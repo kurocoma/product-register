@@ -36,7 +36,8 @@ def test_rakuten_output_structure(tmp_path):
     rows = RakutenConverter().convert(products)
     assert len(rows) > 0
     assert "商品管理番号（商品URL）" in rows[0]
-    assert "属性" in rows[0]
+    assert "商品番号" in rows[0]
+    assert "SKU管理番号" in rows[0]
 
 
 def test_ne_output_structure(tmp_path):
