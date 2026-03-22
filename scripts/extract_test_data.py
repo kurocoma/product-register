@@ -124,8 +124,12 @@ def write_csv(path: Path, rows: list[dict]) -> None:
     print(f"  Wrote {len(rows)} rows -> {path}")
 
 
+# Base codes to include in test fixtures (covers all variants present in expected output CSVs)
+TARGET_BASE_CODES = {"t002-2542", "t002-2559", "n019-0250"}
+
+
 def extract_input_sample(wb) -> list[dict]:
-    """Extract first 5 products from データ入力シート."""
+    """Extract products whose base code matches TARGET_BASE_CODES from データ入力シート."""
     ws = wb["データ入力シート"]
 
     # Row 3 = Japanese headers (1-indexed)
@@ -139,15 +143,20 @@ def extract_input_sample(wb) -> list[dict]:
         if jp_header in HEADER_MAP:
             col_to_field[col] = HEADER_MAP[jp_header]
 
+    ne_col = next((c for c, f in col_to_field.items() if f == "ne_code"), None)
+
     products = []
     for row in range(data_start_row, ws.max_row + 1):
-        # key column is NEコード (col index found for 'ne_code')
-        ne_col = next((c for c, f in col_to_field.items() if f == "ne_code"), None)
         if ne_col is None:
             break
         ne_val = cell_str(ws.cell(row, ne_col).value)
         if not ne_val:
             continue  # skip empty rows
+
+        # Only include products whose base code is in TARGET_BASE_CODES
+        base = _ne_base_code(ne_val)
+        if base not in TARGET_BASE_CODES:
+            continue
 
         record: dict[str, str] = {}
         for col, field in col_to_field.items():
@@ -162,8 +171,6 @@ def extract_input_sample(wb) -> list[dict]:
                 record[field] = val
 
         products.append(record)
-        if len(products) >= 5:
-            break
 
     return products
 
