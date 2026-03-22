@@ -206,7 +206,11 @@ class RakutenConverter(BaseConverter):
             unit_val = getattr(p, f"attribute_unit_{i}", "")
 
             row[f"商品属性（項目）{i}"] = item_val
-            row[f"商品属性（値）{i}"] = value_val
+            # If attribute item is set but value is empty, output "0" as default
+            if item_val and not value_val:
+                row[f"商品属性（値）{i}"] = "0"
+            else:
+                row[f"商品属性（値）{i}"] = value_val
             row[f"商品属性（単位）{i}"] = "" if unit_val == "0" else unit_val
 
         return row

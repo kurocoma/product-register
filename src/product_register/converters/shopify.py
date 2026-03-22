@@ -121,13 +121,25 @@ def _get_option1_value(p: ProductInput) -> str:
     return matched
 
 
+def _add_table_class(html: str) -> str:
+    """Add class="itemtable" to <table> tags that don't already have a class attribute."""
+    import re
+    def _inject_class(m: re.Match) -> str:
+        tag = m.group(0)
+        if 'class=' in tag:
+            return tag
+        return tag.replace('<table ', '<table class="itemtable" ', 1)
+    return re.sub(r'<table\s[^>]*>', _inject_class, html)
+
+
 def _build_body_html(base: str, image_count: int, description_pc: str) -> str:
     """Build Body (HTML) with imgList section (images 2+) + description_pc."""
     img_tags = ""
     for i in range(2, image_count + 1):
         url = f"{SHOPIFY_CDN_BASE}{base}_{i}.jpg"
         img_tags += f'<img src="{url}" width="100%"><br>'
-    img_list = f"<!--imgList-->{img_tags}<!--/imgList-->\n{description_pc}"
+    processed_description = _add_table_class(description_pc)
+    img_list = f"<!--imgList-->{img_tags}<!--/imgList-->\n{processed_description}"
     return img_list
 
 
