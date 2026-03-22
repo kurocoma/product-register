@@ -35,6 +35,10 @@ class ProductInput(BaseModel):
     maker_name: str = ""
     brand_name: str = ""
 
+    # Yahoo固有
+    yahoo_category_id: str = ""   # Yahoo用カテゴリID (e.g., "41383", "20946")
+    yahoo_path: str = ""          # Yahoo用店舗内カテゴリパス (e.g., "沖縄のお酒")
+
     # バリエーション
     option_item_name: str = ""
     option_horizontal: str = ""

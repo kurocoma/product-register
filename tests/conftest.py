@@ -11,6 +11,7 @@ def make_product(**overrides) -> ProductInput:
         tax_rate=10, cost_price=0, selling_price=10000,
         shipping_type="送料無料", image_count=3, delivery_method=4,
         lead_time=1, mall_category_id="402930", store_category="沖縄のお酒",
+        yahoo_category_id="41383", yahoo_path="沖縄のお酒",
         catch_copy_pc="毎年完売必須 プロ野球 人気のボトル",
         catch_copy_yahoo="毎年完売 プロ野球ボトル",
     )
