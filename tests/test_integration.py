@@ -17,6 +17,7 @@ from product_register.reader import read_input_csv
 from product_register.converters.rakuten import RakutenConverter
 from product_register.converters.ne import NEConverter
 from product_register.converters.shopify import ShopifyConverter
+from product_register.converters.yahoo import YahooConverter
 from product_register.verify.diff_checker import compare_csv
 from product_register.writers.csv_writer import write_csv
 
@@ -141,6 +142,32 @@ def test_shopify_diff_vs_expected(tmp_path):
     _log_diff_result(result, "shopify")
 
     assert len(rows) > 0, "Shopify converter produced no output"
+
+
+# ---------------------------------------------------------------------------
+# Yahoo grouping consistency
+# ---------------------------------------------------------------------------
+
+def test_yahoo_grouping_consistency():
+    """同一 grouping-id を持つ行が Yahoo 集約として正しい構造になっていることを保証する。"""
+    products = read_input_csv(FIXTURES / "input_sample.csv")
+    rows = YahooConverter().convert(products)
+
+    # n019-0250 グループ (ちんすこう 1袋/5袋/10袋)
+    chinsuko = [r for r in rows if r["grouping-id"] == "n019-0250"]
+    assert len(chinsuko) == 3, "n019-0250 グループは 3 商品 (1袋/5袋/10袋)"
+    assert {r["variation1-name"] for r in chinsuko} == {"1袋", "5袋セット", "10袋セット"}
+    assert len({r["path"] for r in chinsuko}) == 1, "集約商品の path は同一"
+
+    # t002-2542 グループ (10年貯蔵 1本/3本)
+    giants10 = [r for r in rows if r["grouping-id"] == "t002-2542"]
+    assert len(giants10) == 2
+    assert {r["variation1-name"] for r in giants10} == {"1本", "3本セット"}
+
+    # t002-2559 グループ (16年貯蔵 1本/3本)
+    giants16 = [r for r in rows if r["grouping-id"] == "t002-2559"]
+    assert len(giants16) == 2
+    assert {r["variation1-name"] for r in giants16} == {"1本", "3本セット"}
 
 
 # ---------------------------------------------------------------------------
