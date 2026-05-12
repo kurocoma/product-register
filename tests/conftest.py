@@ -14,6 +14,9 @@ def make_product(**overrides) -> ProductInput:
         yahoo_category_id="41383", yahoo_path="沖縄のお酒",
         catch_copy_pc="毎年完売必須 プロ野球 人気のボトル",
         catch_copy_yahoo="毎年完売 プロ野球ボトル",
+        unit="本",
+        yahoo_grouping_enabled=False,
+        yahoo_variation_title="数量",
     )
     defaults.update(overrides)
     return ProductInput(**defaults)

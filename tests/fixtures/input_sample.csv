@@ -1,4 +1,4 @@
-﻿ne_code,jan_code,maker_code,product_type,quantity,product_name,display_name,tax_rate,cost_price,selling_price,shipping_type,image_count,delivery_method,lead_time,mall_category_id,store_category,catch_copy_pc,catch_copy_yahoo,description_pc,description_sp,description_4,free1,free2,keyword,maker_name,brand_name,option_item_name,option_horizontal,variation_key,variation_name,variation_choices,choice_numbers,image_url_1,image_url_2,image_url_3,image_url_4,image_url_5,image_url_6,image_url_7,image_url_8,image_url_9,image_url_10,image_url_11,image_url_12,image_url_13,image_url_14,image_url_15,image_url_16,image_url_17,image_url_18,image_url_19,image_url_20,attribute_item_1,attribute_value_1,attribute_unit_1,attribute_item_2,attribute_value_2,attribute_unit_2,attribute_item_3,attribute_value_3,attribute_unit_3,attribute_item_4,attribute_value_4,attribute_unit_4,attribute_item_5,attribute_value_5,attribute_unit_5,yahoo_category_id,yahoo_path
+﻿ne_code,jan_code,maker_code,product_type,quantity,product_name,display_name,tax_rate,cost_price,selling_price,shipping_type,image_count,delivery_method,lead_time,mall_category_id,store_category,catch_copy_pc,catch_copy_yahoo,description_pc,description_sp,description_4,free1,free2,keyword,maker_name,brand_name,option_item_name,option_horizontal,variation_key,variation_name,variation_choices,choice_numbers,image_url_1,image_url_2,image_url_3,image_url_4,image_url_5,image_url_6,image_url_7,image_url_8,image_url_9,image_url_10,image_url_11,image_url_12,image_url_13,image_url_14,image_url_15,image_url_16,image_url_17,image_url_18,image_url_19,image_url_20,attribute_item_1,attribute_value_1,attribute_unit_1,attribute_item_2,attribute_value_2,attribute_unit_2,attribute_item_3,attribute_value_3,attribute_unit_3,attribute_item_4,attribute_value_4,attribute_unit_4,attribute_item_5,attribute_value_5,attribute_unit_5,yahoo_category_id,yahoo_path,unit,yahoo_grouping_enabled,yahoo_variation_title
 t002-2542-1,4955028002542,t002,単品,1,GIANTSボトル 10年貯蔵古酒 720ml 25度,巨人 GIANTSボトル 10年貯蔵古酒 720ml 25度 沖縄県酒造協同組合|読売巨人 プロ野球 那覇キャンプ 応援ボトル 送料無料,10,0,10000,送料無料,7,4,1,402930,沖縄のお酒,毎年完売必須 プロ野球 人気のボトル,毎年完売必須 プロ野球 人気のボトル,"<!--text-->
 <p>
 <b><font size=""4"">■ 商品の魅力</font></b><br>
@@ -569,7 +569,7 @@ A. はい、ジャイアンツボトルは毎年異なる<br>
     <td>ジャイアンツ 巨人 読売ジャイアンツ 那覇キャンプ<br>沖縄 泡盛 古酒 クース 10年古酒 琉球泡盛<br>沖縄県酒造協同組合 限定 限定ボトル 記念ボトル<br>2026 春季キャンプ プロ野球 贈り物 ギフト<br>父の日 お土産 沖縄土産 お酒 25度 720ml</td>
   </tr>
 </table>
-<!--/itemtable-->",,沖縄県酒造協同組合,沖縄県酒造協同組合,1本,,key0,本数,1本|3本,,,,,,,,,,,,,,,,,,,,,https://image.rakuten.co.jp/ichiban-okinawa/cabinet/wb01/wb-t002-2542.jpg,シリーズ名,ジャイアンツボトル,,ブランド名,沖縄県酒造協同組合,,総本数,1,,単品容量,720,ml,アルコール度数,25,%,41383,沖縄のお酒
+<!--/itemtable-->",,沖縄県酒造協同組合,沖縄県酒造協同組合,1本,,key0,本数,1本|3本,,,,,,,,,,,,,,,,,,,,,https://image.rakuten.co.jp/ichiban-okinawa/cabinet/wb01/wb-t002-2542.jpg,シリーズ名,ジャイアンツボトル,,ブランド名,沖縄県酒造協同組合,,総本数,1,,単品容量,720,ml,アルコール度数,25,%,41383,沖縄のお酒,本,TRUE,数量
 t002-2542-3,4955028002542,t002,セット商品,3,GIANTSボトル 10年貯蔵古酒 720ml 25度,巨人 GIANTSボトル 10年貯蔵古酒 720ml 25度 沖縄県酒造協同組合|読売巨人 プロ野球 那覇キャンプ 応援ボトル 送料無料,10,0,30000,送料無料,7,4,1,402930,沖縄のお酒,毎年完売必須 プロ野球 人気のボトル,毎年完売必須 プロ野球 人気のボトル,"<!--text-->
 <p>
 <b><font size=""4"">■ 商品の魅力</font></b><br>
@@ -1140,7 +1140,7 @@ A. はい、ジャイアンツボトルは毎年異なる<br>
     <td>ジャイアンツ 巨人 読売ジャイアンツ 那覇キャンプ<br>沖縄 泡盛 古酒 クース 10年古酒 琉球泡盛<br>沖縄県酒造協同組合 限定 限定ボトル 記念ボトル<br>2026 春季キャンプ プロ野球 贈り物 ギフト<br>父の日 お土産 沖縄土産 お酒 25度 720ml</td>
   </tr>
 </table>
-<!--/itemtable-->",,沖縄県酒造協同組合,沖縄県酒造協同組合,3本,,key0,本数,1本|3本,,,,,,,,,,,,,,,,,,,,,https://image.rakuten.co.jp/ichiban-okinawa/cabinet/wb01/wb-t002-2542.jpg,シリーズ名,ジャイアンツボトル,,ブランド名,沖縄県酒造協同組合,,総本数,3,,単品容量,720,ml,アルコール度数,25,%,41383,沖縄のお酒
+<!--/itemtable-->",,沖縄県酒造協同組合,沖縄県酒造協同組合,3本,,key0,本数,1本|3本,,,,,,,,,,,,,,,,,,,,,https://image.rakuten.co.jp/ichiban-okinawa/cabinet/wb01/wb-t002-2542.jpg,シリーズ名,ジャイアンツボトル,,ブランド名,沖縄県酒造協同組合,,総本数,3,,単品容量,720,ml,アルコール度数,25,%,41383,沖縄のお酒,本,TRUE,数量
 t002-2559-1,4955028002559,t002,単品,1,GIANTSボトル 16年貯蔵古酒 720ml 43度,GIANTSボトル 16年貯蔵古酒 720ml 43度|読売巨人 プロ野球 那覇キャンプ 応援ボトル 送料無料,10,0,30000,送料無料,8,4,1,402930,沖縄のお酒,毎年完売必須 プロ野球 人気のボトル,毎年完売必須 プロ野球 人気のボトル,"<!--text-->
 <p>
 <b>■ 読売ジャイアンツ×沖縄泡盛古酒</b><br>
@@ -1776,7 +1776,7 @@ A. 泡盛を3年以上貯蔵熟成させたものを<br>
     <td>ジャイアンツ 巨人 GIANTS 読売ジャイアンツ<br>沖縄キャンプ 那覇キャンプ 春季キャンプ<br>泡盛 古酒 クース 琉球泡盛 16年古酒<br>限定ボトル コラボボトル 限定250本<br>シリアルナンバー付き 海乃邦 オーク樽熟成<br>樽貯蔵 琥珀色 沖縄県酒造協同組合<br>沖縄土産 贈答品 プロ野球 野球<br>記念品 コレクション オオゴマダラ<br>ブーゲンビレア 沖縄限定</td>
   </tr>
 </table>
-<!--/itemtable-->",,沖縄県酒造協同組合,沖縄県酒造協同組合,1本,,key0,本数,1本|3本,,,,,,,,,,,,,,,,,,,,,https://image.rakuten.co.jp/ichiban-okinawa/cabinet/wb01/wb-t002-2559.jpg,シリーズ名,ジャイアンツボトル,,ブランド名,沖縄県酒造協同組合,,総本数,1,,単品容量,720,ml,アルコール度数,43,%,41383,沖縄のお酒
+<!--/itemtable-->",,沖縄県酒造協同組合,沖縄県酒造協同組合,1本,,key0,本数,1本|3本,,,,,,,,,,,,,,,,,,,,,https://image.rakuten.co.jp/ichiban-okinawa/cabinet/wb01/wb-t002-2559.jpg,シリーズ名,ジャイアンツボトル,,ブランド名,沖縄県酒造協同組合,,総本数,1,,単品容量,720,ml,アルコール度数,43,%,41383,沖縄のお酒,本,TRUE,数量
 t002-2559-3,4955028002559,t002,セット商品,3,GIANTSボトル 16年貯蔵古酒 720ml 43度,GIANTSボトル 16年貯蔵古酒 720ml 43度|読売巨人 プロ野球 那覇キャンプ 応援ボトル 送料無料,10,0,50000,送料無料,8,4,1,402930,沖縄のお酒,毎年完売必須 プロ野球 人気のボトル,毎年完売必須 プロ野球 人気のボトル,"<!--text-->
 <p>
 <b>■ 読売ジャイアンツ×沖縄泡盛古酒</b><br>
@@ -2412,7 +2412,7 @@ A. 泡盛を3年以上貯蔵熟成させたものを<br>
     <td>ジャイアンツ 巨人 GIANTS 読売ジャイアンツ<br>沖縄キャンプ 那覇キャンプ 春季キャンプ<br>泡盛 古酒 クース 琉球泡盛 16年古酒<br>限定ボトル コラボボトル 限定250本<br>シリアルナンバー付き 海乃邦 オーク樽熟成<br>樽貯蔵 琥珀色 沖縄県酒造協同組合<br>沖縄土産 贈答品 プロ野球 野球<br>記念品 コレクション オオゴマダラ<br>ブーゲンビレア 沖縄限定</td>
   </tr>
 </table>
-<!--/itemtable-->",,沖縄県酒造協同組合,沖縄県酒造協同組合,3本,,key0,本数,1本|3本,,,,,,,,,,,,,,,,,,,,,https://image.rakuten.co.jp/ichiban-okinawa/cabinet/wb01/wb-t002-2559.jpg,シリーズ名,ジャイアンツボトル,,ブランド名,沖縄県酒造協同組合,,総本数,3,,単品容量,720,ml,アルコール度数,43,%,41383,沖縄のお酒
+<!--/itemtable-->",,沖縄県酒造協同組合,沖縄県酒造協同組合,3本,,key0,本数,1本|3本,,,,,,,,,,,,,,,,,,,,,https://image.rakuten.co.jp/ichiban-okinawa/cabinet/wb01/wb-t002-2559.jpg,シリーズ名,ジャイアンツボトル,,ブランド名,沖縄県酒造協同組合,,総本数,3,,単品容量,720,ml,アルコール度数,43,%,41383,沖縄のお酒,本,TRUE,数量
 n019-0250-1,4522814010250,n019,単品,1,ホワイトショコラ in 塩ちんすこう 12個入り,ホワイトショコラ in 塩ちんすこう 12個入り|お土産 ばらまき 個包装 北谷の塩 沖縄銘菓,8,0,800,送料別,8,4,1,564651,沖縄のお土産\ちんすこう,沖縄を代表する銘菓ちんすこうにホワイトショコラがプラス,沖縄を代表する銘菓ちんすこうにホワイトショコラがプラス,"<!--text-->
 <p>
 <b><font size=""4"">■ 商品の魅力</font></b><br>
@@ -2908,7 +2908,7 @@ A. お子様にもお召し上がりいただけます。<br>
   </tr>
 </table>
 <!--/itemtable-->",,株式会社ナンポー,塩ちんすこう,1箱,,key0,個数,1箱|5箱|10箱,,,,,,,,,,,,,,,,,,,,,https://image.rakuten.co.jp/ichiban-okinawa/cabinet/wb01/wb-n019-0250.jpg,シリーズ名,ホワイトショコラin塩ちんすこう,,ブランド名,ナンポー,,原産国／製造国,日本(沖縄),,総重量,,g,総個数,12,,20946,"沖縄のお土産:ちんすこう
-沖縄のお土産"
+沖縄のお土産",袋,TRUE,数量
 n019-0250-5,4522814010250,n019,セット商品,5,ホワイトショコラ in 塩ちんすこう 12個入り,ホワイトショコラ in 塩ちんすこう 12個入り|お土産 ばらまき 個包装 北谷の塩 沖縄銘菓,8,0,4000,送料無料,8,4,1,564651,沖縄のお土産\ちんすこう,沖縄を代表する銘菓ちんすこうにホワイトショコラがプラス,沖縄を代表する銘菓ちんすこうにホワイトショコラがプラス,"<!--text-->
 <p>
 <b><font size=""4"">■ 商品の魅力</font></b><br>
@@ -3404,7 +3404,7 @@ A. お子様にもお召し上がりいただけます。<br>
   </tr>
 </table>
 <!--/itemtable-->",,株式会社ナンポー,塩ちんすこう,5箱,,key0,個数,1箱|5箱|10箱,,,,,,,,,,,,,,,,,,,,,https://image.rakuten.co.jp/ichiban-okinawa/cabinet/wb01/wb-n019-0250.jpg,シリーズ名,ホワイトショコラin塩ちんすこう,,ブランド名,ナンポー,,原産国／製造国,日本(沖縄),,総重量,,g,総個数,60,,20946,"沖縄のお土産:ちんすこう
-沖縄のお土産"
+沖縄のお土産",袋,TRUE,数量
 n019-0250-10,4522814010250,n019,セット商品,10,ホワイトショコラ in 塩ちんすこう 12個入り,ホワイトショコラ in 塩ちんすこう 12個入り|お土産 ばらまき 個包装 北谷の塩 沖縄銘菓,8,0,2963,送料無料,8,4,1,564651,沖縄のお土産\ちんすこう,沖縄を代表する銘菓ちんすこうにホワイトショコラがプラス,沖縄を代表する銘菓ちんすこうにホワイトショコラがプラス,"<!--text-->
 <p>
 <b><font size=""4"">■ 商品の魅力</font></b><br>
@@ -3900,4 +3900,4 @@ A. お子様にもお召し上がりいただけます。<br>
   </tr>
 </table>
 <!--/itemtable-->",,株式会社ナンポー,塩ちんすこう,10箱,,key0,個数,1箱|5箱|10箱,,,,,,,,,,,,,,,,,,,,,https://image.rakuten.co.jp/ichiban-okinawa/cabinet/wb01/wb-n019-0250.jpg,シリーズ名,ホワイトショコラin塩ちんすこう,,ブランド名,ナンポー,,原産国／製造国,日本(沖縄),,総重量,,g,総個数,120,,20946,"沖縄のお土産:ちんすこう
-沖縄のお土産"
+沖縄のお土産",袋,TRUE,数量
