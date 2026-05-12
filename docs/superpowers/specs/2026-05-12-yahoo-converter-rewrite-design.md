@@ -208,7 +208,7 @@ item-social-gift-type, cross-border-agency-flag, item-image-urls
 | `ship-weight` | `"1"` |
 | `condition` | `"0"` |
 | `taxable` | `"1"` |
-| `taxrate-type` | `str(tax_rate / 100)` （`tax_rate∈{8, 10}` の前提なので `"0.08"` か `"0.1"` のみ） |
+| `taxrate-type` | `str(tax_rate / 100)` （`tax_rate∈{8, 10}` の前提なので `"0.08"` か `"0.1"` のみ。⚠ Yahoo 仕様で `"0.10"` 表記が要求される場合は不一致になるため、アップロード前に Yahoo 管理画面で要確認） |
 | `lead-time-instock` | `str(lead_time)` |
 | `lead-time-outstock` | `str(lead_time)` |
 | `keep-stock` | `"1"` |
@@ -221,6 +221,8 @@ item-social-gift-type, cross-border-agency-flag, item-image-urls
 | 残り 51 列 | 全て `""` |
 
 ### 主要ヘルパー関数
+
+**既存ヘルパーは流用** — `_build_caption(ne_code, image_count, description_pc)` と `_build_explanation(free1, description_pc)` は現状の [src/product_register/converters/yahoo.py](../../../src/product_register/converters/yahoo.py) のロジックをそのまま使う（シグネチャ・戻り値ともに変更なし）。新規追加は以下の 3 関数のみ。
 
 ```python
 import re
@@ -334,19 +336,32 @@ def _build_item_image_urls(ne_code: str, image_count: int) -> str:
 | `test_yahoo_variation2_through_5_empty` | variation2〜5 系 9 列は常に空 |
 | `test_yahoo_item_image_urls` | image_count=3 → 3 URL セミコロン区切り、1枚目はサフィックスなし |
 | `test_yahoo_item_image_urls_count_1` | image_count=1 → URL 1 件のみ、セミコロンなし |
+| `test_yahoo_item_image_urls_count_0` | image_count=0 → `""`（空文字列） |
 
 ### conftest.py の `make_product` 更新
+
+`make_product` のデフォルトは **grouping を OFF** にして既存テストへの波及を最小化する。grouping を検証するテストでは個別に `yahoo_grouping_enabled=True` を明示する:
 
 ```python
 defaults = dict(
     # …既存…
     unit="本",
-    yahoo_grouping_enabled=True,
+    yahoo_grouping_enabled=False,    # ← デフォルト OFF（既存テストの出力が変わらない）
     yahoo_variation_title="数量",
 )
 ```
 
-**注意:** デフォルトを `yahoo_grouping_enabled=True` にすると、既存 13 テストの出力でも grouping-id 等が埋まる。これらは `code` / `name` / `price` 等の検証なので、出力に grouping 列があっても assert は壊れない（影響範囲を実装時に再確認すること）。
+例:
+```python
+# grouping を検証するテストは明示的に True にする
+def test_yahoo_grouping_id_auto():
+    conv = YahooConverter()
+    rows = conv.convert([make_product(
+        ne_code="t002-2542-3", quantity=3,
+        yahoo_grouping_enabled=True,
+    )])
+    assert rows[0]["grouping-id"] == "t002-2542"
+```
 
 ### reader.py のテスト追加（tests/test_reader.py）
 
@@ -395,7 +410,7 @@ def test_yahoo_grouping_consistency():
 
 すべて自動テストで判定可能:
 
-- [ ] `pytest tests/` が全件パス（既存 79件 + 新規 13件 Yahoo + 新規 4件 reader = 96件）
+- [ ] `pytest tests/` が全件パス（既存 79件 + 新規 14件 Yahoo + 新規 4件 reader = 97件）
 - [ ] `product-register convert tests/fixtures/input_sample.csv -o ./output/` が成功し、`output/yahoo.csv` が 85列形式で生成される
 - [ ] `product-register verify ./output/ ./tests/fixtures/expected/` で `mismatched_rows == 0`
 - [ ] `test_yahoo_grouping_consistency` 統合テストで grouping-id の集約構造が assert で確認される
@@ -416,3 +431,4 @@ def test_yahoo_grouping_consistency():
 | `variation1-spec-id` 空運用が Yahoo CSV 仕様で恒久的に許容される保証なし | 添付CSV (data_input202605122227.csv) で動作実績ありを根拠とするが、Yahoo 仕様変更で動作不能になるリスクあり。アップロード前に Yahoo 管理画面で確認 |
 | `unit` を空にした商品で variation1-name が「5セット」と壊れる | 警告ログで気付ける、運用 SOP で「grouping=TRUE のときは必ず unit を入力する」を明記 |
 | 異種セット (-S01) は今回 grouping されず個別商品扱い | Phase 2 で「異種セット集約 (variation1=構成品)」を別途設計 |
+| `taxrate-type` の `"0.1"` 表記が Yahoo 仕様の `"0.10"` 要求と食い違う可能性 | アップロード前に Yahoo 管理画面でテスト商品登録し、エラー有無を確認 |
