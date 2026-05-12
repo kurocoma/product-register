@@ -3,4 +3,14 @@ __pycache__/
 dist/
 output/
 logs/*.json
+logs/*.txt
 .venv/
+
+# 外部API資料・サンプルデータは git 管理外
+# 設計書・計画書 (docs/superpowers/) は追跡対象として残す
+docs/*
+!docs/superpowers/
+!docs/superpowers/**
+
+# 旧 plans/plan.md (Phase 1 全体計画書) は git 管理外
+plans/
