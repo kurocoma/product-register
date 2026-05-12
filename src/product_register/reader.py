@@ -2,6 +2,14 @@ import csv
 from pathlib import Path
 from product_register.models import ProductInput
 
+
+def _parse_bool(v: str) -> bool:
+    """CSV の文字列を bool に変換。空文字列は False。"""
+    if not v:
+        return False
+    return v.strip().upper() in ("TRUE", "1", "YES")
+
+
 def read_input_csv(path: Path) -> list[ProductInput]:
     """統一入力CSVを読み込んでProductInputリストを返す"""
     products = []
@@ -20,5 +28,9 @@ def read_input_csv(path: Path) -> list[ProductInput]:
                     cleaned[int_field] = int(cleaned[int_field])
                 elif int_field in cleaned:
                     cleaned[int_field] = 0
+            # bool フィールドの変換
+            for bool_field in ("yahoo_grouping_enabled",):
+                if bool_field in cleaned:
+                    cleaned[bool_field] = _parse_bool(cleaned[bool_field])
             products.append(ProductInput(**cleaned))
     return products
