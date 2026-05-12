@@ -1,7 +1,7 @@
 # Yahoo Converter 再書き直し — セット集約 + 85列フォーマット対応 設計書
 
 **作成日:** 2026-05-12
-**改訂:** v2 (spec-review 指摘反映)
+**改訂:** v3 (spec-review 指摘反映、最終版)
 **対象:** [src/product_register/converters/yahoo.py](../../../src/product_register/converters/yahoo.py)
 **スコープ:** Phase 1 (CSV出力CLIツール)
 **実装アプローチ:** 一括書き換え（Approach B）
@@ -316,10 +316,10 @@ def _build_item_image_urls(ne_code: str, image_count: int) -> str:
 
 ### 既存テスト ([tests/test_yahoo.py](../../../tests/test_yahoo.py)) の更新
 
-- `test_yahoo_42_columns` → `test_yahoo_85_columns` にリネーム + 期待値変更
-- 既存 13 テストは変更なしで通る想定（code/name/price/headline/explanation/caption/sp-additional/delivery系/taxable/taxrate-type/lead-time/postage-set はロジック変更なし）
+- 既存 13 テスト中、`test_yahoo_42_columns` を `test_yahoo_85_columns` にリネーム + 期待値変更
+- 残り 12 テストはロジック変更なしで通る想定（code/name/price/headline/explanation/caption/sp-additional/delivery系/taxable/taxrate-type/lead-time/postage-set はロジック変更なし）
 
-### 新規テストケース（13件）
+### 新規テストケース（14件）
 
 | テスト | 検証内容 |
 |---|---|
