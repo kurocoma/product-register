@@ -116,19 +116,18 @@ git commit -m "feat: ProductInput に Yahoo grouping 用 3 列追加 (unit, yaho
 `tests/test_reader.py` の末尾に以下を追記:
 
 ```python
-def test_parse_bool_true_variants(tmp_path):
-    """CSV値 'TRUE' / 'True' / 'true' / '1' を bool True に変換"""
+def test_parse_bool_true_variants():
+    """CSV値 'TRUE' / 'True' / 'true' / '1' / 'YES' を bool True に変換"""
     from product_register.reader import _parse_bool
     assert _parse_bool("TRUE") is True
     assert _parse_bool("True") is True
     assert _parse_bool("true") is True
     assert _parse_bool("1") is True
     assert _parse_bool("YES") is True
-    assert _parse_bool("Y") is True
 
 
 def test_parse_bool_false_variants():
-    """CSV値 'FALSE' / 'false' / '0' / '' / None っぽい文字列は False"""
+    """CSV値 'FALSE' / 'false' / '0' / '' / 認識外文字列は False"""
     from product_register.reader import _parse_bool
     assert _parse_bool("FALSE") is False
     assert _parse_bool("false") is False
@@ -179,55 +178,27 @@ def test_read_csv_backward_compat(tmp_path):
 Run: `pytest tests/test_reader.py -v -k "parse_bool or yahoo_grouping or backward_compat"`
 Expected: FAIL（`_parse_bool` が存在しない）
 
-- [ ] **Step 3: reader.py に bool 変換を実装**
+- [ ] **Step 3: reader.py に最小差分パッチを当てる**
 
-`src/product_register/reader.py` を全面差し替え:
+`src/product_register/reader.py` への変更は **`_parse_bool` 追加 + 既存ループに bool 変換追加** のみ。`read_input_excel` 等のスコープ外関数は追加しない。
+
+`from product_register.models import ProductInput` の直後に `_parse_bool` を追加:
 
 ```python
-import csv
-from pathlib import Path
-from openpyxl import load_workbook
-from product_register.models import ProductInput
-
-
 def _parse_bool(v: str) -> bool:
     """CSV の文字列を bool に変換。空文字列は False。"""
     if not v:
         return False
-    return v.strip().upper() in ("TRUE", "1", "YES", "Y")
+    return v.strip().upper() in ("TRUE", "1", "YES")
+```
 
+そして `read_input_csv` 内の `# 数値フィールドの変換` の **for ループの直後**（`products.append(...)` の直前）に bool 変換ループを追加:
 
-def read_input_csv(path: Path) -> list[ProductInput]:
-    """統一入力CSVを読み込んでProductInputリストを返す"""
-    products = []
-    with open(path, encoding="utf-8-sig", newline="") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            cleaned = {}
-            for key, value in row.items():
-                if key is None:
-                    continue
-                cleaned[key.strip()] = value.strip() if value else ""
-            # 数値フィールドの変換
-            for int_field in ("quantity", "tax_rate", "cost_price", "selling_price",
-                              "image_count", "delivery_method", "lead_time"):
-                if int_field in cleaned and cleaned[int_field]:
-                    cleaned[int_field] = int(cleaned[int_field])
-                elif int_field in cleaned:
-                    cleaned[int_field] = 0
+```python
             # bool フィールドの変換
             for bool_field in ("yahoo_grouping_enabled",):
                 if bool_field in cleaned:
                     cleaned[bool_field] = _parse_bool(cleaned[bool_field])
-            products.append(ProductInput(**cleaned))
-    return products
-
-
-def read_input_excel(path: Path, sheet_name: str = "データ入力シート") -> list[ProductInput]:
-    """既存Excelテンプレートを読み込んでProductInputリストを返す。"""
-    wb = load_workbook(path, data_only=True)
-    ws = wb[sheet_name]
-    raise NotImplementedError("Excel読み込みは既存テンプレート解析後に実装")
 ```
 
 - [ ] **Step 4: テスト実行 → 成功確認**
@@ -254,13 +225,28 @@ git commit -m "feat: reader に bool 変換ロジック追加 (_parse_bool + yah
 
 - [ ] **Step 1: conftest.py の `make_product` デフォルトを更新**
 
-`tests/conftest.py` の `defaults = dict(...)` ブロックに `yahoo_category_id="41383", yahoo_path="沖縄のお酒",` の直後に以下を追加:
+`tests/conftest.py` の `defaults = dict(...)` の末尾、`catch_copy_yahoo="毎年完売 プロ野球ボトル",` の **直後** に 3 行追加する。
 
+Edit ツールで以下の `old_string` → `new_string` を適用:
+
+`old_string`:
 ```python
-        unit="本",
-        yahoo_grouping_enabled=False,  # ← デフォルト OFF (既存テストへの波及防止)
-        yahoo_variation_title="数量",
+        catch_copy_pc="毎年完売必須 プロ野球 人気のボトル",
+        catch_copy_yahoo="毎年完売 プロ野球ボトル",
+    )
 ```
+
+`new_string`:
+```python
+        catch_copy_pc="毎年完売必須 プロ野球 人気のボトル",
+        catch_copy_yahoo="毎年完売 プロ野球ボトル",
+        unit="本",
+        yahoo_grouping_enabled=False,
+        yahoo_variation_title="数量",
+    )
+```
+
+> ⚠ `yahoo_grouping_enabled=False` をデフォルトにする理由: 既存テストの出力が変わらないようにするため。grouping を検証するテストは個別に `make_product(yahoo_grouping_enabled=True, ...)` で明示する。
 
 - [ ] **Step 2: input_sample.csv に 3 列追加するスクリプトを書く（一時利用）**
 
@@ -326,7 +312,7 @@ Expected: ALL PASS（既存の 79 件 + 新規 6 件 (Task1+Task2) = 85 件）
 
 ```bash
 git add tests/conftest.py tests/fixtures/input_sample.csv
-git commit -m "feat: conftest と input_sample.csv に Yahoo grouping 用 3 列を追加"
+git commit -m "chore: conftest と input_sample.csv に Yahoo grouping 用 3 列を追加"
 ```
 
 ---
@@ -596,6 +582,36 @@ def test_yahoo_item_image_urls_count_0():
     conv = YahooConverter()
     rows = conv.convert([make_product(image_count=0)])
     assert rows[0]["item-image-urls"] == ""
+
+
+# ===== 新規テスト: 警告ログ =====
+
+def test_yahoo_warns_when_grouping_enabled_but_unit_empty(caplog):
+    """yahoo_grouping_enabled=True かつ unit="" の商品があると WARNING ログを出す"""
+    import logging
+    conv = YahooConverter()
+    with caplog.at_level(logging.WARNING):
+        rows = conv.convert([make_product(
+            ne_code="x999-9999-5", quantity=5, unit="",
+            yahoo_grouping_enabled=True, yahoo_variation_title="数量",
+        )])
+    # 警告が記録される
+    assert any("unit" in rec.message and "x999-9999-5" in rec.message
+               for rec in caplog.records if rec.levelno == logging.WARNING)
+    # 一方で出力は壊れていても止まらない
+    assert rows[0]["variation1-name"] == "5セット"
+
+
+def test_yahoo_no_warning_when_unit_set(caplog):
+    """unit がセットされていれば WARNING は出ない"""
+    import logging
+    conv = YahooConverter()
+    with caplog.at_level(logging.WARNING):
+        conv.convert([make_product(
+            unit="袋", yahoo_grouping_enabled=True, yahoo_variation_title="数量",
+        )])
+    assert not any("unit" in rec.message
+                   for rec in caplog.records if rec.levelno == logging.WARNING)
 ```
 
 - [ ] **Step 2: テスト実行 → 失敗確認**
@@ -609,10 +625,13 @@ Expected: 多数 FAIL（カラム数が 42、新規列が存在しない）
 
 ```python
 from __future__ import annotations
+import logging
 import math
 import re
 from product_register.models import ProductInput
 from product_register.converters.base import BaseConverter
+
+logger = logging.getLogger(__name__)
 
 
 # Yahoo Shopping CSV 85列（公式アップロードフォーマット data_input202605122227.csv 準拠）
@@ -722,6 +741,13 @@ class YahooConverter(BaseConverter):
         return [self._convert_one(p) for p in products]
 
     def _convert_one(self, p: ProductInput) -> dict:
+        # grouping=True かつ unit が空のとき警告ログ
+        if p.yahoo_grouping_enabled and not p.unit:
+            logger.warning(
+                f"ne_code={p.ne_code}: yahoo_grouping_enabled=True だが unit が空。"
+                f"variation1-name が壊れた値になる可能性"
+            )
+
         # 税込価格 = selling_price * (1 + tax_rate/100)、四捨五入
         tax_inclusive = str(math.floor(p.selling_price * (1 + p.tax_rate / 100) + 0.5))
 
@@ -802,17 +828,25 @@ Expected: `output/yahoo.csv` が 85列 × 7商品で生成
 
 - [ ] **Step 2: 出力内容を目視確認**
 
-Run:
-```bash
-python -c "
+Windows PowerShell では `python -c "..."` 内のクォートエスケープが効きにくいため、独立スクリプトを用意:
+
+`scripts/_dump_yahoo_summary.py` を作成（このスクリプトは Task 5 後に削除）:
+
+```python
+"""Yahoo Converter 出力の grouping/variation/画像数を一覧出力する確認用スクリプト。"""
 import csv
-with open('output/yahoo.csv', encoding='utf-8-sig', newline='') as f:
+from pathlib import Path
+
+with open(Path('output/yahoo.csv'), encoding='utf-8-sig', newline='') as f:
     rows = list(csv.DictReader(f))
-# grouping 状況を確認
+
 for r in rows:
-    print(f\"{r['code']:18s} | grouping-id={r['grouping-id']:18s} | v1-name={r['variation1-name']:12s} | imgs={r['item-image-urls'].count(';')+1 if r['item-image-urls'] else 0}\")
-"
+    img_count = r['item-image-urls'].count(';') + 1 if r['item-image-urls'] else 0
+    print(f"{r['code']:18s} | grouping-id={r['grouping-id']:18s} | "
+          f"v1-name={r['variation1-name']:12s} | imgs={img_count}")
 ```
+
+Run: `python scripts/_dump_yahoo_summary.py`
 
 Expected output（理想形）:
 ```
@@ -832,13 +866,23 @@ n019-0250-10       | grouping-id=n019-0250         | v1-name=10袋セット    |
 確認:
 - ノニジュース行 (4560232380760, 4560232380760-3set, 4560232380760-6set, noni6) の grouping-id="t003-0760" / variation1-name="1本"/"3本セット"/"12本セット"/"6本セット" と同じパターンで出ているか
 
-- [ ] **Step 4: 期待値 CSV にコピー**
+- [ ] **Step 4: 他モール (rakuten/ne/shopify) の期待値 CSV と現出力に差分がないことを確認**
+
+`convert` コマンドは全モール出力するため、Yahoo 以外も `output/` に再生成される。Yahoo 以外の期待値 CSV と差分が出ていないことを確認:
+
+Run: `python -m product_register verify ./output/ ./tests/fixtures/expected/ --log ./logs/`
+Expected: `[rakuten] mismatched_rows: 0`、`[ne_single] mismatched_rows: 0`、`[ne_set] mismatched_rows: 0`、`[shopify] mismatched_rows: 0` がすべて 0。`[yahoo] mismatched_rows: N>0` のみ残る（これから期待値を更新するため）。
+
+→ Yahoo 以外で差分が出た場合は、Task 1〜4 の変更が他モール出力にも波及していることを意味するので、原因を特定して修正。
+
+- [ ] **Step 5: 期待値 CSV にコピー + 確認スクリプト削除**
 
 ```bash
 cp output/yahoo.csv tests/fixtures/expected/yahoo.csv
+rm scripts/_dump_yahoo_summary.py
 ```
 
-- [ ] **Step 5: コミット**
+- [ ] **Step 6: コミット**
 
 ```bash
 git add tests/fixtures/expected/yahoo.csv
@@ -889,7 +933,9 @@ Expected: PASS
 - [ ] **Step 3: 全テスト再実行で回帰確認**
 
 Run: `pytest tests/ -v --tb=no -q`
-Expected: ALL PASS（既存 + 新規合計 約 97 件）
+Expected: ALL PASS（合計約 102 件 = 既存 79 + Task1 +2 + Task2 +4 + Task4 +16 + Task6 +1。Task4 内訳: variation/grouping/image 系 +14, 警告ログ +2。`test_yahoo_42_columns` は削除されるので相殺で -1 ない）
+
+> 注: pytest はリネームを「削除 + 新規追加」として扱うため、`test_yahoo_42_columns` は既存 79 件から外れ、`test_yahoo_85_columns` は Task4 の新規 16 件 (`column_order` 含む) として加算。最終 102 件。
 
 - [ ] **Step 4: コミット**
 
@@ -925,7 +971,8 @@ Expected: `"mismatched_rows": 0`
 - [ ] **Step 4: 全テスト再実行 (最終回帰確認)**
 
 Run: `pytest tests/ -v --tb=no -q`
-Expected: `97 passed` (既存 79 + 新規 18)
+Expected: `102 passed`（既存 79 + Task1 +2 + Task2 +4 + Task4 +16 + Task6 +1）
+※ Task4 内訳: 既存 yahoo 16 件は維持 (`_42_columns` は `_85_columns` にリネーム)、新規 16 件 = grouping 4 + variation1 5 + variation2-5 1 + item-image-urls 3 + 警告 2 + column_order 1。
 
 - [ ] **Step 5: 完了報告コミットなし（変更ないため）**
 
@@ -964,7 +1011,7 @@ Expected: Task 1〜7 のコミットが順に並ぶ
 - [ ] **Step 4: 完了**
 
 Yahoo Converter rewrite 完了。設計書の完了基準を満たす:
-- ✅ pytest 全件パス (97件)
+- ✅ pytest 全件パス (102件)
 - ✅ verify mismatched_rows == 0
 - ✅ test_yahoo_grouping_consistency で集約構造を assert
 - ✅ ちんすこうグループの 3 商品が同一 grouping-id, variation1-name が ["1袋","5袋セット","10袋セット"]
