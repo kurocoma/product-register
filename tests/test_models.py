@@ -99,3 +99,36 @@ def test_jan_code_must_be_13_digits():
             lead_time=1,
             mall_category_id="000000",
         )
+
+
+def test_yahoo_grouping_fields_default():
+    """新規追加フィールドはデフォルト値ありで optional"""
+    p = ProductInput(
+        ne_code="t002-2542-1", jan_code="4955028002542", maker_code="t002",
+        product_type="単品", quantity=1,
+        product_name="テスト", display_name="テスト",
+        tax_rate=10, selling_price=100,
+        shipping_type="送料別", image_count=1, delivery_method=4,
+        lead_time=1, mall_category_id="000000",
+    )
+    assert p.unit == ""
+    assert p.yahoo_grouping_enabled is False
+    assert p.yahoo_variation_title == ""
+
+
+def test_yahoo_grouping_fields_explicit():
+    """値を明示するとそのまま入る"""
+    p = ProductInput(
+        ne_code="n019-0250-5", jan_code="4522814010250", maker_code="n019",
+        product_type="セット商品", quantity=5,
+        product_name="テスト", display_name="テスト",
+        tax_rate=8, selling_price=4000,
+        shipping_type="送料無料", image_count=8, delivery_method=4,
+        lead_time=1, mall_category_id="564651",
+        unit="袋",
+        yahoo_grouping_enabled=True,
+        yahoo_variation_title="数量",
+    )
+    assert p.unit == "袋"
+    assert p.yahoo_grouping_enabled is True
+    assert p.yahoo_variation_title == "数量"

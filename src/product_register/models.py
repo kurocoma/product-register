@@ -39,6 +39,11 @@ class ProductInput(BaseModel):
     yahoo_category_id: str = ""   # Yahoo用カテゴリID (e.g., "41383", "20946")
     yahoo_path: str = ""          # Yahoo用店舗内カテゴリパス (e.g., "沖縄のお酒")
 
+    # Yahoo セット集約用 (新規追加)
+    unit: str = ""                        # 単位 (例: "本", "袋", "個", "枚")
+    yahoo_grouping_enabled: bool = False  # grouping を有効にするか
+    yahoo_variation_title: str = ""       # variation1-free-title (例: "数量")
+
     # バリエーション
     option_item_name: str = ""
     option_horizontal: str = ""
