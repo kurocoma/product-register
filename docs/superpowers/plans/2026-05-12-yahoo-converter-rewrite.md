@@ -803,7 +803,7 @@ class YahooConverter(BaseConverter):
 - [ ] **Step 4: テスト実行 → 成功確認**
 
 Run: `pytest tests/test_yahoo.py -v --tb=short`
-Expected: ALL PASS（既存 16 + 新規 14 = 30 件）
+Expected: ALL PASS（test_yahoo.py 合計 31 件 = 既存 15 件（うち `_42_columns` は `_85_columns` にリネーム）+ 新規 16 件: `column_order` + grouping 4 + variation1 5 + variation2-5 1 + item-image-urls 3 + 警告 2）
 
 - [ ] **Step 5: コミット**
 
@@ -933,9 +933,15 @@ Expected: PASS
 - [ ] **Step 3: 全テスト再実行で回帰確認**
 
 Run: `pytest tests/ -v --tb=no -q`
-Expected: ALL PASS（合計約 102 件 = 既存 79 + Task1 +2 + Task2 +4 + Task4 +16 + Task6 +1。Task4 内訳: variation/grouping/image 系 +14, 警告ログ +2。`test_yahoo_42_columns` は削除されるので相殺で -1 ない）
+Expected: ALL PASS、**合計 102 件**。
 
-> 注: pytest はリネームを「削除 + 新規追加」として扱うため、`test_yahoo_42_columns` は既存 79 件から外れ、`test_yahoo_85_columns` は Task4 の新規 16 件 (`column_order` 含む) として加算。最終 102 件。
+内訳:
+- 既存 79 件（うち test_yahoo.py 15 件、内 `_42_columns` は Task4 で `_85_columns` にリネーム＝件数変わらず）
+- Task 1: test_models.py +2 件
+- Task 2: test_reader.py +4 件
+- Task 4: test_yahoo.py 新規 +16 件（`column_order` / grouping 4 / variation1 5 / variation2-5 1 / item-image-urls 3 / 警告 2）
+- Task 6: test_integration.py +1 件
+- 合計: 79 + 2 + 4 + 16 + 1 = **102 件**
 
 - [ ] **Step 4: コミット**
 
