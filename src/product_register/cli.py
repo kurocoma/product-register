@@ -35,8 +35,9 @@ def convert(input_file: Path, mall: str, output: Path):
 
     if "ne" in targets:
         singles, sets = NEConverter().convert(products)
-        write_csv(singles, output / "ne_single.csv")
-        write_csv(sets, output / "ne_set.csv")
+        # NE は BOM 付き UTF-8 を受け付けない (列名の先頭に BOM が混入し必須列を見失う)
+        write_csv(singles, output / "ne_single.csv", encoding="utf-8")
+        write_csv(sets, output / "ne_set.csv", encoding="utf-8")
         click.echo(f"  NE単品: {len(singles)} 行, NE セット: {len(sets)} 行")
 
     if "yahoo" in targets:

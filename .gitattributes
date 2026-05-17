@@ -1,0 +1,3 @@
+# テスト用 fixture CSV は LF 固定 (Windows git autocrlf による CRLF 変換を防ぐ)
+tests/fixtures/**/*.csv text eol=lf
+docs/Yahoo/data_input202605122227.csv binary
