@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>商品登録アプリ Phase 1 詳細設計書</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="doc-header">
+  <h1>商品登録アプリ Phase 1 詳細設計書</h1>
+  <div class="subtitle">CSV 出力 CLI ツール 実装詳細</div>
+</header>
+
+<nav class="doc-nav">
+  <a href="要件定義書.html">要件定義書</a>
+  <a href="詳細設計書.html" class="current">詳細設計書</a>
+</nav>
+
+<main class="doc-body">
+<h1 id="phase-1">商品登録アプリ Phase 1 詳細設計書</h1>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>値</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>作成日</strong></td>
+<td>2026-05-13</td>
+</tr>
+<tr>
+<td><strong>対象</strong></td>
+<td>Phase 1 CSV 出力 CLI ツール (product-register)</td>
+</tr>
+<tr>
+<td><strong>状態</strong></td>
+<td>実装完了・テスト 102 件パス</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="1">1. アーキテクチャ概要</h2>
+<figure class="figure">
+  <img src="images/01-overall-flow.png" alt="図 1: 全体フロー (Reader → Converter → Writer → Verify)">
+  <figcaption>図 1: 全体フロー (Reader → Converter → Writer → Verify)</figcaption>
+</figure>
+
+<h3 id="11">1.1 全体フロー</h3>
+<pre><code>[統一入力CSV (71列)]
+   ↓ reader.py (CSV → ProductInput list)
+[ProductInput オブジェクト]
+   ↓ converters/ (各モール用 Converter で変換)
+[dict のリスト (モール別フォーマット)]
+   ↓ writers/csv_writer.py
+[各モール用 CSV ファイル]
+   ↓ verify/diff_checker.py (期待値CSVと比較)
+[構造化 JSON 差分ログ]
+</code></pre>
+<h3 id="12">1.2 技術スタック</h3>
+<ul>
+<li><strong>言語</strong>: Python 3.13</li>
+<li><strong>CLI</strong>: click</li>
+<li><strong>データバリデーション</strong>: Pydantic v2</li>
+<li><strong>テスト</strong>: pytest（102 件パス）</li>
+<li><strong>Excel 読み込み</strong>: openpyxl（Phase 2 で使用予定）</li>
+</ul>
+<h3 id="13">1.3 ディレクトリ構成</h3>
+<pre><code>商品登録アプリ作成/
+├── pyproject.toml                  # プロジェクト設定・依存管理
+├── src/product_register/
+│   ├── __init__.py
+│   ├── __main__.py                 # python -m product_register エントリ
+│   ├── cli.py                      # CLI (convert / verify コマンド)
+│   ├── models.py                   # ProductInput データモデル (71フィールド)
+│   ├── reader.py                   # CSV 読み込み + bool 変換
+│   ├── converters/
+│   │   ├── base.py                 # Converter 基底クラス
+│   │   ├── rakuten.py              # 楽天 462 列対応
+│   │   ├── ne.py                   # NE 単品/セット分離
+│   │   ├── yahoo.py                # Yahoo 85 列 + grouping 集約
+│   │   └── shopify.py              # Shopify 58 列 + 画像複数行展開
+│   ├── writers/csv_writer.py       # UTF-8-SIG CSV 出力
+│   ├── config/
+│   │   ├── column_filter.py        # 楽天列フィルタ
+│   │   ├── image_url.py            # 画像 URL 自動生成
+│   │   ├── master_data.py          # メーカーコードマスタ
+│   │   └── category_mapping.py     # 楽天→Yahoo カテゴリマッピング
+│   └── verify/
+│       ├── diff_checker.py         # 複合キー対応差分比較
+│       ├── hint_enricher.py        # ドメイン知識 hint 生成
+│       └── reporter.py             # 構造化 JSON 出力
+├── config/
+│   ├── rakuten_columns.json
+│   └── master/
+│       ├── maker_codes.csv
+│       └── category_mapping.csv    # 楽天→Yahoo 86 ジャンル
+├── tests/                          # 102 件 (pytest)
+│   ├── conftest.py
+│   ├── fixtures/
+│   │   ├── input_sample.csv        # 7 商品サンプル
+│   │   └── expected/
+│   │       ├── rakuten_normal_item.csv
+│   │       ├── ne_single.csv
+│   │       ├── ne_set.csv
+│   │       ├── yahoo.csv           # 85 列 grouping 対応
+│   │       └── shopify.csv
+│   ├── test_models.py              # 7 件
+│   ├── test_reader.py              # 7 件
+│   ├── test_base_converter.py
+│   ├── test_csv_writer.py
+│   ├── test_master_data.py
+│   ├── test_column_filter.py
+│   ├── test_rakuten.py
+│   ├── test_ne.py
+│   ├── test_yahoo.py               # 31 件 (grouping/variation/image)
+│   ├── test_shopify.py
+│   ├── test_verify.py
+│   └── test_integration.py         # 8 件 (各モール構造+grouping整合性)
+└── docs/superpowers/               # 設計書・計画書 (git 追跡)
+    ├── specs/
+    └── plans/
+</code></pre>
+<hr />
+<h2 id="2-productinput">2. データモデル: ProductInput</h2>
+<p><a href="../../../src/product_register/models.py">src/product_register/models.py</a> の Pydantic モデル。71 フィールドで統一入力を表現。</p>
+<h3 id="21-5">2.1 必須フィールド (5 件)</h3>
+<pre><code class="language-python">ne_code: str       # 商品コード &quot;t002-2542-1&quot;
+jan_code: str      # 13桁 JAN (バリデーション: 13桁数字)
+maker_code: str    # メーカーコード &quot;t002&quot;
+product_type: str  # &quot;単品&quot; or &quot;セット商品&quot;
+quantity: int      # 数量
+product_name: str
+display_name: str
+tax_rate: int      # 8 or 10 (バリデーションで強制)
+selling_price: int
+shipping_type: str
+image_count: int
+delivery_method: int
+lead_time: int
+mall_category_id: str
+</code></pre>
+<h3 id="22-yahoo-phase-1">2.2 Yahoo セット集約用フィールド（Phase 1 で追加）</h3>
+<pre><code class="language-python">unit: str = &quot;&quot;                        # 単位 (&quot;本&quot;, &quot;袋&quot;, &quot;個&quot;, &quot;枚&quot;)
+yahoo_grouping_enabled: bool = False  # grouping 有効フラグ
+yahoo_variation_title: str = &quot;&quot;       # &quot;数量&quot; などのバリエーション見出し
+</code></pre>
+<h3 id="23">2.3 バリデーション</h3>
+<table>
+<thead>
+<tr>
+<th>フィールド</th>
+<th>バリデーション</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>tax_rate</code></td>
+<td>8 または 10 以外は ValueError</td>
+</tr>
+<tr>
+<td><code>jan_code</code></td>
+<td>13 桁の数字のみ</td>
+</tr>
+<tr>
+<td>その他</td>
+<td>Pydantic の自動型変換に任せる</td>
+</tr>
+</tbody>
+</table>
+<h3 id="24">2.4 派生プロパティ</h3>
+<pre><code class="language-python">is_single → product_type == &quot;単品&quot;
+is_set    → product_type == &quot;セット商品&quot;
+get_image_urls() → 設定済み画像URLのリスト
+</code></pre>
+<hr />
+<h2 id="3-readerpy">3. リーダー: reader.py</h2>
+<p>CSV を ProductInput リストに変換。bool 変換ヘルパー <code>_parse_bool</code> を含む。</p>
+<h3 id="31-_parse_bool">3.1 <code>_parse_bool</code> の挙動</h3>
+<table>
+<thead>
+<tr>
+<th>CSV 値</th>
+<th>戻り値</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>"TRUE"</code>, <code>"True"</code>, <code>"true"</code>, <code>"1"</code>, <code>"YES"</code></td>
+<td><code>True</code></td>
+</tr>
+<tr>
+<td><code>"FALSE"</code>, <code>"false"</code>, <code>"0"</code>, <code>""</code>, <code>"NO"</code> 他</td>
+<td><code>False</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="32-read_input_csv">3.2 <code>read_input_csv</code> の処理フロー</h3>
+<ol>
+<li>CSV を <code>csv.DictReader</code> で読み込み（UTF-8-SIG）</li>
+<li>全フィールドを文字列として cleaned dict に格納</li>
+<li>数値フィールド (<code>quantity</code> 等 7 件) を int に変換</li>
+<li>bool フィールド (<code>yahoo_grouping_enabled</code>) を <code>_parse_bool</code> で bool に変換</li>
+<li>ProductInput を構築（Pydantic がバリデーション）</li>
+</ol>
+<h3 id="33">3.3 後方互換性</h3>
+<p><code>yahoo_grouping_enabled</code> 列が無い既存 CSV を読み込んでも、Pydantic のデフォルト値 <code>False</code> が適用される（<code>test_read_csv_backward_compat</code> で検証済み）。</p>
+<hr />
+<h2 id="4-converter">4. 各モール Converter の設計</h2>
+<h3 id="41-converter">4.1 楽天 Converter</h3>
+<p><a href="../../../src/product_register/converters/rakuten.py">src/product_register/converters/rakuten.py</a></p>
+<table>
+<thead>
+<tr>
+<th>観点</th>
+<th>仕様</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>出力フォーマット</td>
+<td>normal-item.csv（最大 462 列）</td>
+</tr>
+<tr>
+<td>親子判定</td>
+<td>単品 → 属性=<code>親</code>、セット → 属性=<code>子</code></td>
+</tr>
+<tr>
+<td>商品管理番号</td>
+<td><code>base_code</code> (= ne_code から数量を除く部分) でグループ化、親子同梱</td>
+</tr>
+<tr>
+<td>消費税率変換</td>
+<td><code>tax_rate / 100</code> → <code>"0.1"</code> / <code>"0.08"</code></td>
+</tr>
+<tr>
+<td>ソート</td>
+<td><code>商品管理番号</code> 昇順 → 属性で親が先</td>
+</tr>
+<tr>
+<td>画像 URL</td>
+<td><code>image_url_1〜20</code> が空なら <code>image_count</code> と <code>ne_code</code> から自動生成</td>
+</tr>
+<tr>
+<td>属性単位の 0 置換</td>
+<td><code>attribute_unit_*</code> が <code>"0"</code> のとき空文字に置換</td>
+</tr>
+<tr>
+<td>列選択フィルタ</td>
+<td><code>config/rakuten_columns.json</code> の <code>enabled</code> 列のみ出力</td>
+</tr>
+</tbody>
+</table>
+<h3 id="42-ne-converter">4.2 NE Converter</h3>
+<p><a href="../../../src/product_register/converters/ne.py">src/product_register/converters/ne.py</a></p>
+<table>
+<thead>
+<tr>
+<th>観点</th>
+<th>仕様</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>出力</td>
+<td>単品用 CSV + セット用 CSV の 2 ファイル</td>
+</tr>
+<tr>
+<td>主要マッピング</td>
+<td><code>syohin_code ← ne_code</code> / <code>syohin_name ← product_name</code> / <code>baika_tnk ← selling_price</code> / <code>sire_code ← maker_code</code> / <code>tax_rate ← tax_rate</code> / <code>genka_tnk ← cost_price</code> / <code>image_url_http ← 画像URL</code></td>
+</tr>
+<tr>
+<td>代表商品コード</td>
+<td>単品は自身、セット商品は親コード</td>
+</tr>
+</tbody>
+</table>
+<h3 id="43-yahoo-converterphase-1">4.3 Yahoo Converter（Phase 1 で全面書き直し）</h3>
+<figure class="figure">
+  <img src="images/02-yahoo-grouping.png" alt="図 2: Yahoo セット商品集約の仕組み">
+  <figcaption>図 2: Yahoo セット商品集約の仕組み</figcaption>
+</figure>
+
+<p><a href="../../../src/product_register/converters/yahoo.py">src/product_register/converters/yahoo.py</a></p>
+<h4 id="_1">出力フォーマット</h4>
+<table>
+<thead>
+<tr>
+<th>観点</th>
+<th>仕様</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>カラム数</td>
+<td><strong>85 列</strong>（Yahoo 公式アップロードフォーマット）</td>
+</tr>
+<tr>
+<td>カラム順</td>
+<td>添付サンプル CSV <code>docs/Yahoo/data_input202605122227.csv</code> 完全準拠</td>
+</tr>
+<tr>
+<td>エンコーディング</td>
+<td>UTF-8-SIG</td>
+</tr>
+<tr>
+<td>値が入る列（25 列）</td>
+<td>path / name / code / original-price / price / headline / caption / explanation / sp-additional / ship-weight / taxable / jan / delivery / condition / product-category / display / lead-time-instock / lead-time-outstock / keep-stock / postage-set / taxrate-type / grouping-id / variation1-free-title / variation1-name / item-image-urls</td>
+</tr>
+<tr>
+<td>残り 60 列</td>
+<td>全て空欄（Phase 2 以降で順次充足）</td>
+</tr>
+</tbody>
+</table>
+<h4 id="grouping-id">grouping-id 生成ロジック</h4>
+<pre><code class="language-python">def _resolve_grouping_id(ne_code: str, enabled: bool) -&gt; str:
+    if not enabled:
+        return &quot;&quot;
+    parts = ne_code.rsplit(&quot;-&quot;, 1)
+    if len(parts) == 2 and parts[1].isdigit():
+        return parts[0]  # 末尾の純粋な数字を除去
+    return ne_code  # S01 等の英字混じり末尾はそのまま
+</code></pre>
+<table>
+<thead>
+<tr>
+<th>入力 ne_code</th>
+<th>enabled</th>
+<th>grouping-id</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>t002-2542-1</code></td>
+<td>True</td>
+<td><code>t002-2542</code></td>
+</tr>
+<tr>
+<td><code>t002-2542-10</code></td>
+<td>True</td>
+<td><code>t002-2542</code></td>
+</tr>
+<tr>
+<td><code>t002-2542-S01</code></td>
+<td>True</td>
+<td><code>t002-2542-S01</code>（trim せず）</td>
+</tr>
+<tr>
+<td><code>noni6</code></td>
+<td>True</td>
+<td><code>noni6</code>（ハイフンなし）</td>
+</tr>
+<tr>
+<td>任意</td>
+<td>False</td>
+<td><code>""</code></td>
+</tr>
+</tbody>
+</table>
+<h4 id="variation1-name">variation1-name 生成ロジック</h4>
+<pre><code class="language-python">def _build_variation_name(quantity: int, unit: str) -&gt; str:
+    if quantity == 1:
+        return f&quot;1{unit}&quot;      # &quot;1袋&quot; / &quot;1本&quot;
+    return f&quot;{quantity}{unit}セット&quot;  # &quot;5袋セット&quot; / &quot;10袋セット&quot;
+</code></pre>
+<h4 id="item-image-urls">item-image-urls 生成ロジック</h4>
+<pre><code class="language-python">def _build_item_image_urls(ne_code: str, image_count: int) -&gt; str:
+    if image_count &lt;= 0:
+        return &quot;&quot;
+    base = &quot;https://shopping.c.yimg.jp/lib/okimarumarket&quot;
+    urls = [f&quot;{base}/{ne_code}.jpg&quot;]                                    # 1枚目
+    urls += [f&quot;{base}/{ne_code}_{i}.jpg&quot; for i in range(2, image_count + 1)]  # N≥2
+    return &quot;;&quot;.join(urls)
+</code></pre>
+<h4 id="_2">警告ログ</h4>
+<p><code>yahoo_grouping_enabled=True</code> かつ <code>unit=""</code> のとき WARNING ログを出力（実装止めないが運用通知）。</p>
+<h3 id="44-shopify-converter">4.4 Shopify Converter</h3>
+<p><a href="../../../src/product_register/converters/shopify.py">src/product_register/converters/shopify.py</a></p>
+<table>
+<thead>
+<tr>
+<th>観点</th>
+<th>仕様</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>出力フォーマット</td>
+<td>Shopify CSV インポート（58 列）</td>
+</tr>
+<tr>
+<td>画像複数行展開</td>
+<td>1 画像 = 1 行、<code>Image Position</code> 1 始まり</td>
+</tr>
+<tr>
+<td>1 行目</td>
+<td>本体データ + 画像 1 枚目</td>
+</tr>
+<tr>
+<td>2 行目以降</td>
+<td>Handle + Image Src + Image Position のみ</td>
+</tr>
+<tr>
+<td>Handle</td>
+<td><code>ne_code</code></td>
+</tr>
+<tr>
+<td>マーケット列</td>
+<td><code>Included / 日本</code> = <code>TRUE</code>、<code>Price / 日本</code> / <code>Price / 国際</code> を埋める</td>
+</tr>
+<tr>
+<td>Status</td>
+<td><code>active</code> 固定</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="5-cli">5. CLI コマンド</h2>
+<h3 id="51-convert-csv-csv">5.1 <code>convert</code> — 統一入力 CSV から各モール CSV を生成</h3>
+<figure class="figure">
+  <img src="images/03-convert-step.png" alt="図 3: convert コマンドの実行手順">
+  <figcaption>図 3: convert コマンドの実行手順</figcaption>
+</figure>
+
+<pre><code class="language-powershell">python -m product_register convert tests/fixtures/input_sample.csv -o ./output/
+</code></pre>
+<p>オプション:
+- <code>--mall {rakuten|ne|yahoo|shopify|all}</code> (デフォルト: all)
+- <code>-o, --output &lt;dir&gt;</code> (デフォルト: <code>./output/</code>)</p>
+<p>出力ファイル: <code>rakuten_normal_item.csv</code>, <code>ne_single.csv</code>, <code>ne_set.csv</code>, <code>yahoo.csv</code>, <code>shopify.csv</code></p>
+<h3 id="52-verify-csv-csv">5.2 <code>verify</code> — 出力 CSV と期待値 CSV の差分を構造化ログ出力</h3>
+<figure class="figure">
+  <img src="images/04-verify-step.png" alt="図 4: verify コマンドの実行手順">
+  <figcaption>図 4: verify コマンドの実行手順</figcaption>
+</figure>
+
+<pre><code class="language-powershell">python -m product_register verify ./output/ ./tests/fixtures/expected/ --log ./logs/
+</code></pre>
+<p>出力: <code>logs/verify_&lt;mall&gt;_&lt;timestamp&gt;.json</code></p>
+<h3 id="53-verify-json">5.3 verify JSON ログのスキーマ</h3>
+<pre><code class="language-json">{
+  &quot;timestamp&quot;: &quot;2026-05-13T00:01:23&quot;,
+  &quot;mall&quot;: &quot;yahoo&quot;,
+  &quot;summary&quot;: {
+    &quot;total_rows&quot;: 7,
+    &quot;matched_rows&quot;: 7,
+    &quot;mismatched_rows&quot;: 0,
+    &quot;missing_rows&quot;: 0,
+    &quot;extra_rows&quot;: 0
+  },
+  &quot;mismatches&quot;: [
+    {
+      &quot;row&quot;: 1,
+      &quot;product_code&quot;: &quot;n019-0250-1&quot;,
+      &quot;diffs&quot;: [
+        {
+          &quot;column&quot;: &quot;variation1-name&quot;,
+          &quot;expected&quot;: &quot;1袋&quot;,
+          &quot;actual&quot;: &quot;1個&quot;,
+          &quot;converter_file&quot;: &quot;src/product_register/converters/yahoo.py&quot;,
+          &quot;hint&quot;: &quot;unit が誤っている可能性&quot;
+        }
+      ]
+    }
+  ],
+  &quot;missing_keys&quot;: [],
+  &quot;extra_keys&quot;: []
+}
+</code></pre>
+<hr />
+<h2 id="6-verify">6. 差分検証エンジン (verify/)</h2>
+<p><a href="../../../src/product_register/verify/diff_checker.py">src/product_register/verify/diff_checker.py</a></p>
+<h3 id="61-compare_csv">6.1 <code>compare_csv</code> の比較キー</h3>
+<table>
+<thead>
+<tr>
+<th>モール</th>
+<th>比較キー</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>楽天</td>
+<td><code>商品管理番号（商品URL）</code> 単一キー</td>
+</tr>
+<tr>
+<td>NE 単品</td>
+<td><code>syohin_code</code></td>
+</tr>
+<tr>
+<td>NE セット</td>
+<td><code>set_syohin_code</code></td>
+</tr>
+<tr>
+<td>Yahoo</td>
+<td><code>code</code></td>
+</tr>
+<tr>
+<td>Shopify</td>
+<td><code>["Handle", "Image Position"]</code> 複合キー（画像複数行対応）</td>
+</tr>
+</tbody>
+</table>
+<h3 id="62-hint_enricher">6.2 hint_enricher のドメイン知識</h3>
+<p><a href="../../../src/product_register/verify/hint_enricher.py">verify/hint_enricher.py</a> に既知パターンを登録（消費税率の変換漏れ、属性マッピング、Yahoo grouping 抜け等）。差分発生時に「修正のヒント」を JSON に同梱する。</p>
+<hr />
+<h2 id="7">7. テスト戦略</h2>
+<h3 id="71-102">7.1 テスト全体像 (102 件)</h3>
+<table>
+<thead>
+<tr>
+<th>ファイル</th>
+<th>件数</th>
+<th>内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>test_models.py</code></td>
+<td>7</td>
+<td>Pydantic バリデーション、3 列追加検証</td>
+</tr>
+<tr>
+<td><code>test_reader.py</code></td>
+<td>7</td>
+<td>CSV 読み込み、<code>_parse_bool</code>、後方互換</td>
+</tr>
+<tr>
+<td><code>test_base_converter.py</code></td>
+<td>2</td>
+<td>Converter 基底クラスの ABC</td>
+</tr>
+<tr>
+<td><code>test_csv_writer.py</code></td>
+<td>3</td>
+<td>UTF-8-SIG 出力</td>
+</tr>
+<tr>
+<td><code>test_master_data.py</code></td>
+<td>2</td>
+<td>メーカーコードマスタ読み込み</td>
+</tr>
+<tr>
+<td><code>test_column_filter.py</code></td>
+<td>3</td>
+<td>楽天 462 列フィルタ</td>
+</tr>
+<tr>
+<td><code>test_rakuten.py</code></td>
+<td>13</td>
+<td>親子判定、税率変換、ソート</td>
+</tr>
+<tr>
+<td><code>test_ne.py</code></td>
+<td>8</td>
+<td>単品/セット分離、フィールドマッピング</td>
+</tr>
+<tr>
+<td><code>test_yahoo.py</code></td>
+<td>31</td>
+<td>85列、grouping、variation1、item-image-urls、警告</td>
+</tr>
+<tr>
+<td><code>test_shopify.py</code></td>
+<td>14</td>
+<td>画像複数行展開、Handle、マーケット</td>
+</tr>
+<tr>
+<td><code>test_verify.py</code></td>
+<td>4</td>
+<td>差分検出、複合キー、JSON 出力</td>
+</tr>
+<tr>
+<td><code>test_integration.py</code></td>
+<td>8</td>
+<td>各モール構造、Yahoo grouping 整合性</td>
+</tr>
+<tr>
+<td><strong>合計</strong></td>
+<td><strong>102</strong></td>
+<td><strong>all pass</strong></td>
+</tr>
+</tbody>
+</table>
+<h3 id="72-yahoo-grouping">7.2 統合テスト（Yahoo grouping 整合性）</h3>
+<p><code>test_yahoo_grouping_consistency</code> で以下を検証:</p>
+<pre><code class="language-python"># n019-0250 グループ
+chinsuko = [r for r in rows if r[&quot;grouping-id&quot;] == &quot;n019-0250&quot;]
+assert len(chinsuko) == 3
+assert {r[&quot;variation1-name&quot;] for r in chinsuko} == {&quot;1袋&quot;, &quot;5袋セット&quot;, &quot;10袋セット&quot;}
+assert len({r[&quot;path&quot;] for r in chinsuko}) == 1  # path 同一
+</code></pre>
+<h3 id="73-csv">7.3 期待値 CSV の作り方</h3>
+<table>
+<thead>
+<tr>
+<th>モール</th>
+<th>期待値の根拠</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>楽天</td>
+<td>既存 Excel テンプレートの「楽天用商品登録データ」シート</td>
+</tr>
+<tr>
+<td>NE</td>
+<td>既存 Excel の「商品ページ生成_単品/セット商品」シート</td>
+</tr>
+<tr>
+<td>Yahoo</td>
+<td>Yahoo 公式アップロードフォーマット例 (<code>data_input202605122227.csv</code>) のパターンに準じて手動作成</td>
+</tr>
+<tr>
+<td>Shopify</td>
+<td>既存 Excel の「shopify変換」シート</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="8-phase-1-phase-2">8. Phase 1 でやらなかったこと（Phase 2 対象）</h2>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>理由</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Excel 読み込み (<code>read_input_excel</code>)</td>
+<td>Phase 1 は CSV のみで十分</td>
+</tr>
+<tr>
+<td>Yahoo <code>variation2〜5</code>, <code>spec1〜10</code>, <code>brand-code</code>, <code>abstract</code> 等</td>
+<td>今回のスコープは grouping のみ</td>
+</tr>
+<tr>
+<td>異種セット (-S01) の集約</td>
+<td>grouping-id を ne_code そのまま使用、Phase 2 で別途設計</td>
+</tr>
+<tr>
+<td>API 直接登録</td>
+<td>Phase 2 のメインスコープ</td>
+</tr>
+<tr>
+<td>画像アップロード自動化</td>
+<td>Phase 2</td>
+</tr>
+<tr>
+<td>Web UI</td>
+<td>Phase 2</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="9">9. 重要な設計判断と背景</h2>
+<h3 id="91-yahoo-converter-42-85">9.1 なぜ Yahoo Converter を 42 列 → 85 列に拡張したか</h3>
+<p>直近 c3ea62e で 42 列で実装したが、セット商品の集約が不可能だった。Yahoo 公式アップロードフォーマット (85 列) には <code>grouping-id</code> / <code>variation1-*</code> / <code>item-image-urls</code> 列があり、これらが必須。</p>
+<h3 id="92-variation1-spec-id">9.2 なぜ <code>variation1-spec-id</code> を空のままにするか</h3>
+<p><code>docs/Yahoo/04-オプション・バリエーション設定.md</code> には「バリエーションスペックIDは商品のスペック設定に存在するIDのみ指定可能」とあるが、Yahoo 公式 CSV 例 (<code>data_input202605122227.csv</code>) の 4 行で <strong><code>variation1-spec-id</code> 空 + <code>variation1-free-title</code> + <code>variation1-name</code> のみ</strong>で動作実績がある「フリータイトル方式」を採用。</p>
+<h3 id="93-yahoo_grouping_enabled">9.3 なぜ <code>yahoo_grouping_enabled</code> をフラグ列にしたか</h3>
+<p>入力者が商品ごとに「集約する/しない」を選択できる柔軟性を確保。フラグ列なら CSV の TRUE/FALSE で済み、grouping-id 自体は Converter が自動生成するので手作業が減る。</p>
+<h3 id="94-_resolve_grouping_id-rsplit-isdigit">9.4 なぜ <code>_resolve_grouping_id</code> を <code>rsplit + isdigit()</code> で実装したか</h3>
+<p>正規表現 <code>^(.+)-(\d+)$</code> だと <code>t002-2542-S01</code> の末尾 <code>01</code> にもマッチして誤分割される。<code>rsplit("-", 1)</code> + <code>parts[1].isdigit()</code> なら <code>S01</code> は <code>isdigit() == False</code> で正しく弾ける。</p>
+<hr />
+<h2 id="10">10. リファレンス</h2>
+<ul>
+<li><a href="../../../docs/Yahoo/02-商品登録更新-editItem.md">Yahoo editItem API 仕様</a></li>
+<li><a href="../../../docs/Yahoo/04-オプション・バリエーション設定.md">Yahoo バリエーション設定</a></li>
+<li><a href="../../../docs/楽天/">楽天 RMS API リファレンス</a></li>
+<li><a href="../../../docs/ネクストエンジン/03-商品マスタCSVフィールド仕様.md">NE 商品マスタ CSV 仕様</a></li>
+<li><a href="../../../docs/shopify/02-商品登録更新-productCreate-productSet.md">Shopify productCreate</a></li>
+<li><a href="../specs/2026-05-12-yahoo-converter-rewrite-design.md">Yahoo Converter 設計書 v3 (本変更の元仕様)</a></li>
+<li><a href="../plans/2026-05-12-yahoo-converter-rewrite.md">Yahoo Converter 実装計画書 v3</a></li>
+</ul>
+</main>
+<footer class="doc-footer">
+  &copy; 2026 product-register project &mdash; Auto-generated from 詳細設計書.md
+</footer>
+</body>
+</html>

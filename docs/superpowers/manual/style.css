@@ -1,0 +1,242 @@
+/* 商品登録アプリ マニュアル共通スタイル */
+
+:root {
+  --primary: #1e6fb6;
+  --primary-dark: #144a7b;
+  --accent: #ff8c00;
+  --bg: #fafafa;
+  --bg-card: #ffffff;
+  --text: #1a1a1a;
+  --text-muted: #555;
+  --border: #e0e0e0;
+  --code-bg: #f4f4f7;
+  --success: #2e7d32;
+  --warning: #c77700;
+  --max-content: 1000px;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Hiragino Sans", "Yu Gothic", sans-serif;
+  font-size: 16px;
+  line-height: 1.75;
+  color: var(--text);
+  background: var(--bg);
+  margin: 0;
+  padding: 0;
+}
+
+header.doc-header {
+  background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+  color: #fff;
+  padding: 2.5rem 1.5rem;
+  text-align: center;
+  margin-bottom: 2rem;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+}
+
+header.doc-header h1 {
+  margin: 0 0 0.5rem 0;
+  font-size: 2.2rem;
+  font-weight: 700;
+}
+
+header.doc-header .subtitle {
+  font-size: 1.1rem;
+  opacity: 0.92;
+}
+
+main.doc-body {
+  max-width: var(--max-content);
+  margin: 0 auto;
+  padding: 0 1.5rem 4rem;
+}
+
+main.doc-body h2 {
+  font-size: 1.6rem;
+  color: var(--primary-dark);
+  border-bottom: 3px solid var(--primary);
+  padding-bottom: 0.4rem;
+  margin-top: 3rem;
+  margin-bottom: 1rem;
+}
+
+main.doc-body h3 {
+  font-size: 1.25rem;
+  color: var(--primary-dark);
+  margin-top: 2rem;
+  margin-bottom: 0.6rem;
+  padding-left: 0.5rem;
+  border-left: 5px solid var(--accent);
+}
+
+main.doc-body h4 {
+  font-size: 1.05rem;
+  color: var(--text);
+  margin-top: 1.5rem;
+  margin-bottom: 0.4rem;
+}
+
+main.doc-body p { margin: 0.6rem 0 1rem; }
+
+main.doc-body a {
+  color: var(--primary);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--primary);
+}
+main.doc-body a:hover { color: var(--primary-dark); border-bottom-style: solid; }
+
+main.doc-body table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 1rem 0;
+  background: var(--bg-card);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}
+
+main.doc-body th {
+  background: var(--primary);
+  color: #fff;
+  padding: 0.6rem 0.8rem;
+  text-align: left;
+  font-weight: 600;
+}
+
+main.doc-body td {
+  padding: 0.5rem 0.8rem;
+  border-bottom: 1px solid var(--border);
+}
+
+main.doc-body tr:nth-child(even) td { background: #f6f8fb; }
+
+main.doc-body code {
+  background: var(--code-bg);
+  color: #c7254e;
+  padding: 0.12rem 0.35rem;
+  border-radius: 3px;
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.92em;
+}
+
+main.doc-body pre {
+  background: #272822;
+  color: #f8f8f2;
+  padding: 1rem 1.2rem;
+  border-radius: 5px;
+  overflow-x: auto;
+  font-size: 0.88rem;
+  line-height: 1.5;
+  margin: 1rem 0;
+}
+
+main.doc-body pre code {
+  background: transparent;
+  color: inherit;
+  padding: 0;
+}
+
+main.doc-body ul, main.doc-body ol { padding-left: 1.4rem; }
+main.doc-body li { margin: 0.2rem 0; }
+
+main.doc-body blockquote {
+  border-left: 4px solid var(--accent);
+  background: #fff7e6;
+  padding: 0.6rem 1rem;
+  margin: 1rem 0;
+  color: var(--text);
+}
+
+.figure {
+  margin: 1.5rem 0;
+  text-align: center;
+  background: var(--bg-card);
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+}
+
+.figure img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 4px;
+}
+
+.figure figcaption {
+  margin-top: 0.6rem;
+  font-size: 0.92rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.badge {
+  display: inline-block;
+  padding: 0.15rem 0.55rem;
+  border-radius: 12px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  margin-right: 0.3rem;
+}
+.badge-success { background: #e8f5e9; color: var(--success); }
+.badge-warning { background: #fff4e0; color: var(--warning); }
+.badge-info { background: #e3f2fd; color: var(--primary); }
+
+.toc {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1rem 1.5rem;
+  margin: 1.5rem 0 2rem;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+}
+.toc h2 {
+  margin-top: 0;
+  font-size: 1.1rem;
+  border-bottom: none;
+  color: var(--text);
+}
+.toc ol { margin: 0.5rem 0 0; padding-left: 1.5rem; }
+.toc li { margin: 0.25rem 0; }
+
+footer.doc-footer {
+  text-align: center;
+  padding: 2rem 1rem;
+  color: var(--text-muted);
+  font-size: 0.88rem;
+  border-top: 1px solid var(--border);
+  margin-top: 3rem;
+}
+
+/* Nav between docs */
+.doc-nav {
+  display: flex;
+  justify-content: center;
+  gap: 1rem;
+  margin: 1rem 0 2rem;
+  flex-wrap: wrap;
+}
+.doc-nav a {
+  background: #fff;
+  color: var(--primary);
+  padding: 0.5rem 1.2rem;
+  border: 2px solid var(--primary);
+  border-radius: 6px;
+  font-weight: 600;
+  text-decoration: none;
+  border-bottom: 2px solid var(--primary);
+}
+.doc-nav a:hover {
+  background: var(--primary);
+  color: #fff;
+}
+.doc-nav a.current {
+  background: var(--primary);
+  color: #fff;
+}
+
+@media (max-width: 600px) {
+  header.doc-header h1 { font-size: 1.7rem; }
+  main.doc-body h2 { font-size: 1.3rem; }
+  main.doc-body { padding: 0 1rem 3rem; }
+}

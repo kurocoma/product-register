@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>商品登録アプリ 要件定義書</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="doc-header">
+  <h1>商品登録アプリ 要件定義書</h1>
+  <div class="subtitle">5モール EC 商品一括登録アプリ — Phase 1 完了時点</div>
+</header>
+
+<nav class="doc-nav">
+  <a href="要件定義書.html" class="current">要件定義書</a>
+  <a href="詳細設計書.html">詳細設計書</a>
+</nav>
+
+<main class="doc-body">
+<h1 id="_1">商品登録アプリ 要件定義書</h1>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>値</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>作成日</strong></td>
+<td>2026-05-13</td>
+</tr>
+<tr>
+<td><strong>対象</strong></td>
+<td>5モール EC 商品一括登録アプリ (product-register)</td>
+</tr>
+<tr>
+<td><strong>フェーズ</strong></td>
+<td>Phase 1（CSV出力CLIツール）完了</td>
+</tr>
+<tr>
+<td><strong>次フェーズ</strong></td>
+<td>Phase 2（WebUI + API直接登録）</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="1">1. プロジェクト概要</h2>
+<figure class="figure">
+  <img src="images/01-overall-flow.png" alt="図 1: 商品登録アプリの全体フロー (入力 → 変換 → 出力 → 検証)">
+  <figcaption>図 1: 商品登録アプリの全体フロー (入力 → 変換 → 出力 → 検証)</figcaption>
+</figure>
+
+<p>5つの EC プラットフォームに商品を一括登録するアプリ。既存の Excel マクロテンプレート（数式 + Power Query + VBA の 3 層構造）による CSV 生成の仕組みを、保守性の高い Python アプリに置き換える。</p>
+<h3 id="11">1.1 解決したい課題</h3>
+<table>
+<thead>
+<tr>
+<th>現状の問題</th>
+<th>解決後</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Excel マクロ・Power Query・数式の 3 層構造で保守困難</td>
+<td>Python のシンプルな関数構造で見通しが良い</td>
+</tr>
+<tr>
+<td>既存テンプレートで Yahoo は NE 経由で登録（重複・手間）</td>
+<td>Yahoo へ直接 CSV / API で登録（Phase 2 で API 化）</td>
+</tr>
+<tr>
+<td>セット商品が「同じ商品名・同じ画像で価格だけ違う」状態で並ぶ</td>
+<td>Yahoo の grouping-id で 1 ページに集約、数量セレクタで選択</td>
+</tr>
+<tr>
+<td>各モールの API 仕様変更時、Excel テンプレートの修正は職人技</td>
+<td>単体テスト + 差分検証コマンドで自動回帰検出</td>
+</tr>
+</tbody>
+</table>
+<h3 id="12">1.2 対象モール（優先順）</h3>
+<table>
+<thead>
+<tr>
+<th>優先度</th>
+<th>モール</th>
+<th>Phase 1 (CSV)</th>
+<th>Phase 2 (API)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><strong>楽天</strong></td>
+<td>✅ 完了</td>
+<td>予定</td>
+</tr>
+<tr>
+<td>1</td>
+<td><strong>ネクストエンジン (NE)</strong></td>
+<td>✅ 完了</td>
+<td>予定</td>
+</tr>
+<tr>
+<td>1</td>
+<td><strong>Yahoo</strong></td>
+<td>✅ 完了</td>
+<td>予定</td>
+</tr>
+<tr>
+<td>2</td>
+<td><strong>Shopify</strong></td>
+<td>✅ 完了</td>
+<td>予定</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Amazon</td>
+<td>対象外</td>
+<td>後日検討</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="2">2. フェーズ定義</h2>
+<h3 id="phase-1-csv-cli">Phase 1: CSV 出力 CLI ツール（完了）</h3>
+<ul>
+<li><strong>入力</strong>: 統一入力フォーマット CSV（68 列 + Yahoo grouping 用 3 列 = 71 列）</li>
+<li><strong>出力</strong>: 各モール用 CSV ファイル</li>
+<li><strong>目的</strong>: 変換ロジックの正確性を検証・微調整</li>
+<li><strong>検証</strong>: <code>verify</code> コマンドで既存 Excel 出力との差分を構造化 JSON ログ出力</li>
+</ul>
+<h3 id="phase-2-webui-api">Phase 2: WebUI + API 自動登録（未着手）</h3>
+<ul>
+<li><strong>入力</strong>: WebUI 上での商品データ入力（または CSV アップロード）</li>
+<li><strong>処理</strong>: 各モールの API を直接叩いて商品登録</li>
+<li><strong>画像アップロード</strong>: 楽天 (R-Cabinet) / Yahoo / Shopify を自動化（Amazon は対象外）</li>
+</ul>
+<hr />
+<h2 id="3">3. 統一入力フォーマット</h2>
+<p>既存 Excel テンプレートの「データ入力シート」（68 列）をベースに設計。Phase 1 で Yahoo grouping 用に 3 列追加し、現在は <strong>71 列</strong>。</p>
+<h3 id="31-10">3.1 基本情報（10 列）</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>フィールド名</th>
+<th>必須</th>
+<th>説明</th>
+<th>例</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><code>ne_code</code></td>
+<td>✅</td>
+<td>NEコード（商品コード）</td>
+<td><code>t002-2542-1</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td><code>jan_code</code></td>
+<td>✅</td>
+<td>13桁JANコード</td>
+<td><code>4955028002542</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td><code>maker_code</code></td>
+<td>✅</td>
+<td>メーカーコード</td>
+<td><code>t002</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td><code>product_type</code></td>
+<td>✅</td>
+<td>単品 / セット商品</td>
+<td><code>単品</code></td>
+</tr>
+<tr>
+<td>5</td>
+<td><code>quantity</code></td>
+<td>✅</td>
+<td>数量</td>
+<td><code>1</code></td>
+</tr>
+<tr>
+<td>6</td>
+<td><code>product_name</code></td>
+<td>✅</td>
+<td>商品名（NE用）</td>
+<td><code>GIANTSボトル 10年貯蔵古酒 720ml 25度</code></td>
+</tr>
+<tr>
+<td>7</td>
+<td><code>display_name</code></td>
+<td>✅</td>
+<td>掲載商品名（モール用）</td>
+<td><code>巨人 GIANTSボトル...</code></td>
+</tr>
+<tr>
+<td>8</td>
+<td><code>tax_rate</code></td>
+<td>✅</td>
+<td>消費税率 (8 or 10)</td>
+<td><code>10</code></td>
+</tr>
+<tr>
+<td>9</td>
+<td><code>cost_price</code></td>
+<td></td>
+<td>原価</td>
+<td><code>0</code></td>
+</tr>
+<tr>
+<td>10</td>
+<td><code>selling_price</code></td>
+<td>✅</td>
+<td>販売価格</td>
+<td><code>10000</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="32-6">3.2 配送・カテゴリ（6 列）</h3>
+<p><code>shipping_type</code>, <code>image_count</code>, <code>delivery_method</code>, <code>lead_time</code>, <code>mall_category_id</code>, <code>store_category</code></p>
+<h3 id="33-10">3.3 商品説明（10 列）</h3>
+<p><code>catch_copy_pc</code>, <code>catch_copy_yahoo</code>, <code>description_pc</code>, <code>description_sp</code>, <code>description_4</code>, <code>free1</code>, <code>free2</code>, <code>keyword</code>, <code>maker_name</code>, <code>brand_name</code></p>
+<h3 id="34-yahoo-2">3.4 Yahoo 固有（2 列）</h3>
+<p><code>yahoo_category_id</code>, <code>yahoo_path</code></p>
+<h3 id="35-yahoo-3-phase-1">3.5 Yahoo セット集約用（3 列、Phase 1 で追加）</h3>
+<table>
+<thead>
+<tr>
+<th>#</th>
+<th>フィールド名</th>
+<th>説明</th>
+<th>例</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>-</td>
+<td><code>unit</code></td>
+<td>単位</td>
+<td><code>本</code> / <code>袋</code> / <code>個</code> / <code>枚</code></td>
+</tr>
+<tr>
+<td>-</td>
+<td><code>yahoo_grouping_enabled</code></td>
+<td>grouping 有効フラグ</td>
+<td><code>TRUE</code> / <code>FALSE</code></td>
+</tr>
+<tr>
+<td>-</td>
+<td><code>yahoo_variation_title</code></td>
+<td>バリエーション選択肢の見出し</td>
+<td><code>数量</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="36">3.6 バリエーション・画像・属性</h3>
+<ul>
+<li>バリエーション（6 列）: <code>option_item_name</code>, <code>option_horizontal</code>, <code>variation_key</code>, <code>variation_name</code>, <code>variation_choices</code>, <code>choice_numbers</code></li>
+<li>画像 URL（20 列）: <code>image_url_1</code> 〜 <code>image_url_20</code></li>
+<li>商品属性（15 列）: <code>attribute_item_1〜5</code>, <code>attribute_value_1〜5</code>, <code>attribute_unit_1〜5</code></li>
+</ul>
+<hr />
+<h2 id="4">4. 商品コード体系</h2>
+<table>
+<thead>
+<tr>
+<th>パターン</th>
+<th>形式</th>
+<th>例</th>
+<th>説明</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>単品</td>
+<td><code>{maker}-{JAN下4桁}-{数量}</code></td>
+<td><code>t002-2542-1</code></td>
+<td>基本パターン</td>
+</tr>
+<tr>
+<td>同一商品セット</td>
+<td><code>{maker}-{JAN下4桁}-{数量}</code></td>
+<td><code>t002-2542-3</code></td>
+<td>同じ商品3本セット</td>
+</tr>
+<tr>
+<td>異種商品セット</td>
+<td><code>{maker}-{JAN下4桁}-S{連番}</code></td>
+<td><code>t002-2542-S01</code></td>
+<td>A+Bのセット商品</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="5">5. 各モール出力仕様</h2>
+<h3 id="51-normal-itemcsv">5.1 楽天 (<code>normal-item.csv</code>)</h3>
+<ul>
+<li><strong>形式</strong>: 楽天 RMS CSV フォーマット（最大 462 列）</li>
+<li><strong>構造</strong>: 親行（商品レベル）＋ 子行（SKU レベル）を結合して 1 ファイル</li>
+<li><strong>主要変換</strong>:</li>
+<li>単品 → 属性「親」、セット → 属性「子」</li>
+<li>消費税率: 入力値 <code>10</code> → 出力値 <code>0.1</code></li>
+<li>商品属性（単位）の <code>0</code> → <code>null</code> 置換</li>
+<li>商品管理番号昇順 → 属性（親先）でソート</li>
+<li><strong>列選択</strong>: 462 項目の出力 ON/OFF フィルタ機能</li>
+</ul>
+<h3 id="52-ne">5.2 ネクストエンジン (NE)</h3>
+<ul>
+<li><strong>形式</strong>: NE 商品マスタ CSV フォーマット</li>
+<li><strong>出力</strong>: 単品用 CSV と セット用 CSV の 2 ファイル</li>
+<li><strong>主要マッピング</strong>: <code>syohin_code ← ne_code</code>, <code>syohin_name ← product_name</code>, <code>baika_tnk ← selling_price</code>, <code>sire_code ← maker_code</code></li>
+</ul>
+<h3 id="53-yahoo">5.3 Yahoo</h3>
+<ul>
+<li><strong>Phase 1</strong>: 85 列の正規アップロードフォーマット CSV を出力</li>
+<li><strong>セット集約</strong>: <code>grouping-id</code> + <code>variation1-free-title</code> + <code>variation1-name</code> で同一 JAN の単品/セットを 1 商品ページに集約</li>
+<li><strong>画像</strong>: <code>item-image-urls</code> 列にセミコロン区切りで全画像 URL を出力</li>
+<li><strong>税込価格</strong>: <code>original-price</code> / <code>price</code> ともに <code>selling_price × (1 + tax_rate/100)</code> の四捨五入</li>
+</ul>
+<h3 id="54-shopify">5.4 Shopify</h3>
+<ul>
+<li><strong>形式</strong>: Shopify 商品 CSV インポートフォーマット（58 列）</li>
+<li><strong>画像複数行展開</strong>: 1 画像 = 1 行、Image Position 自動採番、1 行目のみ本体データ、2 行目以降は画像のみ</li>
+<li><strong>マーケット対応</strong>: 日本 / 国際の価格設定（<code>Included / 日本</code>, <code>Price / 日本</code>, <code>Price / 国際</code> 等）</li>
+</ul>
+<hr />
+<h2 id="6-yahoo-phase-1">6. Yahoo セット商品の集約（Phase 1 で実装）</h2>
+<figure class="figure">
+  <img src="images/02-yahoo-grouping.png" alt="図 2: 同一 JAN の単品/セット商品を grouping-id で 1 ページに集約">
+  <figcaption>図 2: 同一 JAN の単品/セット商品を grouping-id で 1 ページに集約</figcaption>
+</figure>
+
+<h3 id="61">6.1 解決した問題</h3>
+<p>入力データではセット商品は単品と「<code>quantity</code> と <code>selling_price</code> 以外まったく同じ」状態で渡される。これをそのまま Yahoo に流すと、Yahoo ストア上で「<strong>まったく同じ商品が複数並び、価格だけバラバラ</strong>」という最悪の UX になる。</p>
+<pre><code>従来:
+  [商品A] ホワイトショコラ in 塩ちんすこう 12個入り...  ¥864
+  [商品B] ホワイトショコラ in 塩ちんすこう 12個入り...  ¥4,320  ← 同じ見た目
+  [商品C] ホワイトショコラ in 塩ちんすこう 12個入り...  ¥3,200  ← 同じ見た目
+</code></pre>
+<h3 id="62">6.2 解決方針</h3>
+<p>Yahoo の <code>grouping-id</code> + <code>variation1-*</code> 機構を採用し、同一 JAN の単品/セットを 1 つの商品ページに集約する。</p>
+<pre><code>集約後:
+  [商品ページ] ホワイトショコラ in 塩ちんすこう 12個入り
+                数量: ○1袋 ¥864  ○5袋セット ¥4,320  ○10袋セット ¥3,200
+</code></pre>
+<h3 id="63-grouping-id">6.3 grouping-id の生成ルール</h3>
+<table>
+<thead>
+<tr>
+<th>入力 ne_code</th>
+<th>yahoo_grouping_enabled</th>
+<th>grouping-id</th>
+<th>variation1-name (unit=袋)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>n019-0250-1</code></td>
+<td>TRUE</td>
+<td><code>n019-0250</code></td>
+<td><code>1袋</code></td>
+</tr>
+<tr>
+<td><code>n019-0250-5</code></td>
+<td>TRUE</td>
+<td><code>n019-0250</code></td>
+<td><code>5袋セット</code></td>
+</tr>
+<tr>
+<td><code>n019-0250-10</code></td>
+<td>TRUE</td>
+<td><code>n019-0250</code></td>
+<td><code>10袋セット</code></td>
+</tr>
+<tr>
+<td><code>t002-2542-S01</code></td>
+<td>TRUE</td>
+<td><code>t002-2542-S01</code>（trim せず）</td>
+<td><code>1本</code></td>
+</tr>
+<tr>
+<td><code>x999-9999-1</code></td>
+<td>FALSE</td>
+<td><code>（空）</code></td>
+<td><code>（空）</code></td>
+</tr>
+</tbody>
+</table>
+<p>ロジック: <code>ne_code</code> 末尾が「ハイフン + 純粋な数字」のときだけ trim する。<code>S01</code> のように英字を含む末尾はそのまま grouping-id とする。</p>
+<hr />
+<h2 id="7">7. 完了基準</h2>
+<h3 id="phase-1">Phase 1 受入条件（すべて達成）</h3>
+<ul>
+<li>[x] 統一入力 CSV から楽天用 CSV (<code>normal-item.csv</code>) が正しく出力される</li>
+<li>[x] 統一入力 CSV からネクストエンジン用 CSV（単品・セット）が正しく出力される</li>
+<li>[x] 統一入力 CSV から Yahoo 用 CSV が正しく出力される（85 列、grouping 集約対応）</li>
+<li>[x] 統一入力 CSV から Shopify 用 CSV が正しく出力される</li>
+<li>[x] 既存 Excel テンプレートの 7 商品分のデータで出力結果を比較検証できる</li>
+<li>[x] 楽天の列選択フィルタ機能が動作する</li>
+<li>[x] Shopify の画像複数行展開が正しく動作する</li>
+<li>[x] <code>verify</code> コマンドで全モール差分 0</li>
+<li>[x] 単体テスト 102 件パス</li>
+</ul>
+<h3 id="phase-2">Phase 2 受入条件（未着手）</h3>
+<ul>
+<li>[ ] WebUI から商品データを入力・編集できる</li>
+<li>[ ] 楽天 API で商品登録・更新ができる</li>
+<li>[ ] NE API で CSV アップロード → キュー管理 → 結果確認ができる</li>
+<li>[ ] Yahoo API (editItem) で商品登録・更新ができる</li>
+<li>[ ] Shopify API (productCreate / productSet) で商品登録・更新ができる</li>
+<li>[ ] 画像アップロードが自動化される（楽天・Yahoo・Shopify）</li>
+</ul>
+<hr />
+<h2 id="8">8. ステークホルダー・運用</h2>
+<table>
+<thead>
+<tr>
+<th>役割</th>
+<th>担当</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>仕様策定・運用</td>
+<td>開発者本人（kurocoma）</td>
+</tr>
+<tr>
+<td>Phase 1 実装</td>
+<td>Claude Code（TDD・直接実装）</td>
+</tr>
+<tr>
+<td>Phase 2 検討中</td>
+<td>未定（Claude Code 自身 / Codex MCP 委任 / 他開発者）</td>
+</tr>
+</tbody>
+</table>
+<h3 id="phase-1_1">運用上の注意（Phase 1 完了後）</h3>
+<p>Yahoo の CSV アップロードは「省略列がデフォルト値で上書き」される挙動の可能性があるため、既存登録商品への適用前に Yahoo テストストア (<code>test.circus.shopping.yahooapis.jp</code>) で動作確認が必要。Phase 1 では <strong>新規商品登録のみで採用</strong>し、既存登録商品への上書きは Phase 2 で「上書き安全モード」を実装してから対応する。</p>
+</main>
+<footer class="doc-footer">
+  &copy; 2026 product-register project &mdash; Auto-generated from 要件定義書.md
+</footer>
+</body>
+</html>
