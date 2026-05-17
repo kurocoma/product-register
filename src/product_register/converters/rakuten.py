@@ -29,6 +29,24 @@ def _base_code(p: ProductInput) -> str:
     return f"{p.maker_code}-{jan_suffix}"
 
 
+# ---------------------------------------------------------------------------
+# imgList HTML for descriptions
+# 2枚目以降の画像を <img> で並べる。R-Cabinet フル URL を使用。
+# ---------------------------------------------------------------------------
+_RAKUTEN_IMAGE_BASE = "https://image.rakuten.co.jp/ichiban-okinawa/cabinet/thum02"
+
+
+def _build_rakuten_img_list(base_code: str, image_count: int) -> str:
+    """imgList HTML を生成する。image_count <= 1 のときは空文字列。"""
+    if image_count <= 1:
+        return ""
+    imgs = "<br>".join(
+        f"<img src='{_RAKUTEN_IMAGE_BASE}/{base_code}_{i}.jpg' width='100%'>"
+        for i in range(2, image_count + 1)
+    )
+    return f"<!--imgList-->{imgs}<br><!--/imgList-->"
+
+
 def _normalize_rows(rows: list[dict]) -> list[dict]:
     """Ensure all rows share the same set of keys (union of all rows' keys),
     filling missing values with empty string. Key order is preserved from the
@@ -110,10 +128,13 @@ class RakutenConverter(BaseConverter):
         row["ジャンルID"] = rep.mall_category_id
 
         # Copy / description
+        img_list = _build_rakuten_img_list(base, rep.image_count)
         row["キャッチコピー"] = rep.catch_copy_pc
         row["PC用商品説明文"] = rep.description_pc
-        row["スマートフォン用商品説明文"] = rep.description_sp
-        row["PC用販売説明文"] = rep.description_sp
+        # スマホ用: imgList → 本文の順
+        row["スマートフォン用商品説明文"] = img_list + rep.description_sp if img_list else rep.description_sp
+        # 販売説明文: imgList のみ (本文なし)
+        row["PC用販売説明文"] = img_list
 
         # Parent images (CABINET paths, no full URL)
         # Image 1 uses the representative (single) product ne_code

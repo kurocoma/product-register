@@ -133,3 +133,45 @@ def test_child_sku_image():
     child = rows[1]
     assert child["SKU画像タイプ"] == "CABINET"
     assert child["SKU画像パス"] == "/thum02/t002-2542-1.jpg"
+
+
+def test_parent_pc_description_no_imglist():
+    """PC用商品説明文には imgList を入れない (description_pc そのまま)"""
+    conv = RakutenConverter()
+    rows = conv.convert([make_product(image_count=3, description_pc="本文テキスト")])
+    parent = rows[0]
+    assert parent["PC用商品説明文"] == "本文テキスト"
+    assert "<!--imgList-->" not in parent["PC用商品説明文"]
+
+
+def test_parent_sp_description_imglist_then_text():
+    """スマートフォン用商品説明文は imgList が先、その後 description_sp"""
+    conv = RakutenConverter()
+    rows = conv.convert([make_product(image_count=3, description_sp="SP本文")])
+    parent = rows[0]
+    desc = parent["スマートフォン用商品説明文"]
+    assert desc.startswith("<!--imgList-->"), f"先頭が imgList でない: {desc[:50]}"
+    assert "<!--/imgList-->" in desc
+    assert "image.rakuten.co.jp/ichiban-okinawa/cabinet/thum02/t002-2542_2.jpg" in desc
+    assert "image.rakuten.co.jp/ichiban-okinawa/cabinet/thum02/t002-2542_3.jpg" in desc
+    assert desc.endswith("SP本文")
+
+
+def test_parent_pc_sale_description_imglist_only():
+    """PC用販売説明文は imgList のみ (description_sp を含めない)"""
+    conv = RakutenConverter()
+    rows = conv.convert([make_product(image_count=3, description_sp="SP本文")])
+    parent = rows[0]
+    desc = parent["PC用販売説明文"]
+    assert "<!--imgList-->" in desc
+    assert "<!--/imgList-->" in desc
+    assert "SP本文" not in desc, "PC用販売説明文には本文を含めない"
+
+
+def test_parent_imglist_image_count_1():
+    """image_count=1 のとき imgList は空 (2枚目以降がない)"""
+    conv = RakutenConverter()
+    rows = conv.convert([make_product(image_count=1, description_sp="SP本文")])
+    parent = rows[0]
+    assert parent["スマートフォン用商品説明文"] == "SP本文"
+    assert parent["PC用販売説明文"] == ""
