@@ -38,17 +38,6 @@ def _build_img_list_html(ne_code: str, image_count: int) -> str:
     return f"<!--imgList-->{imgs}<!--/imgList-->"
 
 
-def _build_img_list_html_nobr(ne_code: str, image_count: int) -> str:
-    """バッファ関数1 用の imgList HTML を生成する（<br> なし）。"""
-    if image_count <= 1:
-        return ""
-    imgs = "".join(
-        f'<img src="{_RAKUTEN_IMAGE_BASE}/{ne_code}_{i}.jpg" width="100%">'
-        for i in range(2, image_count + 1)
-    )
-    return f"<!--imgList-->{imgs}<!--/imgList-->"
-
-
 def _build_gazou_urls_single(ne_code: str, image_count: int, image_url_20: str) -> dict:
     """単品の gazou_url1〜20 を生成する。
     - gazou_url1: ne_code.jpg
@@ -210,7 +199,6 @@ class NEConverter(BaseConverter):
 
         # 画像リスト HTML (setumei2 / setumei4) — セット商品はフルコードを使用
         img_list = _build_img_list_html(p.ne_code, p.image_count)
-        img_list_nobr = _build_img_list_html_nobr(p.ne_code, p.image_count)
         setumei2 = (img_list + "\n" + p.description_pc) if img_list else p.description_pc
 
         # gazou_url1〜20
@@ -295,6 +283,5 @@ class NEConverter(BaseConverter):
             "tenpo_kihon_category10": "",
             "moru_kihon_category_code": p.mall_category_id,
             "zaiko_su_hyoji_kbn": "0",
-            "バッファ関数1": img_list_nobr,
         })
         return row

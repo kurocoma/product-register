@@ -78,3 +78,10 @@ def test_ne_set_daihyo_syohin_code_empty():
     conv = NEConverter()
     _, sets = conv.convert([make_product(product_type="セット商品", ne_code="t002-2542-3", quantity=3)])
     assert sets[0]["daihyo_syohin_code"] == ""
+
+
+def test_ne_set_no_buffer_function_column():
+    """セット商品 CSV に 'バッファ関数1' 列が含まれていないこと (NE 取込で警告が出る非対応列)"""
+    conv = NEConverter()
+    _, sets = conv.convert([make_product(product_type="セット商品", ne_code="t002-2542-3", quantity=3)])
+    assert "バッファ関数1" not in sets[0], "バッファ関数1 列は NE 仕様外なので出力されるべきでない"
