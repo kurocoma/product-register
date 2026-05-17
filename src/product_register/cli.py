@@ -72,7 +72,7 @@ def verify(actual_dir: Path, expected_dir: Path, log: Path):
         "rakuten": ("rakuten_normal_item.csv", "商品管理番号（商品URL）", "cp932"),
         "ne_single": ("ne_single.csv", "syohin_code", "utf-8"),
         "ne_set": ("ne_set.csv", "syohin_code", "utf-8"),
-        "yahoo": ("yahoo.csv", "code", "utf-8-sig"),
+        "yahoo": ("yahoo.csv", "code", "cp932"),
         "shopify": ("shopify.csv", ["Handle", "Image Position"], "utf-8-sig"),
     }
 

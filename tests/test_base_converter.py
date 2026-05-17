@@ -38,10 +38,10 @@ def test_ne_encoding_is_utf8_no_bom():
     assert NEConverter.encoding == "utf-8"
 
 
-def test_yahoo_encoding_is_utf8_bom():
-    """YahooConverter は BOM 付き UTF-8 (utf-8-sig) で出力 (デフォルト)"""
+def test_yahoo_encoding_is_cp932():
+    """YahooConverter は cp932 (Yahoo 公式アップロードフォーマットに合わせる)"""
     from product_register.converters.yahoo import YahooConverter
-    assert YahooConverter.encoding == "utf-8-sig"
+    assert YahooConverter.encoding == "cp932"
 
 
 def test_shopify_encoding_is_utf8_bom():

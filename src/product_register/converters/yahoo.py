@@ -96,6 +96,7 @@ def _build_item_image_urls(ne_code: str, image_count: int) -> str:
 
 class YahooConverter(BaseConverter):
     mall_name = "yahoo"
+    encoding = "cp932"  # Yahoo 公式アップロードフォーマット (data_input202605122227.csv) も cp932
 
     def convert(self, products: list[ProductInput]) -> list[dict]:
         return [self._convert_one(p) for p in products]
