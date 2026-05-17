@@ -74,11 +74,12 @@ def test_rakuten_diff_vs_expected(tmp_path):
         pytest.skip("Expected file not found: run scripts/extract_test_data.py first")
 
     products = read_input_csv(FIXTURES / "input_sample.csv")
-    rows = RakutenConverter().convert(products)
+    conv = RakutenConverter()
+    rows = conv.convert(products)
     actual_path = tmp_path / "rakuten_actual.csv"
-    write_csv(rows, actual_path)
+    write_csv(rows, actual_path, encoding=conv.encoding)
 
-    result = compare_csv(actual_path, expected_path, key_column="商品管理番号（商品URL）", mall="rakuten")
+    result = compare_csv(actual_path, expected_path, key_column="商品管理番号（商品URL）", mall="rakuten", encoding=conv.encoding)
     _log_diff_result(result, "rakuten")
 
     # Structural assertion: actual must have rows
@@ -98,9 +99,9 @@ def test_ne_single_diff_vs_expected(tmp_path):
         pytest.skip("No single products in input_sample.csv")
 
     actual_path = tmp_path / "ne_single_actual.csv"
-    write_csv(singles, actual_path)
+    write_csv(singles, actual_path, encoding=NEConverter.encoding)
 
-    result = compare_csv(actual_path, expected_path, key_column="syohin_code", mall="ne")
+    result = compare_csv(actual_path, expected_path, key_column="syohin_code", mall="ne", encoding=NEConverter.encoding)
     _log_diff_result(result, "ne_single")
 
     assert len(singles) > 0, "NE single converter produced no output"
@@ -119,9 +120,9 @@ def test_ne_set_diff_vs_expected(tmp_path):
         pytest.skip("No set products in input_sample.csv")
 
     actual_path = tmp_path / "ne_set_actual.csv"
-    write_csv(sets, actual_path)
+    write_csv(sets, actual_path, encoding=NEConverter.encoding)
 
-    result = compare_csv(actual_path, expected_path, key_column="set_syohin_code", mall="ne")
+    result = compare_csv(actual_path, expected_path, key_column="set_syohin_code", mall="ne", encoding=NEConverter.encoding)
     _log_diff_result(result, "ne_set")
 
     assert len(sets) > 0, "NE set converter produced no output"

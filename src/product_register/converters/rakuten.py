@@ -50,6 +50,9 @@ def _normalize_rows(rows: list[dict]) -> list[dict]:
 
 class RakutenConverter(BaseConverter):
     mall_name = "rakuten"
+    # 楽天 RMS は Shift_JIS を要求 (UTF-8 はヘッダー文字化けで取込不可)。
+    # cp932 = Windows 拡張 Shift_JIS。全角チルダ '〜' (U+FF5E) や ① 等の機種依存文字を扱える。
+    encoding = "cp932"
 
     def convert(self, products: list[ProductInput]) -> list[dict]:
         """ProductInputリストを楽天CSV用の辞書リストに変換する。

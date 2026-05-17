@@ -29,26 +29,29 @@ def convert(input_file: Path, mall: str, output: Path):
     targets = ["rakuten", "ne", "yahoo", "shopify"] if mall == "all" else [mall]
 
     if "rakuten" in targets:
-        rows = RakutenConverter().convert(products)
-        write_csv(rows, output / "rakuten_normal_item.csv")
-        click.echo(f"  楽天: {len(rows)} 行 → {output / 'rakuten_normal_item.csv'}")
+        conv = RakutenConverter()
+        rows = conv.convert(products)
+        write_csv(rows, output / "rakuten_normal_item.csv", encoding=conv.encoding)
+        click.echo(f"  楽天: {len(rows)} 行 → {output / 'rakuten_normal_item.csv'} ({conv.encoding})")
 
     if "ne" in targets:
-        singles, sets = NEConverter().convert(products)
-        # NE は BOM 付き UTF-8 を受け付けない (列名の先頭に BOM が混入し必須列を見失う)
-        write_csv(singles, output / "ne_single.csv", encoding="utf-8")
-        write_csv(sets, output / "ne_set.csv", encoding="utf-8")
-        click.echo(f"  NE単品: {len(singles)} 行, NE セット: {len(sets)} 行")
+        conv = NEConverter()
+        singles, sets = conv.convert(products)
+        write_csv(singles, output / "ne_single.csv", encoding=conv.encoding)
+        write_csv(sets, output / "ne_set.csv", encoding=conv.encoding)
+        click.echo(f"  NE単品: {len(singles)} 行, NE セット: {len(sets)} 行 ({conv.encoding})")
 
     if "yahoo" in targets:
-        rows = YahooConverter().convert(products)
-        write_csv(rows, output / "yahoo.csv")
-        click.echo(f"  Yahoo: {len(rows)} 行 → {output / 'yahoo.csv'}")
+        conv = YahooConverter()
+        rows = conv.convert(products)
+        write_csv(rows, output / "yahoo.csv", encoding=conv.encoding)
+        click.echo(f"  Yahoo: {len(rows)} 行 → {output / 'yahoo.csv'} ({conv.encoding})")
 
     if "shopify" in targets:
-        rows = ShopifyConverter().convert(products)
-        write_csv(rows, output / "shopify.csv")
-        click.echo(f"  Shopify: {len(rows)} 行 → {output / 'shopify.csv'}")
+        conv = ShopifyConverter()
+        rows = conv.convert(products)
+        write_csv(rows, output / "shopify.csv", encoding=conv.encoding)
+        click.echo(f"  Shopify: {len(rows)} 行 → {output / 'shopify.csv'} ({conv.encoding})")
 
     click.echo("完了!")
 
@@ -66,15 +69,15 @@ def verify(actual_dir: Path, expected_dir: Path, log: Path):
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
     file_map = {
-        "rakuten": ("rakuten_normal_item.csv", "商品管理番号（商品URL）"),
-        "ne_single": ("ne_single.csv", "syohin_code"),
-        "ne_set": ("ne_set.csv", "syohin_code"),
-        "yahoo": ("yahoo.csv", "code"),
-        "shopify": ("shopify.csv", ["Handle", "Image Position"]),
+        "rakuten": ("rakuten_normal_item.csv", "商品管理番号（商品URL）", "cp932"),
+        "ne_single": ("ne_single.csv", "syohin_code", "utf-8"),
+        "ne_set": ("ne_set.csv", "syohin_code", "utf-8"),
+        "yahoo": ("yahoo.csv", "code", "utf-8-sig"),
+        "shopify": ("shopify.csv", ["Handle", "Image Position"], "utf-8-sig"),
     }
 
     all_ok = True
-    for mall_key, (filename, key_col) in file_map.items():
+    for mall_key, (filename, key_col, encoding) in file_map.items():
         actual_file = actual_dir / filename
         expected_file = expected_dir / filename
         if not actual_file.exists() or not expected_file.exists():
@@ -82,7 +85,7 @@ def verify(actual_dir: Path, expected_dir: Path, log: Path):
             continue
 
         mall_name = mall_key.split("_")[0]
-        result = compare_csv(actual_file, expected_file, key_column=key_col, mall=mall_name)
+        result = compare_csv(actual_file, expected_file, key_column=key_col, mall=mall_name, encoding=encoding)
         log_path = log / f"verify_{mall_key}_{ts}.json"
         generate_report(result, log_path)
         click.echo(print_summary(result))

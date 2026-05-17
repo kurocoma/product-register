@@ -78,6 +78,7 @@ class NEConverter(BaseConverter):
     """Next Engine 用コンバーター。単品リストとセット商品リストの2つを返す。"""
 
     mall_name = "ne"
+    encoding = "utf-8"  # BOM 付きだと列名先頭に BOM が混入し必須列を見失うため BOM なし
 
     def convert(self, products: list[ProductInput]) -> tuple[list[dict], list[dict]]:  # type: ignore[override]
         """ProductInputリストを (単品rows, セット商品rows) のタプルに変換する。"""

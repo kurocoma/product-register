@@ -10,13 +10,14 @@ CONVERTER_FILE_MAP = {
 }
 
 def compare_csv(actual_path: Path, expected_path: Path, key_column: str | list[str],
-                mall: str = "unknown") -> dict:
+                mall: str = "unknown", encoding: str = "utf-8-sig") -> dict:
     """actual vs expected のCSVを比較し、構造化された差分結果を返す。
-    key_column can be a single string or a list of strings for composite keys."""
+    key_column can be a single string or a list of strings for composite keys.
+    encoding は両CSVの読み込みエンコーディング (楽天=shift_jis 等)。"""
     from product_register.verify.hint_enricher import enrich_hint
 
-    actual_rows = _read_csv(actual_path)
-    expected_rows = _read_csv(expected_path)
+    actual_rows = _read_csv(actual_path, encoding=encoding)
+    expected_rows = _read_csv(expected_path, encoding=encoding)
 
     def make_key(row: dict) -> str:
         if isinstance(key_column, list):
@@ -73,6 +74,6 @@ def compare_csv(actual_path: Path, expected_path: Path, key_column: str | list[s
         "extra_keys": extra,
     }
 
-def _read_csv(path: Path) -> list[dict]:
-    with open(path, encoding="utf-8-sig", newline="") as f:
+def _read_csv(path: Path, encoding: str = "utf-8-sig") -> list[dict]:
+    with open(path, encoding=encoding, newline="") as f:
         return list(csv.DictReader(f))
