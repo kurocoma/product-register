@@ -13,4 +13,5 @@ docs/*
 !docs/superpowers/**
 
 # 旧 plans/plan.md (Phase 1 全体計画書) は git 管理外
-plans/
+# docs/superpowers/plans/ は追跡対象 (上のルールで !docs/superpowers/** 済み)
+/plans/
