@@ -1,8 +1,9 @@
-export default function ProductsPage() {
-  return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold">商品一覧</h1>
-      <p className="text-sm text-slate-500 mt-2">Plan 3 で実装予定</p>
-    </div>
-  );
+import { createClient } from "@/lib/supabase/server";
+import { listProducts } from "@/lib/product/repository";
+import { ProductList } from "@/components/product/ProductList";
+
+export default async function ProductsPage() {
+  const supabase = await createClient();
+  const products = await listProducts(supabase);
+  return <ProductList initial={products} />;
 }

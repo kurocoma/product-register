@@ -1,8 +1,26 @@
+"use client";
+
+import { ProductInputSchema, type ProductInput } from "@/lib/product/schema";
+import { ProductEditView } from "@/components/product/ProductEditView";
+
+// 新規作成時の空デフォルト
+const empty: ProductInput = ProductInputSchema.parse({
+  ne_code: "",
+  jan_code: "0000000000000",
+  maker_code: "",
+  product_type: "単品",
+  quantity: 1,
+  product_name: "",
+  display_name: "",
+  tax_rate: 10,
+  selling_price: 0,
+  shipping_type: "送料別",
+  image_count: 1,
+  delivery_method: 4,
+  lead_time: 1,
+  mall_category_id: "",
+});
+
 export default function NewProductPage() {
-  return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold">商品編集 (新規)</h1>
-      <p className="text-sm text-slate-500 mt-2">Plan 3 で実装予定</p>
-    </div>
-  );
+  return <ProductEditView initial={empty} />;
 }

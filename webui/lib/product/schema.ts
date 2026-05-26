@@ -1,76 +1,103 @@
 import { z } from "zod";
 
-const imageUrls = Object.fromEntries(
-  Array.from({ length: 20 }, (_, i) => [`image_url_${i + 1}`, z.string().default("")]),
-) as Record<string, z.ZodDefault<z.ZodString>>;
+/** base スキーマ (派生フィールドなし、 react-hook-form の resolver 用) */
+export const ProductInputBaseSchema = z.object({
+  // 基本情報
+  ne_code: z.string(),
+  jan_code: z.string().regex(/^\d{13}$/, "jan_code must be 13 digits"),
+  maker_code: z.string(),
+  product_type: z.enum(["単品", "セット商品"]),
+  quantity: z.number().int(),
+  product_name: z.string(),
+  display_name: z.string(),
+  tax_rate: z.union([z.literal(8), z.literal(10)]),
+  cost_price: z.number().int().default(0),
+  selling_price: z.number().int(),
 
-const attributes = Object.fromEntries(
-  Array.from({ length: 5 }, (_, i) => i + 1).flatMap((i) => [
-    [`attribute_item_${i}`, z.string().default("")],
-    [`attribute_value_${i}`, z.string().default("")],
-    [`attribute_unit_${i}`, z.string().default("")],
-  ]),
-) as Record<string, z.ZodDefault<z.ZodString>>;
+  // 配送・カテゴリ
+  shipping_type: z.string(),
+  image_count: z.number().int(),
+  delivery_method: z.number().int(),
+  lead_time: z.number().int(),
+  mall_category_id: z.string(),
+  store_category: z.string().default(""),
 
-export const ProductInputSchema = z
-  .object({
-    // 基本情報
-    ne_code: z.string(),
-    jan_code: z.string().regex(/^\d{13}$/, "jan_code must be 13 digits"),
-    maker_code: z.string(),
-    product_type: z.enum(["単品", "セット商品"]),
-    quantity: z.number().int(),
-    product_name: z.string(),
-    display_name: z.string(),
-    tax_rate: z.union([z.literal(8), z.literal(10)]),
-    cost_price: z.number().int().default(0),
-    selling_price: z.number().int(),
+  // 商品説明
+  catch_copy_pc: z.string().default(""),
+  catch_copy_yahoo: z.string().default(""),
+  description_pc: z.string().default(""),
+  description_sp: z.string().default(""),
+  description_4: z.string().default(""),
+  free1: z.string().default(""),
+  free2: z.string().default(""),
+  keyword: z.string().default(""),
+  maker_name: z.string().default(""),
+  brand_name: z.string().default(""),
 
-    // 配送・カテゴリ
-    shipping_type: z.string(),
-    image_count: z.number().int(),
-    delivery_method: z.number().int(),
-    lead_time: z.number().int(),
-    mall_category_id: z.string(),
-    store_category: z.string().default(""),
+  // Yahoo 固有
+  yahoo_category_id: z.string().default(""),
+  yahoo_path: z.string().default(""),
+  unit: z.string().default(""),
+  yahoo_grouping_enabled: z.boolean().default(false),
+  yahoo_variation_title: z.string().default(""),
 
-    // 商品説明
-    catch_copy_pc: z.string().default(""),
-    catch_copy_yahoo: z.string().default(""),
-    description_pc: z.string().default(""),
-    description_sp: z.string().default(""),
-    description_4: z.string().default(""),
-    free1: z.string().default(""),
-    free2: z.string().default(""),
-    keyword: z.string().default(""),
-    maker_name: z.string().default(""),
-    brand_name: z.string().default(""),
+  // バリエーション
+  option_item_name: z.string().default(""),
+  option_horizontal: z.string().default(""),
+  variation_key: z.string().default(""),
+  variation_name: z.string().default(""),
+  variation_choices: z.string().default(""),
+  choice_numbers: z.string().default(""),
 
-    // Yahoo 固有
-    yahoo_category_id: z.string().default(""),
-    yahoo_path: z.string().default(""),
-    unit: z.string().default(""),
-    yahoo_grouping_enabled: z.boolean().default(false),
-    yahoo_variation_title: z.string().default(""),
+  // 画像 URL (1〜20)
+  image_url_1: z.string().default(""),
+  image_url_2: z.string().default(""),
+  image_url_3: z.string().default(""),
+  image_url_4: z.string().default(""),
+  image_url_5: z.string().default(""),
+  image_url_6: z.string().default(""),
+  image_url_7: z.string().default(""),
+  image_url_8: z.string().default(""),
+  image_url_9: z.string().default(""),
+  image_url_10: z.string().default(""),
+  image_url_11: z.string().default(""),
+  image_url_12: z.string().default(""),
+  image_url_13: z.string().default(""),
+  image_url_14: z.string().default(""),
+  image_url_15: z.string().default(""),
+  image_url_16: z.string().default(""),
+  image_url_17: z.string().default(""),
+  image_url_18: z.string().default(""),
+  image_url_19: z.string().default(""),
+  image_url_20: z.string().default(""),
 
-    // バリエーション
-    option_item_name: z.string().default(""),
-    option_horizontal: z.string().default(""),
-    variation_key: z.string().default(""),
-    variation_name: z.string().default(""),
-    variation_choices: z.string().default(""),
-    choice_numbers: z.string().default(""),
+  // 商品属性 (1〜5)
+  attribute_item_1: z.string().default(""),
+  attribute_value_1: z.string().default(""),
+  attribute_unit_1: z.string().default(""),
+  attribute_item_2: z.string().default(""),
+  attribute_value_2: z.string().default(""),
+  attribute_unit_2: z.string().default(""),
+  attribute_item_3: z.string().default(""),
+  attribute_value_3: z.string().default(""),
+  attribute_unit_3: z.string().default(""),
+  attribute_item_4: z.string().default(""),
+  attribute_value_4: z.string().default(""),
+  attribute_unit_4: z.string().default(""),
+  attribute_item_5: z.string().default(""),
+  attribute_value_5: z.string().default(""),
+  attribute_unit_5: z.string().default(""),
+});
 
-    ...imageUrls,
-    ...attributes,
-  })
-  .transform((p) => ({
-    ...p,
-    is_single: p.product_type === "単品",
-    is_set: p.product_type === "セット商品",
-  }));
+/** transform 適用版 (is_single/is_set 派生フィールドを追加) */
+export const ProductInputSchema = ProductInputBaseSchema.transform((p) => ({
+  ...p,
+  is_single: p.product_type === "単品",
+  is_set: p.product_type === "セット商品",
+}));
 
 export type ProductInput = z.infer<typeof ProductInputSchema>;
+export type ProductInputBase = z.output<typeof ProductInputBaseSchema>;
 
 /** テスト用ファクトリ (Phase 1 conftest.make_product と同等) */
 export function makeProduct(
