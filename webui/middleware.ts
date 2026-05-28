@@ -10,6 +10,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
   // ログイン済みで /login にアクセスしたら / へ
+  // ただし /auth/reset-password はリセットリンク経由で一時的にログイン状態になるので除外
   if (user && pathname.startsWith("/login")) {
     return NextResponse.redirect(new URL("/", request.url));
   }

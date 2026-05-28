@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
-type Mode = "password" | "magic-link";
+type Mode = "password" | "magic-link" | "reset";
 
 export function LoginCard() {
   const router = useRouter();
@@ -17,8 +17,21 @@ export function LoginCard() {
   const [password, setPassword] = useState("");
   const [magicSent, setMagicSent] = useState(false);
   const [signedUp, setSignedUp] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const clearState = () => {
+    setError(null);
+    setMagicSent(false);
+    setSignedUp(false);
+    setResetSent(false);
+  };
+
+  const switchMode = (newMode: Mode) => {
+    setMode(newMode);
+    clearState();
+  };
 
   const signInWithPassword = async () => {
     if (!email || !password) return;
@@ -50,7 +63,6 @@ export function LoginCard() {
       setError(error.message);
       return;
     }
-    // Email 確認設定が ON の場合、 session が空でメール確認待ち
     if (data.user && !data.session) {
       setSignedUp(true);
     } else {
@@ -73,6 +85,19 @@ export function LoginCard() {
     else setMagicSent(true);
   };
 
+  const sendResetPassword = async () => {
+    if (!email) return;
+    setLoading(true);
+    setError(null);
+    const supabase = createClient();
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: `${window.location.origin}/auth/reset-password`,
+    });
+    setLoading(false);
+    if (error) setError(error.message);
+    else setResetSent(true);
+  };
+
   const signInWithGoogle = async () => {
     const supabase = createClient();
     await supabase.auth.signInWithOAuth({
@@ -88,26 +113,49 @@ export function LoginCard() {
         <p className="text-center text-sm text-slate-500 mt-1">EC 商品データをまとめて登録</p>
       </CardHeader>
       <CardContent className="space-y-4">
-        {/* タブ切替 */}
-        <div className="flex border-b border-slate-200">
-          <TabButton active={mode === "password"} onClick={() => { setMode("password"); setError(null); setMagicSent(false); setSignedUp(false); }}>
-            パスワード
-          </TabButton>
-          <TabButton active={mode === "magic-link"} onClick={() => { setMode("magic-link"); setError(null); setMagicSent(false); setSignedUp(false); }}>
-            Magic Link
-          </TabButton>
-        </div>
+        {mode !== "reset" && (
+          <div className="flex border-b border-slate-200">
+            <TabButton active={mode === "password"} onClick={() => switchMode("password")}>
+              パスワード
+            </TabButton>
+            <TabButton active={mode === "magic-link"} onClick={() => switchMode("magic-link")}>
+              Magic Link
+            </TabButton>
+          </div>
+        )}
 
-        {magicSent ? (
+        {magicSent && (
           <p className="text-center text-sm text-green-700">
             ログインリンクをメールに送信しました
           </p>
-        ) : signedUp ? (
+        )}
+        {signedUp && (
           <p className="text-center text-sm text-green-700">
-            登録確認メールを送信しました。メールのリンクをクリックしてください。
+            登録確認メールを送信しました。 メールのリンクをクリックしてください。
           </p>
-        ) : (
+        )}
+        {resetSent && (
+          <div className="space-y-2">
+            <p className="text-center text-sm text-green-700">
+              パスワードリセットリンクをメールに送信しました
+            </p>
+            <Button onClick={() => switchMode("password")} variant="outline" className="w-full">
+              ログイン画面に戻る
+            </Button>
+          </div>
+        )}
+
+        {!magicSent && !signedUp && !resetSent && (
           <>
+            {mode === "reset" && (
+              <div>
+                <div className="text-sm font-semibold mb-1">パスワードをリセット</div>
+                <p className="text-xs text-slate-500 mb-3">
+                  登録済みのメールアドレスにリセットリンクを送信します。
+                </p>
+              </div>
+            )}
+
             <div>
               <Label htmlFor="email">メールアドレス</Label>
               <Input
@@ -136,7 +184,7 @@ export function LoginCard() {
 
             {error && <p className="text-sm text-red-600">{error}</p>}
 
-            {mode === "password" ? (
+            {mode === "password" && (
               <div className="space-y-2">
                 <Button
                   onClick={signInWithPassword}
@@ -153,8 +201,19 @@ export function LoginCard() {
                 >
                   新規登録
                 </Button>
+                <div className="text-center">
+                  <button
+                    type="button"
+                    onClick={() => switchMode("reset")}
+                    className="text-xs text-blue-600 hover:underline"
+                  >
+                    パスワードを忘れた方はこちら
+                  </button>
+                </div>
               </div>
-            ) : (
+            )}
+
+            {mode === "magic-link" && (
               <Button
                 onClick={sendMagicLink}
                 className="w-full"
@@ -164,10 +223,29 @@ export function LoginCard() {
               </Button>
             )}
 
-            <div className="text-center text-xs text-slate-400">または</div>
-            <Button onClick={signInWithGoogle} variant="outline" className="w-full">
-              Google でログイン
-            </Button>
+            {mode === "reset" && (
+              <div className="space-y-2">
+                <Button
+                  onClick={sendResetPassword}
+                  className="w-full"
+                  disabled={loading || !email}
+                >
+                  {loading ? "送信中..." : "リセットリンクを送信"}
+                </Button>
+                <Button onClick={() => switchMode("password")} variant="outline" className="w-full">
+                  キャンセル
+                </Button>
+              </div>
+            )}
+
+            {mode !== "reset" && (
+              <>
+                <div className="text-center text-xs text-slate-400">または</div>
+                <Button onClick={signInWithGoogle} variant="outline" className="w-full">
+                  Google でログイン
+                </Button>
+              </>
+            )}
           </>
         )}
       </CardContent>
