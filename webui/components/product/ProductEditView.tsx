@@ -8,13 +8,17 @@ import type { ProductInput } from "@/lib/product/schema";
 import { ProductForm } from "./ProductForm";
 import { useAutoSave } from "@/hooks/useAutoSave";
 import { Button } from "@/components/ui/button";
+import { PreviewTabs } from "@/components/preview/PreviewTabs";
+import { CsvDownloadPanel } from "@/components/csv/CsvDownloadPanel";
 
 export function ProductEditView({
   initial,
   productId,
+  peers,
 }: {
   initial: ProductInput;
-  productId?: string; // 新規ならundefined
+  productId?: string;
+  peers?: ProductInput[];
 }) {
   const router = useRouter();
   const [currentId, setCurrentId] = useState(productId);
@@ -26,7 +30,6 @@ export function ProductEditView({
       const saved = await upsertProduct(supabase, v, currentId);
       if (!currentId) {
         setCurrentId(saved.id);
-        // 新規作成後は URL を更新
         router.replace(`/products/${saved.id}`);
       }
     },
@@ -53,22 +56,14 @@ export function ProductEditView({
         </div>
       </div>
 
-      {/* 本体: 左フォーム + 右プレビュー (Plan 4 で実装) */}
+      {/* 本体: 左フォーム + 右プレビュー */}
       <div className="flex flex-1 overflow-hidden">
         <div className="w-2/5 overflow-y-auto p-4 border-r border-slate-200">
           <ProductForm defaultValues={initial} onChange={setData} />
         </div>
-        <div className="flex-1 overflow-y-auto p-4 bg-slate-50">
-          <div className="text-sm text-slate-500 mb-2">
-            プレビュー (Plan 4 で実装)
-          </div>
-          <div className="bg-white border border-slate-200 rounded p-4 text-sm text-slate-600">
-            <div className="font-semibold">{data.display_name || "(商品名未入力)"}</div>
-            <div className="mt-2">価格: ¥{data.selling_price.toLocaleString()}</div>
-            <div className="mt-2 text-xs">
-              NEコード: {data.ne_code} / JAN: {data.jan_code}
-            </div>
-          </div>
+        <div className="flex-1 overflow-y-auto p-4 bg-slate-50 space-y-3">
+          <PreviewTabs product={data} peers={peers ?? []} />
+          <CsvDownloadPanel productId={currentId} />
         </div>
       </div>
     </div>
