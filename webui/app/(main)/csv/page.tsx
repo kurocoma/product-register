@@ -1,8 +1,14 @@
-export default function CsvDownloadPage() {
-  return (
-    <div className="p-6">
-      <h1 className="text-2xl font-bold">CSV ダウンロード</h1>
-      <p className="text-sm text-slate-500 mt-2">Plan 5 で実装予定</p>
-    </div>
-  );
+import { createClient } from "@/lib/supabase/server";
+import { listProducts } from "@/lib/product/repository";
+import { CsvBulkDownloadForm } from "@/components/csv/CsvBulkDownloadForm";
+
+export default async function CsvDownloadPage() {
+  const supabase = await createClient();
+  const products = await listProducts(supabase);
+  const items = products.map((p) => ({
+    id: p.id,
+    ne_code: String(p.ne_code),
+    product_name: String(p.product_name),
+  }));
+  return <CsvBulkDownloadForm products={items} />;
 }

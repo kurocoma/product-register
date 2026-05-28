@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { ProductInputSchema, type ProductInput } from "./schema";
+import { recordHistory } from "@/lib/history/recorder";
 
 /** DB の products テーブル上で「主要列」として持つフィールド (28列)。残りは extra JSONB へ。 */
 const MAIN_COLUMNS = [
@@ -92,6 +93,7 @@ export async function upsertProduct(
       .select()
       .single();
     if (error) throw error;
+    await recordHistory(supabase, "edit", id, { ne_code: product.ne_code });
     return data as ProductRow;
   }
   const { data, error } = await supabase
@@ -100,11 +102,16 @@ export async function upsertProduct(
     .select()
     .single();
   if (error) throw error;
-  return data as ProductRow;
+  const newRow = data as ProductRow;
+  await recordHistory(supabase, "create", newRow.id, { ne_code: product.ne_code });
+  return newRow;
 }
 
 /** 商品を削除。 */
 export async function deleteProduct(supabase: SupabaseClient, id: string): Promise<void> {
+  // history.product_id は ON DELETE SET NULL なので、 先に履歴を残してから削除
+  const { data: row } = await supabase.from("products").select("ne_code").eq("id", id).maybeSingle();
+  await recordHistory(supabase, "delete", id, { ne_code: row?.ne_code ?? "" });
   const { error } = await supabase.from("products").delete().eq("id", id);
   if (error) throw error;
 }
