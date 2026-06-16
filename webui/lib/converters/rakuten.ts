@@ -83,10 +83,12 @@ export class RakutenConverter implements Converter {
     row["ジャンルID"] = rep.mall_category_id;
 
     const imgList = buildRakutenImgList(base, rep.image_count);
+    // PC用販売説明文: 任意入力(sale_description_pc)があればそれを、空なら画像から自動生成した imgList。
+    const saleBlock = rep.sale_description_pc.trim() ? rep.sale_description_pc : imgList;
     row["キャッチコピー"] = rep.catch_copy_pc;
     row["PC用商品説明文"] = rep.description_pc;
-    row["スマートフォン用商品説明文"] = imgList + rep.description_sp;
-    row["PC用販売説明文"] = imgList;
+    row["スマートフォン用商品説明文"] = saleBlock + rep.description_sp;
+    row["PC用販売説明文"] = saleBlock;
 
     // 画像 (CABINET): 1枚目は rep.ne_code、 2枚目以降は base_code
     row["商品画像タイプ1"] = "CABINET";

@@ -68,6 +68,18 @@ describe("RakutenConverter", () => {
     expect(rows[0]["PC用販売説明文"]).toBe("");
   });
 
+  it("PC用販売説明文: sale_description_pc があれば自動imgListより優先し、スマホ側にも使う", () => {
+    const custom = "<div class='imgList'><img src='https://example.com/x.jpg' width='100%'></div>独自販売説明";
+    const rows = conv.convert([
+      makeProduct({ image_count: 3, sale_description_pc: custom, description_sp: "SP本文" }),
+    ]);
+    // PC用販売説明文 = カスタム値（自動 imgList は使わない）
+    expect(rows[0]["PC用販売説明文"]).toBe(custom);
+    expect(rows[0]["PC用販売説明文"]).not.toContain("<!--imgList-->");
+    // スマホ用商品説明文 = カスタム販売説明文 + スマホ本文（B案）
+    expect(rows[0]["スマートフォン用商品説明文"]).toBe(custom + "SP本文");
+  });
+
   it("child has 販売価格 = selling_price", () => {
     const rows = conv.convert([makeProduct({ selling_price: 12345 })]);
     expect(rows[1]["販売価格"]).toBe("12345");

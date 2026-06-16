@@ -231,6 +231,19 @@ function DescriptionSection() {
       <TextField name="catch_copy_pc" label="キャッチコピー (PC)" />
       <TextField name="catch_copy_yahoo" label="キャッチコピー (Yahoo)" />
       <div>
+        <Label htmlFor="sale_description_pc">PC用販売説明文 (楽天 / 任意HTML)</Label>
+        <textarea
+          id="sale_description_pc"
+          {...register("sale_description_pc")}
+          rows={6}
+          placeholder="例: <img src='...' width='100%'> … 空欄なら画像枚数から自動生成"
+          className="w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm font-mono"
+        />
+        <p className="mt-1 text-[11px] text-slate-400">
+          空欄時は商品画像から imgList を自動生成。入力すると PC用販売説明文・スマホ用商品説明文の先頭に使われます。
+        </p>
+      </div>
+      <div>
         <Label htmlFor="description_pc">商品説明 PC (HTML)</Label>
         <textarea
           id="description_pc"

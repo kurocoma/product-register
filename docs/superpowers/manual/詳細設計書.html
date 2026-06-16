@@ -677,6 +677,115 @@ assert len({r[&quot;path&quot;] for r in chinsuko}) == 1  # path 同一
 <li><a href="../specs/2026-05-12-yahoo-converter-rewrite-design.md">Yahoo Converter 設計書 v3 (本変更の元仕様)</a></li>
 <li><a href="../plans/2026-05-12-yahoo-converter-rewrite.md">Yahoo Converter 実装計画書 v3</a></li>
 </ul>
+<hr />
+<h2 id="11-webuiphase-2">11. WebUI（Phase 2）追加実装</h2>
+<p>Phase 1 の Python CLI とは別に、<code>webui/</code>（Next.js App Router + Supabase + TypeScript）で WebUI を実装。変換ロジックは TS へ移植（<code>webui/lib/converters/</code>）。</p>
+<h3 id="111">11.1 データモデルと永続化</h3>
+<ul>
+<li><code>webui/lib/product/schema.ts</code>（zod）。Phase 1 の ProductInput を踏襲。</li>
+<li><code>webui/lib/product/repository.ts</code>: <code>MAIN_COLUMNS</code>（28 列）は <code>products</code> テーブルの実列、それ以外（<code>attributes</code>, <code>sale_description_pc</code> 等）は <strong><code>extra</code> JSONB</strong> に保存・復元。→ 新フィールド追加に<strong>マイグレーション不要</strong>。</li>
+<li>追加フィールド <code>sale_description_pc</code>（PC 用販売説明文・任意 HTML、default <code>""</code>）。</li>
+</ul>
+<h3 id="112-yahoo">11.2 楽天 → Yahoo カテゴリマッピング</h3>
+<table>
+<thead>
+<tr>
+<th>項目</th>
+<th>実装</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>マスタ表</td>
+<td><code>rakuten_yahoo_category_mapping</code>（<code>genre_id</code> PK / <code>yahoo_category_id</code> 等）。<code>webui/supabase/migrations/20260616000001_*.sql</code></td>
+</tr>
+<tr>
+<td>取得</td>
+<td><code>webui/lib/product/category-mapping.ts</code> <code>fetchYahooCategoryMapping(supabase, genreId)</code></td>
+</tr>
+<tr>
+<td>UI</td>
+<td><code>ProductForm.tsx</code> の <code>MallCategoryField</code>。<code>mall_category_id</code> のフォーカス離脱で自動入力（同一 ID の再 blur はスキップ、確度は無視して機械的にセット）</td>
+</tr>
+<tr>
+<td>投入</td>
+<td><code>webui/scripts/import_yahoo_category_mapping.mjs</code>（<code>docs/rakuten_yahoo_category_mapping.csv</code> を COPY）。<code>supabase link</code> 未設定環境では <code>webui/scripts/apply_sql.mjs</code> でマイグレーション直接適用</td>
+</tr>
+<tr>
+<td>生成</td>
+<td><code>scripts/build_full_category_mapping.py</code>（TF-IDF+bigram+ドメイン辞書で候補抽出）→ LLM 判定 → <code>merge_category_mapping.py</code></td>
+</tr>
+</tbody>
+</table>
+<h3 id="113">11.3 プレビュー描画（楽天）</h3>
+<ul>
+<li><strong>画像 URL 規約（公開と共通）</strong>: <code>webui/lib/converters/image-url.ts</code> <code>buildRakutenImageUrls(base, neCode, imageCount)</code></li>
+<li>商品画像 1 = <code>thum02/{ne_code}.jpg</code></li>
+<li>imgList（販売説明文）= <code>thum02/{base}_2.jpg … _N.jpg</code>（<code>width:100%</code> 縦並び）</li>
+<li><strong>忠実描画</strong>: <code>webui/components/preview/HtmlPreviewFrame.tsx</code></li>
+<li>iframe <code>srcDoc</code> + <code>sandbox="allow-same-origin"</code>（スクリプト無効・高さ自動調整）。</li>
+<li>Tailwind の preflight/prose の影響を受けず、<code>&lt;table border&gt;</code>・<code>&lt;font&gt;</code>・全幅画像を実ページ準拠で表示。</li>
+<li><code>RakutenPreview</code> 本体 = 「販売説明文(saleBlock) + 商品説明文(<code>description_pc</code>)」を iframe 描画。</li>
+<li><strong>saleBlock = <code>sale_description_pc</code> があればそれ、空なら自動 imgList</strong>。</li>
+</ul>
+<h3 id="114-webuilibconvertersrakutents">11.4 コンバータ拡張（<code>webui/lib/converters/rakuten.ts</code>）</h3>
+<table>
+<thead>
+<tr>
+<th>列</th>
+<th>値</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>PC用販売説明文</code></td>
+<td>saleBlock（<code>sale_description_pc</code> ‖ 自動 imgList）</td>
+</tr>
+<tr>
+<td><code>スマートフォン用商品説明文</code></td>
+<td>saleBlock + <code>description_sp</code></td>
+</tr>
+<tr>
+<td>商品管理番号 / base</td>
+<td><code>maker_code + "-" + jan_code 末尾4桁</code></td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>注意: base は JAN 末尾 4 桁から導出するため、<strong>JAN 未入力（<code>0000000000000</code>）だと base がズレる</strong>（例: 画像が <code>a009-0000_*</code> になる）。正しい JAN（末尾 4 桁が <code>ne_code</code> のコード部と一致）を入力すれば解消する。</p>
+</blockquote>
+<h3 id="115-e2e-webuitestse2e_mjs">11.5 e2e テスト（<code>webui/tests/e2e_*.mjs</code>）</h3>
+<p>Service Role でセッション cookie を発行し、<strong>実 HTTP</strong> で SSR / 保存 / プレビュー / CSV を検証する（dev サーバ必須）。</p>
+<table>
+<thead>
+<tr>
+<th>スクリプト</th>
+<th>検証内容</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>e2e_flow</code></td>
+<td>全ページ SSR ＋ 商品 insert ＋ <code>/products/[id]</code>（プレビュー含む）＋ 全モール CSV</td>
+</tr>
+<tr>
+<td><code>e2e_attributes</code></td>
+<td>ジャンル属性取得 → 保存 → 楽天 CSV に値あり属性のみ出力</td>
+</tr>
+<tr>
+<td><code>e2e_neset</code></td>
+<td>単品/セットの ne_single・ne_set 出力仕様</td>
+</tr>
+<tr>
+<td><code>e2e_save_validation</code></td>
+<td>NE コード重複（23505）を DB が弾く＋メッセージ変換</td>
+</tr>
+<tr>
+<td><code>e2e_saledesc</code></td>
+<td><code>sale_description_pc</code> が楽天 CSV（PC 用販売説明文）に反映され、自動 imgList を上書きする</td>
+</tr>
+</tbody>
+</table>
 </main>
 <footer class="doc-footer">
   &copy; 2026 product-register project &mdash; Auto-generated from 詳細設計書.md

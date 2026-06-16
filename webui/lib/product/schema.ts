@@ -25,6 +25,8 @@ export const ProductInputBaseSchema = z.object({
   // 商品説明
   catch_copy_pc: z.string().default(""),
   catch_copy_yahoo: z.string().default(""),
+  // PC用販売説明文（楽天）。任意HTML。空なら画像枚数から imgList を自動生成する。
+  sale_description_pc: z.string().default(""),
   description_pc: z.string().default(""),
   description_sp: z.string().default(""),
   description_4: z.string().default(""),
