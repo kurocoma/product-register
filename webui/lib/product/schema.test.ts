@@ -1,5 +1,43 @@
 import { describe, it, expect } from "vitest";
-import { ProductInputSchema, makeProduct } from "./schema";
+import { ProductInputSchema, makeProduct, resolveAttributes } from "./schema";
+
+describe("resolveAttributes", () => {
+  it("uses attributes array when present, filtering empty item names", () => {
+    const p = makeProduct({
+      attributes: [
+        { item: "収録時間", value: "120", unit: "分" },
+        { item: "", value: "x", unit: "" }, // item空は除外
+        { item: "メーカー型番", value: "", unit: "" },
+      ],
+    });
+    const r = resolveAttributes(p);
+    expect(r.map((a) => a.item)).toEqual(["収録時間", "メーカー型番"]);
+  });
+
+  it("onlyWithValue keeps only attributes that have a value", () => {
+    const p = makeProduct({
+      attributes: [
+        { item: "収録時間", value: "120", unit: "分" },
+        { item: "メーカー型番", value: "", unit: "" },
+      ],
+    });
+    const r = resolveAttributes(p, { onlyWithValue: true });
+    expect(r.map((a) => a.item)).toEqual(["収録時間"]);
+    expect(r[0].unit).toBe("分");
+  });
+
+  it("falls back to attribute_item_1..5 when attributes array is empty", () => {
+    const p = makeProduct({
+      attribute_item_1: "原材料",
+      attribute_value_1: "米",
+      attribute_unit_1: "",
+      attribute_item_2: "",
+    });
+    const r = resolveAttributes(p);
+    expect(r).toHaveLength(1);
+    expect(r[0]).toEqual({ item: "原材料", value: "米", unit: "" });
+  });
+});
 
 describe("ProductInputSchema", () => {
   it("accepts valid single product", () => {

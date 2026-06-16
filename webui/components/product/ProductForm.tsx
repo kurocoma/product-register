@@ -1,7 +1,13 @@
 "use client";
 
 import * as React from "react";
-import { useForm, FormProvider, useFormContext, type FieldPath } from "react-hook-form";
+import {
+  useForm,
+  FormProvider,
+  useFormContext,
+  useFieldArray,
+  type FieldPath,
+} from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import {
@@ -9,8 +15,17 @@ import {
   ProductInputSchema,
   type ProductInput,
 } from "@/lib/product/schema";
+import { createClient } from "@/lib/supabase/client";
+import {
+  fetchGenreAttributes,
+  genreAttributesToInputs,
+  isRequiredAttribute,
+} from "@/lib/product/genre-attributes";
+import { fetchYahooCategoryMapping } from "@/lib/product/category-mapping";
 import { Accordion, AccordionItem } from "@/components/ui/accordion";
 import { Input, Label } from "@/components/ui/input";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 
 type FormValues = z.input<typeof ProductInputBaseSchema>;
 
@@ -154,8 +169,57 @@ function ShippingSection() {
       <TextField name="image_count" label="画像枚数" type="number" />
       <TextField name="delivery_method" label="配送方法セット" type="number" />
       <TextField name="lead_time" label="納期管理番号" type="number" />
-      <TextField name="mall_category_id" label="モール基本カテゴリID" />
+      <MallCategoryField />
       <TextField name="store_category" label="店舗内カテゴリ" />
+    </div>
+  );
+}
+
+/** モール基本カテゴリID(=楽天ジャンルID)。入力（フォーカス離脱）時に、
+ * 紐付くYahooカテゴリ(yahoo_category_id / yahoo_path)を自動入力する。 */
+function MallCategoryField() {
+  const { register, setValue, watch } = useFormContext<FormValues>();
+  const [message, setMessage] = React.useState<string | null>(null);
+  const lastMappedId = React.useRef<string | null>(null);
+  const reg = register("mall_category_id");
+  const yahooCategoryId = watch("yahoo_category_id");
+
+  const autofillYahoo = async (e: React.FocusEvent<HTMLInputElement>) => {
+    const id = (e.target.value || "").trim();
+    if (!id || id === lastMappedId.current) return; // 空 or 同一IDの再blurはスキップ
+    lastMappedId.current = id;
+    try {
+      const supabase = createClient();
+      const mapping = await fetchYahooCategoryMapping(supabase, id);
+      if (!mapping) {
+        setMessage(`カテゴリID ${id} に対応するYahooカテゴリが見つかりませんでした`);
+        return;
+      }
+      const opts = { shouldDirty: true, shouldValidate: true } as const;
+      setValue("yahoo_category_id", mapping.yahoo_category_id, opts);
+      setValue("yahoo_path", mapping.yahoo_path, opts);
+      setMessage(`Yahooカテゴリを自動入力: ${mapping.yahoo_path || mapping.yahoo_category_id}`);
+    } catch (err) {
+      lastMappedId.current = null; // 失敗時は再試行できるようにする
+      setMessage("Yahooカテゴリの取得に失敗しました: " + (err instanceof Error ? err.message : String(err)));
+    }
+  };
+
+  return (
+    <div className="mb-3">
+      <Label htmlFor="mall_category_id">モール基本カテゴリID</Label>
+      <Input
+        id="mall_category_id"
+        {...reg}
+        onBlur={(e) => {
+          reg.onBlur(e);
+          void autofillYahoo(e);
+        }}
+      />
+      {message && <p className="mt-1 text-xs text-blue-700">{message}</p>}
+      <p className="mt-0.5 text-[11px] text-slate-400">
+        現在の Yahoo カテゴリID: {yahooCategoryId || "(未入力)"}
+      </p>
     </div>
   );
 }
@@ -244,24 +308,121 @@ function ImageUrlSection() {
 }
 
 function AttributeSection() {
+  const { control, register, watch } = useFormContext<FormValues>();
+  const { fields, append, remove, replace } = useFieldArray({ control, name: "attributes" });
+  const [loading, setLoading] = React.useState(false);
+  const [message, setMessage] = React.useState<string | null>(null);
+
+  const categoryId = watch("mall_category_id");
+
+  const loadFromCategory = async () => {
+    const id = (categoryId || "").trim();
+    if (!id) {
+      setMessage("先に「配送・カテゴリ」のモール基本カテゴリIDを入力してください");
+      return;
+    }
+    setLoading(true);
+    setMessage(null);
+    try {
+      const supabase = createClient();
+      const attrs = await fetchGenreAttributes(supabase, id);
+      if (attrs.length === 0) {
+        setMessage(`カテゴリID ${id} に対応する推奨属性が見つかりませんでした`);
+        return;
+      }
+      // 既存の入力値（item→value/unit）を保持しつつ、推奨項目で置き換える
+      const current = watch("attributes") || [];
+      const byItem = new Map(current.map((a) => [a.item, a]));
+      const next = genreAttributesToInputs(attrs).map((a) => {
+        const prev = byItem.get(a.item);
+        return prev
+          ? { item: a.item, value: prev.value, unit: prev.unit || a.unit, requirement: a.requirement }
+          : a;
+      });
+      replace(next);
+      setMessage(`カテゴリID ${id} の推奨属性 ${next.length} 件を読み込みました`);
+    } catch (e) {
+      setMessage("属性の読み込みに失敗しました: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
-    <div className="space-y-2">
-      {Array.from({ length: 5 }, (_, i) => i + 1).map((i) => (
-        <div key={i} className="grid grid-cols-3 gap-2 border-t pt-2 first:border-t-0 first:pt-0">
-          <TextField
-            name={`attribute_item_${i}` as FieldPath<FormValues>}
-            label={`項目 ${i}`}
-          />
-          <TextField
-            name={`attribute_value_${i}` as FieldPath<FormValues>}
-            label={`値 ${i}`}
-          />
-          <TextField
-            name={`attribute_unit_${i}` as FieldPath<FormValues>}
-            label={`単位 ${i}`}
-          />
-        </div>
-      ))}
+    <div className="space-y-3">
+      <div className="flex items-center gap-2">
+        <Button type="button" onClick={loadFromCategory} disabled={loading} variant="outline">
+          {loading ? "読み込み中…" : "📥 カテゴリIDから属性を読み込む"}
+        </Button>
+        <span className="text-xs text-slate-500">
+          現在のカテゴリID: {categoryId || "(未入力)"}
+        </span>
+      </div>
+      {message && <p className="text-xs text-blue-700">{message}</p>}
+
+      {fields.length === 0 && (
+        <p className="text-sm text-slate-400">
+          属性がありません。上のボタンでカテゴリIDから読み込むか、「+ 項目を追加」で手動入力できます。
+        </p>
+      )}
+
+      <div className="flex items-center gap-3 text-xs text-slate-500">
+        <span className="inline-flex items-center gap-1">
+          <span className="inline-block w-3 h-3 rounded-sm bg-rose-100 border border-rose-300" />
+          必須項目
+        </span>
+      </div>
+
+      <div className="space-y-2">
+        {fields.map((field, idx) => {
+          const requirement = watch(`attributes.${idx}.requirement`) as string | undefined;
+          const required = isRequiredAttribute(requirement || "");
+          return (
+            <div
+              key={field.id}
+              className={cn(
+                "grid grid-cols-[1fr_1fr_80px_auto] gap-2 items-end border-t pt-2 first:border-t-0 first:pt-0 rounded-sm",
+                required && "bg-rose-50 border-rose-200 px-2 py-1",
+              )}
+            >
+              <div>
+                {idx === 0 && <Label>項目</Label>}
+                <div className="flex items-center gap-1">
+                  <Input {...register(`attributes.${idx}.item` as FieldPath<FormValues>)} />
+                  {required && (
+                    <span className="shrink-0 text-[10px] font-bold text-rose-700 bg-rose-200 rounded px-1 py-0.5">
+                      必須
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div>
+                {idx === 0 && <Label>値</Label>}
+                <Input {...register(`attributes.${idx}.value` as FieldPath<FormValues>)} />
+              </div>
+              <div>
+                {idx === 0 && <Label>単位</Label>}
+                <Input {...register(`attributes.${idx}.unit` as FieldPath<FormValues>)} />
+              </div>
+              <button
+                type="button"
+                onClick={() => remove(idx)}
+                className="text-xs text-red-600 hover:underline pb-2"
+              >
+                削除
+              </button>
+            </div>
+          );
+        })}
+      </div>
+
+      <Button
+        type="button"
+        variant="outline"
+        onClick={() => append({ item: "", value: "", unit: "", requirement: "" })}
+      >
+        + 項目を追加
+      </Button>
     </div>
   );
 }

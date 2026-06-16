@@ -17,6 +17,20 @@ describe("RakutenConverter", () => {
     expect(rows[1]["SKU管理番号"]).toBe("t002-2542-1");
   });
 
+  it("バリエーションなし: SKU画像タイプ・パスは空（楽天は単一SKUにSKU画像を設定できない）", () => {
+    const rows = conv.convert([makeProduct({ variation_key: "" })]);
+    expect(rows[1]["SKU画像タイプ"]).toBe("");
+    expect(rows[1]["SKU画像パス"]).toBe("");
+  });
+
+  it("バリエーションあり: SKU画像タイプ・パスを設定する", () => {
+    const rows = conv.convert([
+      makeProduct({ ne_code: "t002-2542-1", variation_key: "size", option_item_name: "720ml" }),
+    ]);
+    expect(rows[1]["SKU画像タイプ"]).toBe("CABINET");
+    expect(rows[1]["SKU画像パス"]).toBe("/thum02/t002-2542-1.jpg");
+  });
+
   it("parent + 2 children for single + set group", () => {
     const rows = conv.convert([
       makeProduct({ ne_code: "t002-2542-1", quantity: 1 }),
@@ -60,8 +74,27 @@ describe("RakutenConverter", () => {
   });
 
   it("attribute_unit '0' becomes empty string", () => {
-    const rows = conv.convert([makeProduct({ attribute_unit_1: "0" })]);
+    // 値がある項目だけ出力される仕様。項目名と値を与えたうえで単位'0'→空を検証。
+    const rows = conv.convert([
+      makeProduct({ attribute_item_1: "容量", attribute_value_1: "720", attribute_unit_1: "0" }),
+    ]);
+    expect(rows[1]["商品属性（項目）1"]).toBe("容量");
     expect(rows[1]["商品属性（単位）1"]).toBe("");
+  });
+
+  it("outputs only attributes that have a value (空項目はCSVに出さない)", () => {
+    const rows = conv.convert([
+      makeProduct({
+        attributes: [
+          { item: "収録時間", value: "120", unit: "分" },
+          { item: "メーカー型番", value: "", unit: "" }, // 値なし→出力されない
+        ],
+      }),
+    ]);
+    expect(rows[1]["商品属性（項目）1"]).toBe("収録時間");
+    expect(rows[1]["商品属性（値）1"]).toBe("120");
+    expect(rows[1]["商品属性（単位）1"]).toBe("分");
+    expect(rows[1]["商品属性（項目）2"]).toBeUndefined();
   });
 
   it("multiple groups sorted by base_code ascending", () => {

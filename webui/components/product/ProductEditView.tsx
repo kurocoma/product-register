@@ -36,7 +36,7 @@ export function ProductEditView({
     [currentId, router],
   );
 
-  const { status, savedAt, manualSave } = useAutoSave(data, save, 800);
+  const { status, savedAt, errorMessage, manualSave } = useAutoSave(data, save, 800);
 
   return (
     <div className="flex flex-col h-full">
@@ -55,6 +55,13 @@ export function ProductEditView({
           </Button>
         </div>
       </div>
+
+      {/* 保存エラーのバナー（NEコード必須・重複など） */}
+      {status === "error" && errorMessage && (
+        <div className="border-b border-red-200 bg-red-50 px-6 py-2 text-sm text-red-700">
+          ⚠ 保存できませんでした: {errorMessage}
+        </div>
+      )}
 
       {/* 本体: 左フォーム + 右プレビュー */}
       <div className="flex flex-1 overflow-hidden">

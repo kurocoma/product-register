@@ -1,4 +1,5 @@
 import type { ProductInput } from "@/lib/product/schema";
+import { resolveAttributes } from "@/lib/product/schema";
 import type { Converter } from "./base";
 import { ENCODING } from "./base";
 import { buildRakutenImgList } from "./image-url";
@@ -156,18 +157,20 @@ export class RakutenConverter implements Converter {
     row["単品配送設定使用"] = "0";
 
     row["カタログID"] = p.jan_code;
-    row["SKU画像タイプ"] = "CABINET";
-    row["SKU画像パス"] = `/thum02/${p.ne_code}.jpg`;
+    // バリエーション（SKU軸）が定義されている場合のみ SKU画像を設定する。
+    // 単一SKU（バリエーションなし）に SKU画像を入れると楽天側でエラーになるため空にする。
+    const hasVariation = p.variation_key.trim() !== "";
+    row["SKU画像タイプ"] = hasVariation ? "CABINET" : "";
+    row["SKU画像パス"] = hasVariation ? `/thum02/${p.ne_code}.jpg` : "";
 
-    // 商品属性 (1〜5)
-    for (let i = 1; i <= 5; i++) {
-      const itemVal = (p[`attribute_item_${i}` as keyof ProductInput] as string) || "";
-      const valueVal = (p[`attribute_value_${i}` as keyof ProductInput] as string) || "";
-      const unitVal = (p[`attribute_unit_${i}` as keyof ProductInput] as string) || "";
-      row[`商品属性（項目）${i}`] = itemVal;
-      row[`商品属性（値）${i}`] = itemVal && !valueVal ? "0" : valueVal;
-      row[`商品属性（単位）${i}`] = unitVal === "0" ? "" : unitVal;
-    }
+    // 商品属性: 値が入っている項目だけを連番で出力する（空項目は CSV に出さない）。
+    const attrs = resolveAttributes(p, { onlyWithValue: true });
+    attrs.forEach((a, idx) => {
+      const i = idx + 1;
+      row[`商品属性（項目）${i}`] = a.item;
+      row[`商品属性（値）${i}`] = a.value;
+      row[`商品属性（単位）${i}`] = a.unit === "0" ? "" : a.unit;
+    });
     return row;
   }
 }

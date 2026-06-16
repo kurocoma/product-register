@@ -25,6 +25,27 @@ export type ProductRow = {
   extra: Record<string, unknown>;
 } & Record<typeof MAIN_COLUMNS[number], unknown>;
 
+/** 保存前バリデーション。ne_code が空だと (user_id, ne_code) ユニーク制約上、
+ * 空文字同士が衝突するため保存させない。 */
+export function validateForSave(
+  product: ProductInput,
+): { ok: true } | { ok: false; message: string } {
+  if (!product.ne_code || !product.ne_code.trim()) {
+    return { ok: false, message: "NEコードは必須です（商品ごとに一意の値を入力してください）" };
+  }
+  return { ok: true };
+}
+
+/** DB エラーを画面表示用の分かりやすい日本語に変換する。
+ * 特に 23505 (ユニーク制約違反) を NEコード重複として明示する。 */
+export function humanizeSaveError(err: unknown): string {
+  const e = err as { code?: string; message?: string } | null;
+  if (e?.code === "23505" && /ne_code/.test(e.message ?? "")) {
+    return "このNEコードは既に使われています。別のNEコードを入力してください。";
+  }
+  return e?.message ?? "保存に失敗しました";
+}
+
 /** ProductInput → DB row (主要列 + extra) に分割。 */
 export function productInputToDbRow(p: ProductInput): Record<string, unknown> {
   const dbRow: Record<string, unknown> = {};
@@ -81,6 +102,9 @@ export async function upsertProduct(
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) throw new Error("Not authenticated");
 
+  const valid = validateForSave(product);
+  if (!valid.ok) throw new Error(valid.message);
+
   const dbRow = productInputToDbRow(product);
   dbRow.user_id = user.id;
   dbRow.updated_at = new Date().toISOString();
@@ -92,7 +116,7 @@ export async function upsertProduct(
       .eq("id", id)
       .select()
       .single();
-    if (error) throw error;
+    if (error) throw new Error(humanizeSaveError(error));
     await recordHistory(supabase, "edit", id, { ne_code: product.ne_code });
     return data as ProductRow;
   }
@@ -101,7 +125,7 @@ export async function upsertProduct(
     .insert(dbRow)
     .select()
     .single();
-  if (error) throw error;
+  if (error) throw new Error(humanizeSaveError(error));
   const newRow = data as ProductRow;
   await recordHistory(supabase, "create", newRow.id, { ne_code: product.ne_code });
   return newRow;

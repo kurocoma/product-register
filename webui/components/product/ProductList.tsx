@@ -113,33 +113,56 @@ export function ProductList({ initial }: { initial: ProductRow[] }) {
                 </td>
               </tr>
             )}
-            {filtered.map((p) => (
-              <tr key={p.id} className="border-t border-slate-100 hover:bg-slate-50">
-                <td className="px-3 py-2">
-                  <input
-                    type="checkbox"
-                    checked={selected.has(p.id)}
-                    onChange={() => toggleOne(p.id)}
-                  />
-                </td>
-                <td className="px-3 py-2 font-mono">{String(p.ne_code)}</td>
-                <td className="px-3 py-2">
-                  <Link href={`/products/${p.id}`} className="text-blue-600 hover:underline">
-                    {String(p.product_name)}
-                  </Link>
-                </td>
-                <td className="px-3 py-2 text-right">¥{Number(p.selling_price).toLocaleString()}</td>
-                <td className="px-3 py-2 text-xs text-slate-600">{String(p.product_type)}</td>
-                <td className="px-3 py-2">
-                  <button
-                    onClick={() => handleDelete(p.id)}
-                    className="text-xs text-red-600 hover:underline"
-                  >
-                    削除
-                  </button>
-                </td>
-              </tr>
-            ))}
+            {filtered.map((p) => {
+              const name = String(p.product_name).trim();
+              const neCode = String(p.ne_code).trim();
+              return (
+                <tr
+                  key={p.id}
+                  onClick={() => router.push(`/products/${p.id}`)}
+                  className="border-t border-slate-100 hover:bg-slate-50 cursor-pointer"
+                >
+                  {/* チェックボックス: 行遷移を止める */}
+                  <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                    <input
+                      type="checkbox"
+                      checked={selected.has(p.id)}
+                      onChange={() => toggleOne(p.id)}
+                    />
+                  </td>
+                  <td className="px-3 py-2 font-mono">
+                    {neCode || <span className="text-slate-400">(NEコード未設定)</span>}
+                  </td>
+                  <td className="px-3 py-2">
+                    <Link
+                      href={`/products/${p.id}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="text-blue-600 hover:underline"
+                    >
+                      {name || <span className="text-slate-400 italic">(名称未設定)</span>}
+                    </Link>
+                  </td>
+                  <td className="px-3 py-2 text-right">¥{Number(p.selling_price).toLocaleString()}</td>
+                  <td className="px-3 py-2 text-xs text-slate-600">{String(p.product_type)}</td>
+                  <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex gap-2">
+                      <Link
+                        href={`/products/${p.id}`}
+                        className="text-xs text-blue-600 hover:underline"
+                      >
+                        編集
+                      </Link>
+                      <button
+                        onClick={() => handleDelete(p.id)}
+                        className="text-xs text-red-600 hover:underline"
+                      >
+                        削除
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

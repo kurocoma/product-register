@@ -71,7 +71,20 @@ export const ProductInputBaseSchema = z.object({
   image_url_19: z.string().default(""),
   image_url_20: z.string().default(""),
 
-  // 商品属性 (1〜5)
+  // 商品属性: 可変個数版（カテゴリIDからの自動補完で使用）。
+  // 楽天ジャンルの推奨属性を item/value/unit の配列で保持する。空配列なら下記 1〜5 にフォールバック。
+  attributes: z
+    .array(
+      z.object({
+        item: z.string().default(""),
+        value: z.string().default(""),
+        unit: z.string().default(""),
+        requirement: z.string().default(""), // 必須/いずれか必須/任意（UI強調用。CSV出力には影響しない）
+      }),
+    )
+    .default([]),
+
+  // 商品属性 (1〜5) — 旧固定枠（後方互換。attributes が空のとき使われる）
   attribute_item_1: z.string().default(""),
   attribute_value_1: z.string().default(""),
   attribute_unit_1: z.string().default(""),
@@ -98,6 +111,35 @@ export const ProductInputSchema = ProductInputBaseSchema.transform((p) => ({
 
 export type ProductInput = z.infer<typeof ProductInputSchema>;
 export type ProductInputBase = z.output<typeof ProductInputBaseSchema>;
+
+export type ResolvedAttribute = { item: string; value: string; unit: string };
+
+/** 商品属性を統一的に取り出す。
+ * attributes 配列があればそれを、無ければ旧 attribute_item_1〜5 から組み立てる。
+ * onlyWithValue=true なら「値(value)が入っている項目だけ」を返す（CSV出力の絞り込み用）。 */
+export function resolveAttributes(
+  p: ProductInput,
+  { onlyWithValue = false }: { onlyWithValue?: boolean } = {},
+): ResolvedAttribute[] {
+  let list: ResolvedAttribute[];
+  if (p.attributes && p.attributes.length > 0) {
+    list = p.attributes.map((a) => ({
+      item: a.item ?? "",
+      value: a.value ?? "",
+      unit: a.unit ?? "",
+    }));
+  } else {
+    list = [1, 2, 3, 4, 5].map((i) => ({
+      item: (p[`attribute_item_${i}` as keyof ProductInput] as string) || "",
+      value: (p[`attribute_value_${i}` as keyof ProductInput] as string) || "",
+      unit: (p[`attribute_unit_${i}` as keyof ProductInput] as string) || "",
+    }));
+  }
+  // 項目名が空の枠は常に除外
+  list = list.filter((a) => a.item.trim() !== "");
+  if (onlyWithValue) list = list.filter((a) => a.value.trim() !== "");
+  return list;
+}
 
 /** テスト用ファクトリ (Phase 1 conftest.make_product と同等) */
 export function makeProduct(

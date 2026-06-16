@@ -1,6 +1,45 @@
 import { describe, it, expect } from "vitest";
 import { makeProduct } from "./schema";
-import { productInputToDbRow, dbRowToProductInput, type ProductRow } from "./repository";
+import {
+  productInputToDbRow,
+  dbRowToProductInput,
+  validateForSave,
+  humanizeSaveError,
+  type ProductRow,
+} from "./repository";
+
+describe("validateForSave", () => {
+  it("rejects empty ne_code", () => {
+    const p = makeProduct({ ne_code: "" });
+    const result = validateForSave(p);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.message).toContain("NEコード");
+  });
+
+  it("rejects whitespace-only ne_code", () => {
+    const p = makeProduct({ ne_code: "   " });
+    expect(validateForSave(p).ok).toBe(false);
+  });
+
+  it("accepts product with non-empty ne_code", () => {
+    const p = makeProduct({ ne_code: "t002-2542-1" });
+    expect(validateForSave(p).ok).toBe(true);
+  });
+});
+
+describe("humanizeSaveError", () => {
+  it("converts 23505 unique violation into a clear NE code message", () => {
+    const err = { code: "23505", message: 'duplicate key value violates unique constraint "products_user_id_ne_code_key"' };
+    const msg = humanizeSaveError(err);
+    expect(msg).toContain("NEコード");
+    expect(msg).toContain("既に");
+  });
+
+  it("passes through other error messages", () => {
+    const err = { code: "12345", message: "some other db error" };
+    expect(humanizeSaveError(err)).toContain("some other db error");
+  });
+});
 
 describe("productInputToDbRow", () => {
   it("separates main columns and extra fields", () => {

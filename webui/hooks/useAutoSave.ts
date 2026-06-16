@@ -11,8 +11,12 @@ export function useAutoSave<T>(
 ) {
   const [status, setStatus] = useState<AutoSaveStatus>("idle");
   const [savedAt, setSavedAt] = useState<Date | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const firstRun = useRef(true);
+
+  const errMsg = (e: unknown) =>
+    e instanceof Error ? e.message : typeof e === "string" ? e : "保存に失敗しました";
 
   useEffect(() => {
     if (firstRun.current) {
@@ -26,9 +30,11 @@ export function useAutoSave<T>(
         await onSave(value);
         setStatus("saved");
         setSavedAt(new Date());
+        setErrorMessage(null);
       } catch (e) {
         console.error("auto-save failed", e);
         setStatus("error");
+        setErrorMessage(errMsg(e));
       }
     }, delayMs);
     return () => {
@@ -44,11 +50,13 @@ export function useAutoSave<T>(
       await onSave(value);
       setStatus("saved");
       setSavedAt(new Date());
+      setErrorMessage(null);
     } catch (e) {
       console.error("manual save failed", e);
       setStatus("error");
+      setErrorMessage(errMsg(e));
     }
   }, [onSave, value]);
 
-  return { status, savedAt, manualSave };
+  return { status, savedAt, errorMessage, manualSave };
 }
