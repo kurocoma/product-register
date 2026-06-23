@@ -12,7 +12,7 @@ function soryo(shippingType: string): number {
   return shippingType === "送料無料" ? 1 : 0;
 }
 
-function baseCodeOf(p: ProductInput): string {
+export function baseCodeOf(p: ProductInput): string {
   return `${p.maker_code}-${p.jan_code.slice(-4)}`;
 }
 

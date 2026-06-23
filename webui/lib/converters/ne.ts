@@ -1,8 +1,7 @@
 import type { ProductInput } from "@/lib/product/schema";
 import type { Converter } from "./base";
 import { ENCODING } from "./base";
-
-const RAKUTEN_IMAGE_BASE = "https://image.rakuten.co.jp/ichiban-okinawa/cabinet/thum02";
+import { RAKUTEN_IMAGE_BASE } from "./image-url";
 
 function extractSireCode(makerCode: string): string {
   return makerCode.replace(/[^0-9]/g, "");

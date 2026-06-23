@@ -1,5 +1,7 @@
-export const RAKUTEN_IMAGE_BASE = "https://image.rakuten.co.jp/ichiban-okinawa/cabinet/thum02";
-const YAHOO_IMAGE_BASE = "https://shopping.c.yimg.jp/lib/okimarumarket";
+import { DEFAULT_RAKUTEN_STORE, rakutenCabinetBase } from "@/lib/rakuten/store";
+
+export const RAKUTEN_IMAGE_BASE = rakutenCabinetBase(DEFAULT_RAKUTEN_STORE, "thum02");
+export const YAHOO_IMAGE_BASE = "https://shopping.c.yimg.jp/lib/okimarumarket";
 
 /** sale_desc(imgList) に並ぶ 2 枚目以降の画像URL: {base}_{n}.jpg (n=2..imageCount)。 */
 function rakutenImgListUrls(baseCode: string, imageCount: number): string[] {
@@ -40,10 +42,16 @@ export function buildYahooImgListHtml(neCode: string, imageCount: number): strin
   return `<!--imgList-->${imgs}<br><!--/imgList-->`;
 }
 
-/** Yahoo item-image-urls 列 (セミコロン区切り) */
-export function buildYahooItemImageUrls(neCode: string, imageCount: number): string {
-  if (imageCount <= 0) return "";
+/** Yahoo R-Cabinet 相当(店舗画像ライブラリ)の商品画像URLの並び。
+ * 1 枚目 = {neCode}.jpg、2 枚目以降 = {neCode}_{n}.jpg。公開時(item-image-urls)と共通。 */
+export function buildYahooImageUrls(neCode: string, imageCount: number): string[] {
+  if (imageCount <= 0) return [];
   return Array.from({ length: imageCount }, (_, i) =>
     i === 0 ? `${YAHOO_IMAGE_BASE}/${neCode}.jpg` : `${YAHOO_IMAGE_BASE}/${neCode}_${i + 1}.jpg`,
-  ).join(";");
+  );
+}
+
+/** Yahoo item-image-urls 列 (セミコロン区切り) */
+export function buildYahooItemImageUrls(neCode: string, imageCount: number): string {
+  return buildYahooImageUrls(neCode, imageCount).join(";");
 }
