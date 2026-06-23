@@ -2,7 +2,7 @@ import type { ProductInput } from "@/lib/product/schema";
 import type { Converter } from "./base";
 import { ENCODING } from "./base";
 
-const SHOPIFY_CDN_BASE = "https://cdn.shopify.com/s/files/1/0602/0992/2282/files/";
+export const SHOPIFY_CDN_BASE = "https://cdn.shopify.com/s/files/1/0602/0992/2282/files/";
 const SITE_NAME = "【くりま】沖縄県産品・特産品の通販サイト";
 const SEO_DESC_SUFFIX =
   "のことなら沖縄県産品・特産品の通販サイトくりま。沖縄から全国一律9800円以上購入で送料無料！単品購入で送料無料も多数。";
@@ -70,7 +70,7 @@ function addTableClass(html: string): string {
   });
 }
 
-function buildBodyHtml(base: string, imageCount: number, descriptionPc: string): string {
+export function buildShopifyBodyHtml(base: string, imageCount: number, descriptionPc: string): string {
   let imgTags = "";
   for (let i = 2; i <= imageCount; i++) {
     imgTags += `<img src="${SHOPIFY_CDN_BASE}${base}_${i}.jpg" width="100%"><br>`;
@@ -146,7 +146,7 @@ export class ShopifyConverter implements Converter {
   ): Record<string, string> {
     const row = this.emptyRow(base);
     row["Title"] = rep.display_name;
-    row["Body (HTML)"] = buildBodyHtml(base, rep.image_count, rep.description_pc);
+    row["Body (HTML)"] = buildShopifyBodyHtml(base, rep.image_count, rep.description_pc);
     row["Vendor"] = `${rep.maker_name}<br>商品コード:${base}`;
     row["Tags"] = `${rep.maker_name},税率${rep.tax_rate}%`;
     row["Published"] = "true";

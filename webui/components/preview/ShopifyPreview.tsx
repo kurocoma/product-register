@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import type { ProductInput } from "@/lib/product/schema";
-
-const SHOPIFY_CDN_BASE = "https://cdn.shopify.com/s/files/1/0602/0992/2282/files/";
+import { SHOPIFY_CDN_BASE, buildShopifyBodyHtml } from "@/lib/converters/shopify";
+import { HtmlPreviewFrame } from "./HtmlPreviewFrame";
 
 function baseCode(p: ProductInput): string {
   return `${p.maker_code}-${p.jan_code.slice(-4)}`;
@@ -27,6 +27,12 @@ export function ShopifyPreview({
   ].sort((a, b) => a.quantity - b.quantity);
   const [selectedNe, setSelectedNe] = useState(product.ne_code);
   const current = variants.find((v) => v.ne_code === selectedNe) ?? product;
+
+  // Body(HTML) = Shopify imgList(店舗CDN画像) + 商品説明文。公開時と同じHTMLを描画する。
+  const hasContent = !!current.description_pc || (current.image_count || 0) > 1;
+  const bodyHtml = hasContent
+    ? buildShopifyBodyHtml(base, current.image_count || 0, current.description_pc)
+    : '<p style="color:#94a3b8">(画像・説明文 未入力)</p>';
 
   return (
     <div className="bg-white border border-slate-200 rounded p-4 space-y-4">
@@ -94,14 +100,10 @@ export function ShopifyPreview({
         カートに追加
       </button>
 
-      {/* 商品説明 */}
+      {/* 商品説明: Body(HTML) (imgList + 商品説明文) を実HTMLのまま iframe で忠実描画 */}
       <div className="border-t border-slate-200 pt-4">
-        <div
-          className="text-sm prose prose-sm max-w-none"
-          dangerouslySetInnerHTML={{
-            __html: current.description_pc || "<p class='text-slate-400'>(説明文未入力)</p>",
-          }}
-        />
+        <div className="text-sm font-semibold mb-2">─── 商品説明 (Body HTML) ───</div>
+        <HtmlPreviewFrame html={bodyHtml} title="Shopify 商品説明プレビュー" />
       </div>
 
       {/* デバッグ情報 */}

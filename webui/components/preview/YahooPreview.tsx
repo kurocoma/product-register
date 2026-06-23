@@ -2,8 +2,8 @@
 
 import { useState } from "react";
 import type { ProductInput } from "@/lib/product/schema";
-
-const YAHOO_IMAGE_BASE = "https://shopping.c.yimg.jp/lib/okimarumarket";
+import { YAHOO_IMAGE_BASE, buildYahooImgListHtml } from "@/lib/converters/image-url";
+import { HtmlPreviewFrame } from "./HtmlPreviewFrame";
 
 function priceInclusive(p: ProductInput): number {
   return Math.floor(p.selling_price * (1 + p.tax_rate / 100) + 0.5);
@@ -28,6 +28,13 @@ export function YahooPreview({
     : [product];
   const [selectedNe, setSelectedNe] = useState(product.ne_code);
   const current = variants.find((v) => v.ne_code === selectedNe) ?? product;
+
+  // caption(商品説明) = Yahoo imgList(店舗ライブラリ画像) + 商品説明文。公開時と同じHTMLを描画する。
+  const captionImgList = buildYahooImgListHtml(current.ne_code, current.image_count || 0);
+  const bodyHtml =
+    captionImgList +
+    (current.description_pc ||
+      (captionImgList ? "" : '<p style="color:#94a3b8">(画像・説明文 未入力)</p>'));
 
   const prices = variants.map(priceInclusive);
   const minPrice = Math.min(...prices);
@@ -105,14 +112,10 @@ export function YahooPreview({
         カートに入れる
       </button>
 
-      {/* 商品説明 */}
+      {/* 商品説明: caption(imgList + 商品説明文) を実HTMLのまま iframe で忠実描画 */}
       <div className="border-t border-slate-200 pt-4">
-        <div
-          className="text-sm prose prose-sm max-w-none"
-          dangerouslySetInnerHTML={{
-            __html: current.description_pc || "<p class='text-slate-400'>(説明文未入力)</p>",
-          }}
-        />
+        <div className="text-sm font-semibold mb-2">─── 商品説明 (caption) ───</div>
+        <HtmlPreviewFrame html={bodyHtml} title="Yahoo 商品説明プレビュー" />
       </div>
 
       {/* デバッグ情報 */}
