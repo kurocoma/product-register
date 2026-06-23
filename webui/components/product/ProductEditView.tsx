@@ -10,6 +10,9 @@ import { useAutoSave } from "@/hooks/useAutoSave";
 import { Button } from "@/components/ui/button";
 import { PreviewTabs } from "@/components/preview/PreviewTabs";
 import { CsvDownloadPanel } from "@/components/csv/CsvDownloadPanel";
+import { ImageUploadPanel } from "./ImageUploadPanel";
+import { RegisterPanel } from "./RegisterPanel";
+import { MallEditPanel } from "./MallEditPanel";
 
 export function ProductEditView({
   initial,
@@ -70,6 +73,9 @@ export function ProductEditView({
         </div>
         <div className="flex-1 overflow-y-auto p-4 bg-slate-50 space-y-3">
           <PreviewTabs product={data} peers={peers ?? []} />
+          <ImageUploadPanel productId={currentId} />
+          <RegisterPanel productId={currentId} />
+          <MallEditPanel productId={currentId} />
           <CsvDownloadPanel productId={currentId} />
         </div>
       </div>
