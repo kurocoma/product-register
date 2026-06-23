@@ -91,6 +91,11 @@ async function main() {
     check("selling_price 取込一致", product.selling_price === PRICE, String(product.selling_price));
     check("display_name 取込一致", product.display_name === NAME, product.display_name);
     check("mall_category_id 取込一致", product.mall_category_id === "553575", product.mall_category_id);
+    // 画像: getItem の images[].location → 実画像URL(image_url_1) + image_count に取り込まれる
+    check("image_count 取込一致", product.image_count === 1, String(product.image_count));
+    check("image_url_1 = 実画像の公開URL", product.image_url_1 === `https://image.rakuten.co.jp/ichiban-okinawa/cabinet/thum02/${NE}.jpg`, product.image_url_1);
+    // システム連携用SKU番号(register が ne_code を書込)→ 取込時に NEコードとして読まれる
+    check("ne_code = merchantDefinedSkuId(=登録時のNEコード)", product.ne_code === NE, product.ne_code);
   }
 
   // 5) 再度 import → 重複作成せず existed:true で同一商品を返す

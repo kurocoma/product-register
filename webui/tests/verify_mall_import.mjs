@@ -136,6 +136,24 @@ const check = (l, c, d) => { if (!c) fail++; console.log(`${c ? "✅" : "❌"} $
   }
 }
 
+// --- 楽天: 取込した実画像URL(image_url_N)と枚数(image_count)を保持する ---
+{
+  const r = buildImportedProduct("rakuten", "zzv-2542", {
+    ne_code: "zzz-2542-1", jan_code: "4955028002542", display_name: "IMG",
+    image_count: 3,
+    image_url_1: "https://image.rakuten.co.jp/ichiban-okinawa/cabinet/thum01/zzz-2542-1.jpg",
+    image_url_2: "https://image.rakuten.co.jp/ichiban-okinawa/cabinet/08038533/4955028002542_2.jpg",
+    image_url_3: "https://image.rakuten.co.jp/ichiban-okinawa/cabinet/08038533/4955028002542_3.jpg",
+  });
+  check("楽天/画像: ok", r.ok, !r.ok ? r.error : "");
+  if (r.ok) {
+    const p = r.product;
+    check("楽天/画像: image_count反映", p.image_count === 3, String(p.image_count));
+    check("楽天/画像: image_url_1(実URL・規約外thum01)保持", p.image_url_1.endsWith("/thum01/zzz-2542-1.jpg"), p.image_url_1);
+    check("楽天/画像: image_url_2(JAN名)保持", p.image_url_2.endsWith("/4955028002542_2.jpg"), p.image_url_2);
+  }
+}
+
 // --- 共通: 小数価格は整数へ丸めて取込継続（422で全体を落とさない） ---
 {
   const r1 = buildImportedProduct("rakuten", "abc-1234", { display_name: "P", selling_price: 1980.5 });

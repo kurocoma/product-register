@@ -51,6 +51,8 @@ export function buildRakutenUpsertBody(p: ProductInput, opts: BuildUpsertOptions
     .map((a) => (a.unit ? { name: a.item, values: [a.value], unit: a.unit } : { name: a.item, values: [a.value] }));
 
   const variant: Record<string, unknown> = {
+    // システム連携用SKU番号 = NEコード。取込→編集→反映や再登録で NE連携番号を保持する。
+    merchantDefinedSkuId: p.ne_code,
     standardPrice: String(p.selling_price),
     articleNumber,
     shipping: { postageIncluded: p.shipping_type === "送料無料" },

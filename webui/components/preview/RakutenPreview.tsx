@@ -9,6 +9,12 @@ function baseCode(p: ProductInput): string {
   return `${p.maker_code}-${p.jan_code.slice(-4)}`;
 }
 
+/** image_url_{i}（取込した実画像URL）を取り出す。空文字なら null。 */
+function imageUrlAt(p: ProductInput, i: number): string | null {
+  const u = (p as unknown as Record<string, unknown>)[`image_url_${i}`];
+  return typeof u === "string" && u.trim() !== "" ? u : null;
+}
+
 export function RakutenPreview({
   product,
   peers,
@@ -23,14 +29,20 @@ export function RakutenPreview({
   const current = variants.find((v) => v.ne_code === selectedNe) ?? product;
   const base = baseCode(current);
 
-  // 公開時と同じ画像規約 (R-Cabinet):
-  //   商品画像1      = thum02/{ne_code}.jpg
-  //   PC用販売説明文 = thum02/{base}_2.jpg … _N.jpg を width:100% で縦並び (imgList)
-  const heroUrl = `${RAKUTEN_IMAGE_BASE}/${current.ne_code}.jpg`;
-  // PC用販売説明文: 任意入力があればそれを、空なら画像から自動生成した imgList(公開時と同じ)。
-  const saleDescHtml = current.sale_description_pc.trim()
-    ? current.sale_description_pc
-    : buildRakutenImgList(base, current.image_count || 0);
+  // 画像URL: 取込した実画像URL(image_url_N)があればそれを優先。無ければ公開時と同じ自動生成規約。
+  //   商品画像1      = image_url_1 || thum02/{ne_code}.jpg
+  //   PC用販売説明文 = image_url_2..N || thum02/{base}_2.jpg … _N.jpg を width:100% で縦並び (imgList)
+  const heroUrl = imageUrlAt(current, 1) ?? `${RAKUTEN_IMAGE_BASE}/${current.ne_code}.jpg`;
+  // 取込した実画像URL(2枚目以降)があれば、それで imgList を組む。無ければ算出。
+  const explicitImgList = Array.from({ length: Math.max(0, (current.image_count || 0) - 1) }, (_, k) =>
+    imageUrlAt(current, k + 2),
+  ).filter((u): u is string => u !== null);
+  const autoImgList =
+    explicitImgList.length > 0
+      ? explicitImgList.map((u) => `<img src="${u}" width="100%"><br>`).join("")
+      : buildRakutenImgList(base, current.image_count || 0);
+  // PC用販売説明文: 任意入力があればそれを、空なら画像から組み立てた imgList(公開時と同じ)。
+  const saleDescHtml = current.sale_description_pc.trim() ? current.sale_description_pc : autoImgList;
   const itemDescHtml = current.description_pc;
   // プレビュー本体 = PC用販売説明文 + PC用商品説明文。公開時と同じ生HTMLを描画する。
   const bodyHtml =

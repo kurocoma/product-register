@@ -15,10 +15,12 @@ let fail = 0;
 const check = (l, c, d) => { if (!c) fail++; console.log(`${c ? "✅" : "❌"} ${l}${d ? "  " + d : ""}`); };
 
 const MN = "zzz-parse-9995";
+// variant キー(zzz-pv-1)と merchantDefinedSkuId(zzz-mds-1)を別値にし、NEコードに後者が採用されることを検証。
 const body = {
   title: "パース検証商品", itemType: "NORMAL", genreId: "553575", hideItem: true, tagline: "キャッチ確認",
   productDescription: { pc: "<p>PC説明確認</p>", sp: "<p>SP説明</p>" },
-  variants: { "zzz-pv-1": { standardPrice: "2580", articleNumber: { value: "4955028002542" }, shipping: { postageIncluded: true },
+  images: [{ type: "CABINET", location: "/thum02/zzz-pv-1.jpg" }],
+  variants: { "zzz-pv-1": { merchantDefinedSkuId: "zzz-mds-1", standardPrice: "2580", articleNumber: { value: "4955028002542" }, shipping: { postageIncluded: true },
     attributes: [{ name: "メーカー型番", values: ["X"] }, { name: "タイトル", values: ["Y"] }, { name: "発売元", values: ["Z"] }] } },
 };
 
@@ -34,10 +36,12 @@ check("display_name = title", parsed.display_name === "パース検証商品", p
 check("mall_category_id = genreId", parsed.mall_category_id === "553575", parsed.mall_category_id);
 check("description_pc", parsed.description_pc === "<p>PC説明確認</p>", parsed.description_pc);
 check("catch_copy_pc = tagline", parsed.catch_copy_pc === "キャッチ確認", parsed.catch_copy_pc);
-check("ne_code = variantId", parsed.ne_code === "zzz-pv-1", parsed.ne_code);
+check("ne_code = merchantDefinedSkuId(variantキーでなく)", parsed.ne_code === "zzz-mds-1", parsed.ne_code);
 check("selling_price(number)", parsed.selling_price === 2580, String(parsed.selling_price));
 check("jan_code = articleNumber.value", parsed.jan_code === "4955028002542", parsed.jan_code);
 check("shipping_type = 送料無料", parsed.shipping_type === "送料無料", parsed.shipping_type);
+check("image_count = images数", parsed.image_count === 1, String(parsed.image_count));
+check("image_url_1 = 実画像の公開URL", parsed.image_url_1 === "https://image.rakuten.co.jp/ichiban-okinawa/cabinet/thum02/zzz-pv-1.jpg", parsed.image_url_1);
 
 await sleep(800);
 const del = await deleteItem(cred, MN);
