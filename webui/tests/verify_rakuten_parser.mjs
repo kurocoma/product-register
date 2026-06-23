@@ -42,6 +42,23 @@ check("jan_code = articleNumber.value", parsed.jan_code === "4955028002542", par
 check("shipping_type = 送料無料", parsed.shipping_type === "送料無料", parsed.shipping_type);
 check("image_count = images数", parsed.image_count === 1, String(parsed.image_count));
 check("image_url_1 = 実画像の公開URL", parsed.image_url_1 === "https://image.rakuten.co.jp/ichiban-okinawa/cabinet/thum02/zzz-pv-1.jpg", parsed.image_url_1);
+check("attributes 取込(3件)", Array.isArray(parsed.attributes) && parsed.attributes.length === 3, `${parsed.attributes?.length}件`);
+check("attribute item/value(ジャンル必須属性を保持)", parsed.attributes?.[0]?.item === "メーカー型番" && parsed.attributes?.[0]?.value === "X", JSON.stringify(parsed.attributes?.[0]));
+
+// オフライン: unit付き・多値属性のパース(先頭値採用)を確認（API不要）。
+{
+  const mock = parseRakutenItem({
+    variants: { v1: { merchantDefinedSkuId: "ne-1", attributes: [
+      { name: "総重量", unit: "ｇ", values: ["300"] },
+      { name: "食品の状態", values: ["レトルト", "インスタント"] },
+      { name: "", values: ["x"] },        // 名前空→除外
+      { name: "空値", values: [] },        // 値空→除外
+    ] } },
+  });
+  check("offline: unit付き属性", mock.attributes?.some((a) => a.item === "総重量" && a.unit === "ｇ" && a.value === "300"), JSON.stringify(mock.attributes));
+  check("offline: 多値は先頭値採用", mock.attributes?.some((a) => a.item === "食品の状態" && a.value === "レトルト"), "");
+  check("offline: 名前/値が空の属性は除外", mock.attributes?.length === 2, `${mock.attributes?.length}件`);
+}
 
 await sleep(800);
 const del = await deleteItem(cred, MN);

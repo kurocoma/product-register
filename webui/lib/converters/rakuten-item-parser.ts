@@ -60,6 +60,23 @@ export function parseRakutenItem(
       if (art && typeof art.value === "string") out.jan_code = art.value;
       const ship = v.shipping as { postageIncluded?: boolean } | undefined;
       if (ship) out.shipping_type = ship.postageIncluded ? "送料無料" : "送料別";
+
+      // 商品属性 variants.{id}.attributes[] → product.attributes。
+      // これを取り込まないと、ジャンル必須属性が欠落して再登録(upsert)が IE0418 で失敗する。
+      // 多値属性はアプリの属性モデル(1属性1値)に合わせ先頭値を採用する（必須属性は単一値）。
+      const rawAttrs = v.attributes;
+      if (Array.isArray(rawAttrs) && rawAttrs.length > 0) {
+        const attrs = rawAttrs
+          .map((a) => {
+            const at = (a ?? {}) as { name?: unknown; values?: unknown; unit?: unknown };
+            const item = typeof at.name === "string" ? at.name : "";
+            const values = Array.isArray(at.values) ? at.values.filter((x): x is string => typeof x === "string") : [];
+            const unit = typeof at.unit === "string" ? at.unit : "";
+            return { item, value: values[0] ?? "", unit, requirement: "" };
+          })
+          .filter((a) => a.item !== "" && a.value !== "");
+        if (attrs.length > 0) out.attributes = attrs;
+      }
     }
   }
   return out;

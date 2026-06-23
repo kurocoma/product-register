@@ -5,6 +5,32 @@ import { esaAuthHeader, type RakutenCredentials } from "./cabinet-client";
 
 const BASE = "https://api.rms.rakuten.co.jp/es/2.0";
 
+/** 楽天エラーJSONを画面表示用メッセージへ整形する。
+ * errors[].metadata.details[] の message（例: IE0418 の不足属性名）まで展開し、何が原因か分かるようにする。 */
+function formatRakutenError(text: string, status: number): string {
+  try {
+    const j = JSON.parse(text);
+    const errs = j.errors || j.error || [];
+    if (Array.isArray(errs) && errs.length) {
+      return errs
+        .map((e: { code?: string; message?: string; metadata?: { details?: { message?: string }[] } }) => {
+          let m = `${e.code || ""}: ${e.message || ""}`.trim();
+          const details = e.metadata?.details;
+          if (Array.isArray(details) && details.length) {
+            const ds = details.map((d) => d.message || "").filter(Boolean).join(" / ");
+            if (ds) m += ` — ${ds}`;
+          }
+          return m;
+        })
+        .join(" / ");
+    }
+    if (j.message) return String(j.message);
+  } catch {
+    /* テキストのまま */
+  }
+  return `HTTP ${status}`;
+}
+
 export type UpsertResult =
   | { ok: true; created: boolean; status: number }
   | { ok: false; status: number; message: string; body: string };
@@ -27,15 +53,8 @@ export async function upsertItem(
   if (res.status === 201 || res.status === 204) {
     return { ok: true, created: res.status === 201, status: res.status };
   }
-  // エラーは JSON（errors[].code/message 等）
-  let message = `HTTP ${res.status}`;
-  try {
-    const j = JSON.parse(text);
-    const errs = j.errors || j.error || [];
-    if (Array.isArray(errs) && errs.length) message = errs.map((e: { code?: string; message?: string }) => `${e.code || ""}: ${e.message || ""}`).join(" / ");
-    else if (j.message) message = j.message;
-  } catch { /* テキストのまま */ }
-  return { ok: false, status: res.status, message, body: text.slice(0, 400) };
+  // エラーは JSON（errors[].code/message + metadata.details[]）
+  return { ok: false, status: res.status, message: formatRakutenError(text, res.status), body: text.slice(0, 600) };
 }
 
 /** items.patch（商品の部分更新）。送ったフィールドだけ反映、未指定項目は保持（全置換しない）。
@@ -57,14 +76,7 @@ export async function patchItem(
   if (res.status === 201 || res.status === 204) {
     return { ok: true, created: res.status === 201, status: res.status };
   }
-  let message = `HTTP ${res.status}`;
-  try {
-    const j = JSON.parse(text);
-    const errs = j.errors || j.error || [];
-    if (Array.isArray(errs) && errs.length) message = errs.map((e: { code?: string; message?: string }) => `${e.code || ""}: ${e.message || ""}`).join(" / ");
-    else if (j.message) message = j.message;
-  } catch { /* テキストのまま */ }
-  return { ok: false, status: res.status, message, body: text.slice(0, 400) };
+  return { ok: false, status: res.status, message: formatRakutenError(text, res.status), body: text.slice(0, 600) };
 }
 
 /** items.get（商品取得）。存在すれば json に全文JSON。差分編集の取得元。 */
