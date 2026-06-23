@@ -3,8 +3,13 @@ import { baseCodeOf } from "./rakuten";
 import { buildCabinetFileName } from "./cabinet-path";
 import { buildRakutenImgList } from "./image-url";
 
-/** 商品管理番号（items.upsert のパス）。base_code を冪等キーに使う。 */
+/** 商品管理番号（items.upsert / items.patch / items.get のパス）。
+ * 取込商品は実際の管理番号(rakuten_manage_number)を保存しているので最優先で使う
+ * （非規約書式でも編集→反映で同一商品へ往復する）。未保存（新規登録・既存商品）は
+ * 従来どおり baseCodeOf を冪等キーに使う。 */
 export function buildRakutenManageNumber(p: ProductInput): string {
+  const stored = p.rakuten_manage_number?.trim();
+  if (stored) return stored;
   return baseCodeOf(p);
 }
 

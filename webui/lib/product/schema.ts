@@ -21,6 +21,10 @@ export const ProductInputBaseSchema = z.object({
   lead_time: z.number().int(),
   mall_category_id: z.string(),
   store_category: z.string().default(""),
+  // モール識別子: 取込商品の実際の楽天 商品管理番号。
+  // 非規約書式(maker-JAN下4桁以外)でも編集→反映で同一商品へ往復させるため保存する。
+  // 空のとき buildRakutenManageNumber は従来どおり baseCodeOf を使う（新規登録・既存商品は後方互換）。
+  rakuten_manage_number: z.string().default(""),
 
   // 商品説明
   catch_copy_pc: z.string().default(""),
