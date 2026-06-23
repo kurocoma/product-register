@@ -9,12 +9,20 @@ function tag(xml: string, name: string): string {
   return m ? m[1] : "";
 }
 
-/** XML から Warning/Error を収集する。 */
+/** タグ値を取り出す。CDATA(<![CDATA[..]]>) と素のテキストの両方に対応。 */
+function tagInner(s: string, name: string): string {
+  const cdata = s.match(new RegExp(`<${name}>\\s*<!\\[CDATA\\[([\\s\\S]*?)\\]\\]>\\s*</${name}>`, "i"));
+  if (cdata) return cdata[1].trim();
+  const plain = s.match(new RegExp(`<${name}>([^<]*)</${name}>`, "i"));
+  return plain ? plain[1].trim() : "";
+}
+
+/** XML から Warning/Error を収集する。Message は CDATA で返ることがある（例: it-14091）。 */
 function collectMessages(xml: string, kind: "Warning" | "Error"): string[] {
   return [...xml.matchAll(new RegExp(`<${kind}>([\\s\\S]*?)</${kind}>`, "gi"))].map((m) => {
-    const code = (m[1].match(/<Code>([^<]*)<\/Code>/i) || [])[1] || "";
-    const msg = (m[1].match(/<Message>([^<]*)<\/Message>/i) || [])[1] || "";
-    const target = (m[1].match(/<Target>([^<]*)<\/Target>/i) || [])[1] || "";
+    const code = tagInner(m[1], "Code");
+    const msg = tagInner(m[1], "Message");
+    const target = tagInner(m[1], "Target");
     return [target, code, msg].filter(Boolean).join(": ");
   });
 }
@@ -37,7 +45,10 @@ export async function editItem(
   const status = tag(body, "Status");
   const warnings = collectMessages(body, "Warning");
   if (res.status === 200 && status === "OK") return { ok: true, warnings };
-  return { ok: false, message: status || `HTTP ${res.status}`, warnings, errors: collectMessages(body, "Error") };
+  // エラー詳細(Code/Message。CDATA含む)を優先して message にする。無ければ Status/HTTP。
+  const errors = collectMessages(body, "Error");
+  const message = errors.length > 0 ? errors.join(" / ") : (status || `HTTP ${res.status}`);
+  return { ok: false, message, warnings, errors };
 }
 
 /** 商品1件をフロントへ反映する（submitItem）。 */
