@@ -13,6 +13,7 @@ export function ImageUploadPanel({ productId }: { productId?: string }) {
   const [kind, setKind] = useState<RakutenKind>("main"); // 楽天のみ
   const [index, setIndex] = useState(1);
   const [uploading, setUploading] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [results, setResults] = useState<UploadResult[]>([]);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -54,6 +55,30 @@ export function ImageUploadPanel({ productId }: { productId?: string }) {
       setError("通信エラー: " + (e instanceof Error ? e.message : String(e)));
     } finally {
       setUploading(false);
+    }
+  };
+
+  // 取込んだ実画像URL(image_url_N)を Yahoo追加画像(lib)へ転送する（楽天取込商品をYahooに出す準備）。
+  const syncFromImport = async () => {
+    setSyncing(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/upload/yahoo-sync/${productId}`, { method: "POST" });
+      const json = await res.json();
+      if (!res.ok || !json.ok) {
+        const detail = json.failed?.length ? json.failed.map((f: { error: string }) => f.error).join(" / ") : "";
+        setError(json.error || detail || `転送失敗 (HTTP ${res.status})`);
+      }
+      if (Array.isArray(json.uploaded) && json.uploaded.length > 0) {
+        setResults((prev) => [
+          ...json.uploaded.map((u: { fileName: string; publicUrl: string }) => ({ label: `Yahoo(取込転送): ${u.fileName}`, publicUrl: u.publicUrl, at: Date.now() })),
+          ...prev,
+        ]);
+      }
+    } catch (e) {
+      setError("通信エラー: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -109,6 +134,22 @@ export function ImageUploadPanel({ productId }: { productId?: string }) {
       >
         {uploading ? "アップロード中…" : "アップロード"}
       </button>
+
+      {mall === "yahoo" && (
+        <div className="rounded border border-rose-200 bg-rose-50/50 p-2 space-y-1">
+          <button
+            onClick={syncFromImport}
+            disabled={syncing}
+            className="rounded border border-rose-400 text-rose-700 px-3 py-1.5 text-sm font-medium hover:bg-rose-100 disabled:opacity-50"
+          >
+            {syncing ? "転送中…" : "⤴ 取込画像をYahoo libへ転送"}
+          </button>
+          <p className="text-xs text-slate-500">
+            楽天等から取込んだ商品の画像(image_url)をYahoo追加画像(lib)へコピーします。
+            ファイルが手元になくてもOK。転送後に「Yahooへ登録」が通ります（it-14091 対策）。
+          </p>
+        </div>
+      )}
 
       <p className="text-xs text-slate-500">
         {mall === "yahoo"
