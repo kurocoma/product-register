@@ -51,6 +51,8 @@ export function parseRakutenItem(
     const firstId = Object.keys(variants)[0];
     if (firstId) {
       out._variantId = firstId;
+      // variant キー(SKU管理番号)を保持。upsert/patch の variants.{key} に使う実キー。
+      out.rakuten_variant_id = firstId;
       const v = variants[firstId];
       // NEコード = システム連携用SKU番号(merchantDefinedSkuId)を優先。無ければ variant キー(SKU管理番号)。
       const merchantSku = typeof v.merchantDefinedSkuId === "string" ? v.merchantDefinedSkuId.trim() : "";

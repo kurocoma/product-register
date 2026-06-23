@@ -37,6 +37,7 @@ check("mall_category_id = genreId", parsed.mall_category_id === "553575", parsed
 check("description_pc", parsed.description_pc === "<p>PC説明確認</p>", parsed.description_pc);
 check("catch_copy_pc = tagline", parsed.catch_copy_pc === "キャッチ確認", parsed.catch_copy_pc);
 check("ne_code = merchantDefinedSkuId(variantキーでなく)", parsed.ne_code === "zzz-mds-1", parsed.ne_code);
+check("rakuten_variant_id = variantキー(SKU管理番号)", parsed.rakuten_variant_id === "zzz-pv-1", parsed.rakuten_variant_id);
 check("selling_price(number)", parsed.selling_price === 2580, String(parsed.selling_price));
 check("jan_code = articleNumber.value", parsed.jan_code === "4955028002542", parsed.jan_code);
 check("shipping_type = 送料無料", parsed.shipping_type === "送料無料", parsed.shipping_type);

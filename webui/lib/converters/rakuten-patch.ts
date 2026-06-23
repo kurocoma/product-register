@@ -1,5 +1,6 @@
 import type { ProductInput } from "@/lib/product/schema";
 import type { ChangedField } from "@/lib/product/diff";
+import { rakutenVariantId } from "./rakuten-api";
 
 /** 楽天 items.patch のボディ。変更されたフィールドだけを含む部分更新用。 */
 export type RakutenPatchBody = Record<string, unknown>;
@@ -21,7 +22,9 @@ const RAKUTEN_PATCHABLE = new Set([
  * 設計上の注意:
  * - productDescription / variants.{id}.* のようなネストは、PATCH がオブジェクト単位で
  *   置換しても兄弟項目を失わないよう、変更時は編集後の「完全な」サブオブジェクトを送る。
- * - 価格・JAN・送料は variant（SKU管理番号=ne_code）配下に入れる。
+ * - 価格・JAN・送料は variant（SKU管理番号 = rakuten_variant_id、無ければ ne_code）配下に入れる。
+ *   ※ ここを ne_code 固定にすると、外部作成商品(variantキー≠NEコード)で別variant新規作成と誤認され
+ *      IE0269/IE0229/IE0418 で失敗する。必ず実 variant キーを使う。
  * - 画像(image_count)・Yahoo専用項目はここでは扱わない（別フロー）。
  */
 export function buildRakutenPatchBody(
@@ -33,7 +36,7 @@ export function buildRakutenPatchBody(
   const skipped = changed.map((c) => c.field).filter((f) => !RAKUTEN_PATCHABLE.has(f));
 
   const body: RakutenPatchBody = {};
-  const variantId = p.ne_code;
+  const variantId = rakutenVariantId(p);
   const variant: Record<string, unknown> = {};
 
   // 必須・キー的な項目は空で送らない（空送信は楽天側でエラー/不正値になりうる）。

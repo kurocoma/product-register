@@ -3,6 +3,14 @@ import { baseCodeOf } from "./rakuten";
 import { buildCabinetFileName } from "./cabinet-path";
 import { buildRakutenImgList } from "./image-url";
 
+/** 楽天 variant キー(SKU管理番号 = variants.{key})。取込商品は実キー(rakuten_variant_id)を保持しており、
+ * NEコード(merchantDefinedSkuId)と別物の外部作成商品でも正しいキーで upsert/patch する。
+ * 未保持(新規登録・アプリ作成)は従来どおり ne_code を使う。 */
+export function rakutenVariantId(p: ProductInput): string {
+  const stored = p.rakuten_variant_id?.trim();
+  return stored || p.ne_code;
+}
+
 /** 商品管理番号（items.upsert / items.patch / items.get のパス）。
  * 取込商品は実際の管理番号(rakuten_manage_number)を保存しているので最優先で使う
  * （非規約書式でも編集→反映で同一商品へ往復する）。未保存（新規登録・既存商品）は
@@ -36,7 +44,7 @@ export type BuildUpsertOptions = {
 /** ProductInput → items.upsert リクエストボディ（単一SKU通常商品）。
  * 注意: upsert は全置換。多SKUグループは将来対応（現状は1商品=1SKU）。在庫は InventoryAPI 別送（本体に含めない）。 */
 export function buildRakutenUpsertBody(p: ProductInput, opts: BuildUpsertOptions = {}): RakutenUpsertBody {
-  const variantId = p.ne_code;
+  const variantId = rakutenVariantId(p);
   const imgList = buildRakutenImgList(baseCodeOf(p), p.image_count);
 
   // articleNumber: 13桁JANがあれば value、無ければ店舗オリジナル(3)

@@ -25,6 +25,9 @@ export const ProductInputBaseSchema = z.object({
   // 非規約書式(maker-JAN下4桁以外)でも編集→反映で同一商品へ往復させるため保存する。
   // 空のとき buildRakutenManageNumber は従来どおり baseCodeOf を使う（新規登録・既存商品は後方互換）。
   rakuten_manage_number: z.string().default(""),
+  // 楽天 variant キー(SKU管理番号)。NEコード(=merchantDefinedSkuId)と別物の外部作成商品で、
+  // upsert/patch の variants.{key} に使う実キーを保持する。空のとき ne_code を使う（後方互換）。
+  rakuten_variant_id: z.string().default(""),
 
   // 商品説明
   catch_copy_pc: z.string().default(""),

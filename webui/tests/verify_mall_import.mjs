@@ -154,6 +154,23 @@ const check = (l, c, d) => { if (!c) fail++; console.log(`${c ? "✅" : "❌"} $
   }
 }
 
+// --- 楽天: 識別子3種が全部別物(ppork5型)でも正しく分離保持する ---
+{
+  // 管理番号=ppork5, variantキー=ppork5, NEコード(merchantDefinedSkuId)=m043-3425-1 を想定。
+  // parseRakutenItem が ne_code=merchantDefinedSkuId, rakuten_variant_id=variantキー を渡す。
+  const r = buildImportedProduct("rakuten", "ppork5", {
+    ne_code: "m043-3425-1", rakuten_variant_id: "ppork5",
+    jan_code: "5707196114669", display_name: "ポーク", selling_price: 429,
+  });
+  check("楽天/識別子分離: ok", r.ok, !r.ok ? r.error : "");
+  if (r.ok) {
+    const p = r.product;
+    check("楽天/識別子分離: ne_code=merchantDefinedSkuId", p.ne_code === "m043-3425-1", p.ne_code);
+    check("楽天/識別子分離: rakuten_variant_id=variantキー", p.rakuten_variant_id === "ppork5", p.rakuten_variant_id);
+    check("楽天/識別子分離: rakuten_manage_number=管理番号", p.rakuten_manage_number === "ppork5", p.rakuten_manage_number);
+  }
+}
+
 // --- 共通: 小数価格は整数へ丸めて取込継続（422で全体を落とさない） ---
 {
   const r1 = buildImportedProduct("rakuten", "abc-1234", { display_name: "P", selling_price: 1980.5 });
