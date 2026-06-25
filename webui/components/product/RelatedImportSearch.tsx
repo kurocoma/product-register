@@ -16,24 +16,24 @@ type RelatedSet = {
 type Mall = "rakuten" | "yahoo";
 const MALL_LABEL: Record<Mall, string> = { rakuten: "楽天", yahoo: "Yahoo" };
 
-/** 編集中の商品(ne_code)を含むセット商品を NEマスタ から引き、各セットの楽天/Yahoo商品コードから
- * アプリへ取込む（要件①の /api/import/[mall] を再利用）。値上げ連動でセットを一括取り込む用途。 */
-export function MallRelatedImportPanel({ neCode }: { neCode?: string }) {
+/** 商品一覧の検索窓。単品コード/JANを入れると、それを含むセット商品を NEマスタ から引き、
+ * 各セットの楽天/Yahoo商品コードからアプリへ取込む（/api/masters/related + /api/import/[mall]）。 */
+export function RelatedImportSearch() {
+  const [input, setInput] = useState("");
   const [sets, setSets] = useState<RelatedSet[] | null>(null);
+  const [notFound, setNotFound] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [importing, setImporting] = useState<string | null>(null);
   const [done, setDone] = useState<Record<string, { productId: string; existed: boolean }>>({});
 
-  if (!neCode) {
-    return (
-      <div className="bg-white border border-slate-200 rounded p-4 text-sm text-slate-500">
-        💡 商品を保存すると、関連セットのモール取込が有効になります
-      </div>
-    );
-  }
-
-  const load = async () => {
+  const search = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    const q = input.trim();
+    if (!q) {
+      setErr("単品コード/JANを入力してください");
+      return;
+    }
     setBusy(true);
     setErr(null);
     setSets(null);
@@ -42,14 +42,15 @@ export function MallRelatedImportPanel({ neCode }: { neCode?: string }) {
       const res = await fetch("/api/masters/related", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ input: neCode }),
+        body: JSON.stringify({ input: q }),
       });
       const j = await res.json();
       if (!res.ok || !j.ok) {
-        setErr(j.error || `取得失敗 (HTTP ${res.status})`);
+        setErr(j.error || `検索失敗 (HTTP ${res.status})`);
         return;
       }
       setSets(j.sets as RelatedSet[]);
+      setNotFound(j.notFound ?? []);
     } catch (e) {
       setErr("通信エラー: " + (e instanceof Error ? e.message : String(e)));
     } finally {
@@ -81,17 +82,29 @@ export function MallRelatedImportPanel({ neCode }: { neCode?: string }) {
 
   return (
     <div className="bg-white border border-slate-200 rounded p-4 space-y-3">
-      <div className="font-semibold">🧩 関連商品をモールから取込（NEマスタ連携）</div>
+      <div className="font-semibold">🧩 関連商品（セット）をモールから取込</div>
       <p className="text-xs text-slate-500">
-        この商品（NEコード <span className="font-mono">{neCode}</span>）を構成に含む<strong>セット商品</strong>を NEマスタ から引き、
-        楽天/Yahoo の商品コードからアプリへ取り込みます（値上げ時のセット取込に）。
+        値上げ対象の単品コード/JANを入れると、それを構成に含む<strong>セット商品</strong>を NEマスタ から引き、
+        楽天/Yahoo の商品コードからアプリへ取り込みます。
       </p>
-      <button onClick={load} disabled={busy} className="rounded border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50 disabled:opacity-50">
-        {busy ? "..." : "関連セットを表示"}
-      </button>
+      <form onSubmit={search} className="flex flex-wrap items-center gap-2">
+        <input
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          placeholder="例: n050-3426-1 または 4582469493426（単品コード/JAN）"
+          disabled={busy}
+          className="flex-1 min-w-[18rem] rounded border border-slate-300 px-3 py-2 text-sm font-mono disabled:opacity-50"
+        />
+        <button type="submit" disabled={busy} className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+          {busy ? "検索中…" : "関連セットを検索"}
+        </button>
+      </form>
 
       {err && <p className="text-sm text-red-600">⚠ {err}</p>}
-      {sets && sets.length === 0 && <p className="text-sm text-slate-500">この商品を含むセットはありません</p>}
+      {notFound.length > 0 && (
+        <p className="text-sm text-amber-700">未解決（マスタに無い）: <span className="font-mono">{notFound.join(", ")}</span></p>
+      )}
+      {sets && <div className="text-sm text-slate-600">該当セット {sets.length} 件</div>}
 
       {sets && sets.length > 0 && (
         <div className="overflow-x-auto border border-slate-200 rounded">
@@ -101,6 +114,7 @@ export function MallRelatedImportPanel({ neCode }: { neCode?: string }) {
                 <th className="px-2 py-2">セット商品コード</th>
                 <th className="px-2 py-2">セット名</th>
                 <th className="px-2 py-2 text-right">販売価格</th>
+                <th className="px-2 py-2">構成品（コード×数量）</th>
                 <th className="px-2 py-2">取込</th>
               </tr>
             </thead>
@@ -112,6 +126,11 @@ export function MallRelatedImportPanel({ neCode }: { neCode?: string }) {
                     <td className="px-2 py-2 font-mono">{s.set_ne_code}</td>
                     <td className="px-2 py-2 max-w-xs">{s.set_name}</td>
                     <td className="px-2 py-2 text-right">{s.set_price ?? ""}</td>
+                    <td className="px-2 py-2 font-mono">
+                      {s.components.map((c) => (
+                        <div key={c.ne_code}>{c.ne_code}×{c.suryo}</div>
+                      ))}
+                    </td>
                     <td className="px-2 py-2 space-y-1">
                       {malls.length === 0 && (
                         <span className="text-slate-400">{s.missing_link ? "紐づけ漏れ（楽天/Yahooコード無し）" : "—"}</span>
