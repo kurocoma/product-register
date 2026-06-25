@@ -83,7 +83,7 @@ export function parseRakutenItem(
       // NEコード = システム連携用SKU番号(merchantDefinedSkuId)を優先。無ければ variant キー(SKU管理番号)。
       const merchantSku = typeof v.merchantDefinedSkuId === "string" ? v.merchantDefinedSkuId.trim() : "";
       out.ne_code = merchantSku || targetId;
-      if (typeof v.standardPrice === "string") out.selling_price = Number(v.standardPrice);
+      if (typeof v.standardPrice === "string") out.selling_price = parsePrice(v.standardPrice);
       const art = v.articleNumber as { value?: string } | undefined;
       if (art && typeof art.value === "string") out.jan_code = art.value;
       const ship = v.shipping as { postageIncluded?: boolean } | undefined;
@@ -98,6 +98,31 @@ export function parseRakutenItem(
   return out;
 }
 
+/** standardPrice を整数円へ。桁区切りカンマ("6,220")を除去してから数値化（外部作成商品対策）。
+ * 非数/空は 0 にフォールバック。 */
+function parsePrice(raw: unknown): number {
+  const n = Number(String(raw ?? "").replace(/,/g, ""));
+  return Number.isFinite(n) ? Math.round(n) : 0;
+}
+
+/** variant の選択肢ラベル(例 "24本"・多軸 "赤 / S")を組み立てる。
+ * v.selectorValues = { selectorKey: 表示値 }、json.variantSelectors[] がページ表示順(キー順)を定める。 */
+function variationLabel(json: Record<string, unknown>, v: Record<string, unknown>): string {
+  const sel = v.selectorValues;
+  if (!sel || typeof sel !== "object") return "";
+  const selMap = sel as Record<string, unknown>;
+  const selectors = json.variantSelectors;
+  const keys = Array.isArray(selectors)
+    ? selectors
+        .map((s) => (s && typeof s === "object" && typeof (s as { key?: unknown }).key === "string" ? (s as { key: string }).key : ""))
+        .filter(Boolean)
+    : Object.keys(selMap);
+  return keys
+    .map((k) => selMap[k])
+    .filter((x): x is string => typeof x === "string" && x.trim() !== "")
+    .join(" / ");
+}
+
 /** 楽天 items.get の全 variant を Variant[] へパースする（多SKU取込 P2）。
  * 各SKUの SKU管理番号(variantキー)・NEコード(merchantDefinedSkuId)・JAN(articleNumber.value)・
  * 標準価格・送料無料/別・属性を抽出。1商品ページの全SKUを variants[] に格納する用途。
@@ -109,15 +134,15 @@ export function parseRakutenVariants(json: Record<string, unknown>): Variant[] {
     const merchantSku = typeof v.merchantDefinedSkuId === "string" ? v.merchantDefinedSkuId.trim() : "";
     const art = v.articleNumber as { value?: unknown } | undefined;
     const janRaw = typeof art?.value === "string" ? art.value.trim() : "";
-    const price = Number(v.standardPrice);
     const ship = v.shipping as { postageIncluded?: boolean } | undefined;
     return VariantSchema.parse({
       sku_manage_number: key,
       ne_code: merchantSku || key,
       jan_code: /^\d{13}$/.test(janRaw) ? janRaw : "",
-      selling_price: Number.isFinite(price) ? Math.round(price) : 0,
+      selling_price: parsePrice(v.standardPrice),
       tax_rate: 10,
       quantity: 1,
+      variation_value: variationLabel(json, v),
       shipping_type: ship?.postageIncluded ? "送料無料" : "送料別",
       attributes: parseVariantAttributes(v.attributes),
     });
