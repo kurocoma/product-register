@@ -23,7 +23,7 @@ Phase 1 が提供できれば、JAN入力解決・モール別コード出力・
 | データ | ファイル/シート | 件数 | 本DBで使う情報（正本） |
 |---|---|---:|---|
 | NE 商品マスタ | `syohin_basic*.csv` | 773 | 単品の **売価(baika_tnk)**・税率・在庫 |
-| NE セット商品マスタ | `set_syohin*.csv` | 9,902セット/99,855行 | **セット構成(set↔component↔数量)**・セット**売価(set_baika_tnk)**・税率 |
+| NE セット商品マスタ | `set_syohin*.csv` | **約1,457セット/1,662構成行**(物理99,857行=説明文の改行で1論理レコードが複数行に跨る) | **セット構成(set↔component↔数量)**・セット**売価(set_baika_tnk)**・税率 |
 | NE 紐づけ表 | `himoduke*.csv` | 1,193 | **在庫連携フラグ(する/しない, 全件)・代表商品コード(37件)**。※モール列は楽天=全空/Yahoo118・Amazon81はJAN様の値で**管理番号ではない**→モールコード源には使わない |
 | Excel 商品マスタ | `商品管理シート.xlsm[商品マスタ]` | 816 | **JANコード**(NEコードで結合)・仕入価・カテゴリ・仕入先 |
 | Excel 終売品マスタ | `[終売品マスタ]` | 380 | **終売フラグ**(is_discontinued) |
@@ -116,7 +116,7 @@ runtime=nodejs。各APIは `{ ok, inserted, updated, skipped, unmatched, message
 
 ### 4.4 パース・正規化
 - 共通CSVパーサ（クォート有無・CP932/UTF-8・BOM・空行に耐性）。
-- **NEセットマスタは未クォート（130+列）で商品名(col3)にカンマが入りうる**ため、汎用CSV分割に頼らず**列位置＋フィールド数許容**でパースする：先頭の `set_syohin_code`(col1)・`daihyo_syohin_code`(col2) は名より前で安全、`set_baika_tnk`(col4)以降は末尾からの相対位置で取得。さらに `set_syohin_code`(col1)/`syohin_code`(col6) がコード書式（`/^[A-Za-z0-9_-]+$/`）に合致するか検証し、外れる行はスキップしてカウント報告。（商品マスタ・himodukeはクォート済みで安全。）
+- **NEセットマスタは RFC形式のクォート済みCSV（142列）で、後方の説明文列(setumei/keyword等)に改行・カンマ・エスケープ`""`を含み、1論理レコードが複数物理行に跨る**（物理99,857行→論理約1,663レコード）。**papaparse で論理レコード化**し、欲しい先頭8列だけを index で取得する：`[0]=set_syohin_code, [1]=daihyo, [2]=set_syohin_name, [3]=set_baika_tnk, [4]=tax_rate, [5]=syohin_code, [6]=suryo, [7]=jan_code`。先頭列は実データ上クリーン（カンマ/改行/クォートなし）。`[0]`と`[5]`がコード書式（`/^[A-Za-z0-9_-]+$/`）・`[6]`が整数か検証し、外れる残骸行はスキップしてカウント報告。（商品マスタ・himodukeもクォート済みで papaparse で安全。）
 - 文字コード：取込時に UTF-8 へ正規化（CP932入力を許容）。
 - 全角コード/前後空白の trim。
 
@@ -155,7 +155,7 @@ runtime=nodejs。各APIは `{ ok, inserted, updated, skipped, unmatched, message
 ## 9. 非機能
 
 - **RLS**: 全テーブル user_id 一致のみ（既存migrations/rls_policiesに追加）。
-- **パフォーマンス**: ne_set_composition `(user_id, component_ne_code)` index で逆引きO(log n)。99,855行でも問題なし。
+- **パフォーマンス**: ne_set_composition `(user_id, component_ne_code)` index で逆引きO(log n)。構成行は約1,662行で軽量。
 - **マイグレーション**: `webui/supabase/migrations/` に新規SQL（3テーブル＋index＋RLS）。
 - **将来の自動DL**: 取込APIはCSV受けなので、NE/Excel自動DLツールが同じエンドポイントへPOSTするだけで連携可能（本Phaseでツール自体は作らない）。
 - **Excel→CSV変換**: 一時的に openpyxl スクリプト（`tools/excel_to_csv.py`）で対象シートをCSV化。将来は自動DLツールに内包。

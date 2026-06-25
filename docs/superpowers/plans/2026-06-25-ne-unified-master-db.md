@@ -181,9 +181,9 @@ git commit -m "feat(ne-master): CSVバイト列のUTF-8/Shift-JIS自動デコー
 - Create: `webui/lib/ne-master/types.ts`, `webui/lib/ne-master/parse.ts`
 - Test: `webui/lib/ne-master/parse.test.ts`
 
-各ソースの列（0-indexed、spec §2/§5 準拠）:
+各ソースの列（0-indexed、spec §2/§5 準拠）。**全ソース papaparse でパースする**（クォート/改行/エスケープ対応）:
 - NE商品マスタ(クォート): `syohin_code,syohin_name,baika_tnk,tax_rate,zaiko_su`
-- NEセット(未クォート130+列): `set_syohin_code(0),daihyo_syohin_code(1),set_syohin_name(2),set_baika_tnk(3),tax_rate(4),syohin_code(5),suryo(6),jan_code(7)`
+- **NEセット(RFCクォート済み142列・説明文に改行/カンマ→1論理レコードが複数物理行に跨る・物理99,857行→論理約1,663)**: papaparseで論理レコード化し**先頭8列をindex取得** `[0]=set_syohin_code,[1]=daihyo,[2]=set_name,[3]=set_baika_tnk,[4]=tax_rate,[5]=syohin_code,[6]=suryo,[7]=jan_code`。`[0]`/`[5]`がコード書式・`[6]`が整数の行のみ採用（残骸行はskip）。**※line.split(',')やレコードを物理行と仮定する実装は禁止（壊れる）**
 - NE himoduke(クォート): `商品コード(0),代表商品コード(1),取込元(2),商品名(3),在庫連携(4),...モール列`
 - Excel商品マスタ(CSV化): `仕入先,JANコード,NEコード,仕入先CD,商品名,仕入れ価格,税率,カテゴリ,備品フラグ`
 - Excel終売(CSV化): 同上(`NEコード` 列を使う)
@@ -216,11 +216,13 @@ describe("parse", () => {
     expect(rows).toEqual([{ ne_code: "a008-4032-1", name: "青切り", selling_price: 2191, tax_rate: 8 }]);
   });
 
-  it("NEセット(未クォート・名にカンマ・列位置パース・コード書式検証)", () => {
-    // 名にカンマ → 列位置パースで吸収。構成syohin_code が書式外の行はスキップ。
-    const header = "set_syohin_code,daihyo_syohin_code,set_syohin_name,set_baika_tnk,tax_rate,syohin_code,suryo,jan_code\n";
-    const ok = "a008-4032-3,,青切り,3本,セット,6286,8,a008-4032-1,3,\n"; // ←名に「,」入り(3本,セット)
-    const rows = parseNeSet(header + ok);
+  it("NEセット(RFCクォート・説明文が複数行に跨る・先頭8列をindex取得・残骸行skip)", () => {
+    // 実データ同様: 先頭列はクリーン、後方の説明文列が引用符内に改行・カンマを含み複数物理行に跨る。
+    // papaparse が論理レコード化する前提。
+    const header = "set_syohin_code,daihyo_syohin_code,set_syohin_name,set_baika_tnk,tax_rate,syohin_code,suryo,jan_code,setumei1\n";
+    const rec = 'a008-4032-3,,青切りシークヮーサー500ml,6286,8,a008-4032-1,3,4582218324032,"説明文1行目,カンマ入り\n2行目\n3行目"\n';
+    const rows = parseNeSet(header + rec);
+    expect(rows).toHaveLength(1); // 複数物理行でも1論理レコード
     expect(rows[0]).toMatchObject({ set_ne_code: "a008-4032-3", component_ne_code: "a008-4032-1", suryo: 3, set_price: 6286 });
   });
 
@@ -247,14 +249,13 @@ describe("parse", () => {
 
 - [ ] **Step 4: 実装（parse.ts）**
 
-要点:
-- クォート系（商品マスタ/himoduke/Excel各CSV）は `Papa.parse(text, { skipEmptyLines: true })` の `data: string[][]` を使い、ヘッダ行を捨てて列インデックスで取り出す。`num(s)` ヘルパで整数化（空/NaN→null）。
-- **NEセットは papaparse を使わず列位置パース**：各行を「先頭から `set_syohin_code,daihyo,` の2列」「末尾は不要」「`set_baika_tnk(3),tax_rate(4),syohin_code(5),suryo(6),jan_code(7)` を取りたいが名(col2)にカンマが入ると右へずれる」。
-  - 方針: 1行を `,` 分割し、**右側の固定構造**を利用。`syohin_code` は「コード書式 `/^[A-Za-z0-9_-]+$/`」かつ「直後(`suryo`)が数値」になる位置を col2 の後ろから探索する単純実装でよい。MVPは「`fields = line.split(',')`、`set_ne_code=fields[0]`, `daihyo=fields[1]`、残りの中から *最初に現れる『コード書式の値 かつ 次が整数』* を `(syohin_code, suryo)` とし、その直前までを名前(再結合)、名前の次を `set_baika_tnk`,その次 `tax_rate`」。
-  - `syohin_code` が書式外/見つからない行はスキップして `skipped++`。
+要点（**全ソース papaparse で `data: string[][]` を得て、ヘッダ行を捨て列indexで取り出す**。`num(s)`で整数化＝空/NaN→null）:
+- `Papa.parse(text, { skipEmptyLines: true })`。これでクォート/エスケープ`""`/引用符内改行（NEセットの説明文）が**論理レコード化**される。
+- **NEセット**: 各論理レコードの**先頭8列**を index で取得（`r[0]..r[7]`）。`r[0]`/`r[5]` が `/^[A-Za-z0-9_-]+$/`・`r[6]` が `/^[0-9]+$/` の行のみ採用、外れる残骸行は `skipped++`。**line.split(',')や物理行=レコードと仮定する実装は禁止**（説明文の改行で破綻する）。
 - 数量・価格・税率は整数化。
+- `parseExcelMall(csv, mall)`：楽天は商品番号列(index1)=ne_code、Yahoo/amazonはne_code列なしのため `ne_code=""`(後段build/repositoryでJAN+数量解決)。
 
-（完全な実装はテストを緑にする最小で書く。`parseExcelMall(csv, mall)`：楽天は商品番号列=ne_code、Yahoo/amazonはne_code列なしのため `ne_code=""`(後段build/repositoryでJAN+数量解決)。）
+（完全な実装はテストを緑にする最小で書く。）
 
 - [ ] **Step 5: 通過を確認** — Run: `npx vitest run lib/ne-master/parse.test.ts` → PASS
 
@@ -274,6 +275,7 @@ git commit -m "feat(ne-master): ソース別CSVパーサ(NE3種+Excel各種, セ
 - Test: `webui/lib/ne-master/build.test.ts`
 
 各ソースの生レコード → テーブル投入レコードへ変換する純粋関数群。DBに触れない（マージはrepository）。
+**`sources` 配列の正規トークン（統一）**: `ne_single` / `ne_set` / `excel_master` / `excel_discon` / `himoduke`。（path の source id `ne-syohin` 等とは別物。ドリフト防止のためこの5語に固定）
 
 - [ ] **Step 1: 失敗するテスト** — 主な関数:
   - `buildItemFromNeSyohin(rows)` → `ItemMasterPatch[]`（ne_code, selling_price, tax_rate, is_set:false, source:'ne_single'）
@@ -422,6 +424,7 @@ git commit -m "chore(ne-master): Excel商品管理シート→CSV変換スクリ
   - `a008-4032-3` が is_set かつ `ne_set_composition` で component=`a008-4032-1`, suryo=3
   - 逆引き：`ne_set_composition WHERE component_ne_code='a008-4032-1'` が期待セット群
   - 楽天mall_code `aogiri-sh2`→`a008-4032-3`
+  - **少なくとも1つのfixtCSVは Shift-JIS(CP932) で用意**し、decode経路を実機で通す（NEマスタは実際にCP932）。
   - 後始末：当該user_idのテスト行を全削除。
 - [ ] **Step 2: 実行** — Run: `cd webui && npx tsx tests/e2e_ne_master_import.mjs`（dev server起動前提）→ 全✅
 - [ ] **Step 3: Commit**
