@@ -156,6 +156,8 @@ export function buildYahooUpdateParams(
     params[o.param] = v;
     // 商品説明(caption)は register 同様 SP用フリースペースとも同値にする（PC/SP不整合を防ぐ）。
     if (c.field === "description_pc") params.sp_additional = v;
+    // 通常購入販売価格(price)を変えたら表示価格(original_price)も同値にする（二重価格の旧値残りを防ぐ）。
+    if (c.field === "selling_price") params.original_price = v;
   }
   return { params, advanced, skipped };
 }

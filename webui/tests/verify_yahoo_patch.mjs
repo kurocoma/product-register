@@ -49,6 +49,7 @@ const { params, advanced, skipped } = buildYahooUpdateParams(g0.raw, diff, edite
 check("advanced設定なし", advanced.length === 0, advanced.join(","));
 check("skippedなし", skipped.length === 0, skipped.join(","));
 check("price上書き=2480", params.price === "2480", params.price);
+check("表示価格(original_price)も2480に同期", params.original_price === "2480", params.original_price);
 check("headlineを土台から復元して同梱", params.headline === "初期見出し", params.headline);
 check("captionを土台から復元して同梱", params.caption === "<p>初期キャプ</p>", params.caption);
 check("display=0を復元(非公開維持)", params.display === "0", params.display);

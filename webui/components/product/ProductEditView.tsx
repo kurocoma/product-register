@@ -72,11 +72,12 @@ export function ProductEditView({
           <ProductForm defaultValues={initial} onChange={setData} />
         </div>
         <div className="flex-1 overflow-y-auto p-4 bg-slate-50 space-y-3">
-          <PreviewTabs product={data} peers={peers ?? []} />
+          {/* 反映系（画像アップ・モール登録・取込編集・CSV）はプレビューの上に置く（プレビューが長く下まで届きにくいため） */}
           <ImageUploadPanel productId={currentId} />
           <RegisterPanel productId={currentId} />
           <MallEditPanel productId={currentId} />
           <CsvDownloadPanel productId={currentId} />
+          <PreviewTabs product={data} peers={peers ?? []} />
         </div>
       </div>
     </div>
