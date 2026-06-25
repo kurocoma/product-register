@@ -120,7 +120,6 @@ export function RelatedImportSearch() {
             </thead>
             <tbody>
               {sets.map((s) => {
-                const malls = (["rakuten", "yahoo"] as Mall[]).filter((m) => s.mall_codes[m]);
                 return (
                   <tr key={s.set_ne_code} className="border-t border-slate-100 align-top">
                     <td className="px-2 py-2 font-mono">{s.set_ne_code}</td>
@@ -132,10 +131,10 @@ export function RelatedImportSearch() {
                       ))}
                     </td>
                     <td className="px-2 py-2 space-y-1">
-                      {malls.length === 0 && (
-                        <span className="text-slate-400">{s.missing_link ? "紐づけ漏れ（楽天/Yahooコード無し）" : "—"}</span>
-                      )}
-                      {malls.map((m) => {
+                      {(["rakuten", "yahoo"] as Mall[]).map((m) => {
+                        // モール別コードがあればそれ、無ければ NEコード(=システム連携用SKU番号)を取込コードに使う
+                        const mallCode = s.mall_codes[m];
+                        const code = mallCode || s.set_ne_code;
                         const key = `${s.set_ne_code}:${m}`;
                         const d = done[key];
                         if (d) {
@@ -150,12 +149,13 @@ export function RelatedImportSearch() {
                         return (
                           <div key={m}>
                             <button
-                              onClick={() => importFromMall(m, s.mall_codes[m], key)}
+                              onClick={() => importFromMall(m, code, key)}
                               disabled={importing === key}
                               className="rounded border border-blue-300 text-blue-700 px-2 py-1 hover:bg-blue-50 disabled:opacity-50"
                             >
                               {importing === key ? "取込中…" : `${MALL_LABEL[m]}から取込`}
-                              <span className="ml-1 text-slate-400 font-mono">{s.mall_codes[m]}</span>
+                              <span className="ml-1 text-slate-400 font-mono">{code}</span>
+                              {!mallCode && <span className="ml-1 text-amber-600">(NEコード試行)</span>}
                             </button>
                           </div>
                         );

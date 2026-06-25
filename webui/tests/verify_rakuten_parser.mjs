@@ -61,6 +61,18 @@ check("attribute item/value(ジャンル必須属性を保持)", parsed.attribut
   check("offline: 名前/値が空の属性は除外", mock.attributes?.length === 2, `${mock.attributes?.length}件`);
 }
 
+// オフライン: 多SKU商品で merchantSku 指定→一致variantを選ぶ(SKU検索取込の別SKU誤取込を防ぐ)。
+{
+  const json = { variants: {
+    VK1: { merchantDefinedSkuId: "ne-a", standardPrice: "100", articleNumber: { value: "4955028002542" } },
+    VK2: { merchantDefinedSkuId: "ne-b", standardPrice: "200", articleNumber: { value: "4902102140133" } },
+  } };
+  const def = parseRakutenItem(json); // 指定なし=先頭
+  check("offline: 指定なしは先頭variant", def.ne_code === "ne-a" && def.rakuten_variant_id === "VK1", `${def.ne_code}/${def.rakuten_variant_id}`);
+  const sel = parseRakutenItem(json, { merchantSku: "ne-b" });
+  check("offline: merchantSku一致variantを選択(ne_code/key/価格)", sel.ne_code === "ne-b" && sel.rakuten_variant_id === "VK2" && sel.selling_price === 200, `${sel.ne_code}/${sel.rakuten_variant_id}/${sel.selling_price}`);
+}
+
 await sleep(800);
 const del = await deleteItem(cred, MN);
 check("後始末 delete", del.ok, `status=${del.status}`);

@@ -16,6 +16,7 @@ function toRakutenImageUrl(img: { type?: unknown; location?: unknown }): string 
  * 構造は実機 items.get で確認済み（docs/楽天/items.get.txt / 03-商品取得検索）。 */
 export function parseRakutenItem(
   json: Record<string, unknown>,
+  opts?: { merchantSku?: string },
 ): Partial<ProductInput> & { _variantId?: string } {
   const out: Partial<ProductInput> & { _variantId?: string } = {};
 
@@ -45,18 +46,27 @@ export function parseRakutenItem(
     }
   }
 
-  // 先頭 variant（単一SKU前提）から SKU管理番号・価格・JAN を取り出す。
+  // 対象 variant から SKU管理番号・価格・JAN を取り出す。
+  // 多SKU商品(1商品ページに複数SKU)を merchantDefinedSkuId(=NEコード)指定で取込む場合は、
+  // 先頭でなく一致する variant を選ぶ（SKU検索取込で別SKUを誤取込しないため）。
   const variants = json.variants as Record<string, Record<string, unknown>> | undefined;
   if (variants) {
-    const firstId = Object.keys(variants)[0];
-    if (firstId) {
-      out._variantId = firstId;
+    let targetId = Object.keys(variants)[0];
+    if (opts?.merchantSku) {
+      const found = Object.keys(variants).find((k) => {
+        const ms = variants[k]?.merchantDefinedSkuId;
+        return typeof ms === "string" && ms.trim() === opts.merchantSku;
+      });
+      if (found) targetId = found;
+    }
+    if (targetId) {
+      out._variantId = targetId;
       // variant キー(SKU管理番号)を保持。upsert/patch の variants.{key} に使う実キー。
-      out.rakuten_variant_id = firstId;
-      const v = variants[firstId];
+      out.rakuten_variant_id = targetId;
+      const v = variants[targetId];
       // NEコード = システム連携用SKU番号(merchantDefinedSkuId)を優先。無ければ variant キー(SKU管理番号)。
       const merchantSku = typeof v.merchantDefinedSkuId === "string" ? v.merchantDefinedSkuId.trim() : "";
-      out.ne_code = merchantSku || firstId;
+      out.ne_code = merchantSku || targetId;
       if (typeof v.standardPrice === "string") out.selling_price = Number(v.standardPrice);
       const art = v.articleNumber as { value?: string } | undefined;
       if (art && typeof art.value === "string") out.jan_code = art.value;

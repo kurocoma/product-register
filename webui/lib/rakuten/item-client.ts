@@ -95,6 +95,35 @@ export async function getItem(
   return { exists: res.status === 200, status: res.status, json, raw };
 }
 
+/** items.search でシステム連携用SKU番号(merchantDefinedSkuId)から商品管理番号を引き当てる。
+ * items.search は部分一致のため、結果のうち merchantDefinedSkuId が完全一致する variant を持つ商品の
+ * manageNumber を返す。見つからなければ null。（管理番号≠NEコードの商品を NEコードで取込むため。
+ * ※検索インデックス反映は最大24h遅延あり＝直近登録は引けないことがある。） */
+export async function searchManageNumberBySku(
+  cred: RakutenCredentials,
+  sku: string,
+): Promise<string | null> {
+  const res = await fetch(`${BASE}/items/search?merchantDefinedSkuId=${encodeURIComponent(sku)}&hits=100`, {
+    headers: { Authorization: esaAuthHeader(cred.serviceSecret, cred.licenseKey) },
+  });
+  if (res.status !== 200) return null;
+  let json: { results?: { item?: { manageNumber?: string; variants?: Record<string, { merchantDefinedSkuId?: string }> } }[] };
+  try {
+    json = JSON.parse(await res.text());
+  } catch {
+    return null;
+  }
+  for (const r of json.results ?? []) {
+    const variants = r.item?.variants;
+    if (variants) {
+      for (const v of Object.values(variants)) {
+        if (v?.merchantDefinedSkuId === sku && r.item?.manageNumber) return r.item.manageNumber;
+      }
+    }
+  }
+  return null;
+}
+
 /** items.delete（商品削除、テスト後始末用）。 */
 export async function deleteItem(
   cred: RakutenCredentials,

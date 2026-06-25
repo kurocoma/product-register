@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { upsertProduct } from "@/lib/product/repository";
 import type { ProductInput } from "@/lib/product/schema";
 import { getRakutenCredentialsFromEnv } from "@/lib/rakuten/credentials";
-import { getItem as getRakutenItem } from "@/lib/rakuten/item-client";
+import { getItem as getRakutenItem, searchManageNumberBySku } from "@/lib/rakuten/item-client";
 import { parseRakutenItem } from "@/lib/converters/rakuten-item-parser";
 import { getYahooConfig, getYahooAccessToken } from "@/lib/yahoo/auth";
 import { getItem as getYahooItem } from "@/lib/yahoo/item-client";
@@ -35,14 +35,25 @@ export async function POST(req: Request, { params }: { params: Promise<{ mall: s
 
   // 1) モールから getItem → editable subset へパース
   let parsed: Partial<ProductInput>;
+  let resolvedCode = code; // 楽天は SKU検索で実管理番号に解決することがある（rakuten_manage_number に使う）
   if (mall === "rakuten") {
     const cred = getRakutenCredentialsFromEnv();
     if (!cred) return NextResponse.json({ ok: false, error: "楽天 ESA 認証情報が未設定です" }, { status: 500 });
-    const got = await getRakutenItem(cred, code);
+    let got = await getRakutenItem(cred, code);
+    let targetSku: string | undefined; // SKU検索で解決した場合、取込むべき variant の merchantDefinedSkuId(=入力code)
     if (!got.exists || !got.json) {
-      return NextResponse.json({ ok: false, error: `楽天に管理番号「${code}」の商品が見つかりません` }, { status: 404 });
+      // フォールバック: 入力が管理番号でなくシステム連携用SKU番号(=NEコード)の場合、検索で管理番号を引き当てる
+      const mn = await searchManageNumberBySku(cred, code);
+      if (mn) {
+        got = await getRakutenItem(cred, mn);
+        resolvedCode = mn;
+        targetSku = code; // 多SKU商品では、検索した SKU の variant を選んで parse する
+      }
     }
-    const p = parseRakutenItem(got.json);
+    if (!got.exists || !got.json) {
+      return NextResponse.json({ ok: false, error: `楽天に「${code}」の商品が見つかりません（管理番号・システム連携用SKU番号いずれも該当なし。検索反映は最大24h遅延）` }, { status: 404 });
+    }
+    const p = parseRakutenItem(got.json, targetSku ? { merchantSku: targetSku } : undefined);
     delete (p as { _variantId?: string })._variantId;
     parsed = p;
   } else {
@@ -65,7 +76,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ mall: s
   }
 
   // 2) 完全な ProductInput を構築（識別子整合・JAN13桁を担保。失敗時は手動作成を促す）
-  const built = buildImportedProduct(mall, code, parsed);
+  //    楽天で SKU検索により管理番号を解決した場合は、解決後の管理番号を rakuten_manage_number に使う。
+  const built = buildImportedProduct(mall, resolvedCode, parsed);
   if (!built.ok) return NextResponse.json({ ok: false, error: built.error }, { status: 422 });
 
   // 3) 既存 NEコード照合（あれば作成せず既存を開かせる）
