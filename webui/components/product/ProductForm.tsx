@@ -66,6 +66,9 @@ export function ProductForm({
         <AccordionItem value="basic" title="基本情報">
           <BasicInfoSection />
         </AccordionItem>
+        <AccordionItem value="variants" title="SKU一覧 (多SKU価格・配送)">
+          <VariantsSection />
+        </AccordionItem>
         <AccordionItem value="shipping" title="配送・カテゴリ">
           <ShippingSection />
         </AccordionItem>
@@ -147,6 +150,81 @@ function BasicInfoSection() {
       </div>
       <TextField name="cost_price" label="原価" type="number" />
       <TextField name="selling_price" label="販売価格" type="number" />
+    </div>
+  );
+}
+
+/** SKU一覧: 1商品ページ(楽天 商品管理番号)配下の複数SKUを、価格・配送ごとに編集する表。
+ * variants[] を react-hook-form の field array で編集。空のときは単品(上の販売価格/送料)扱い。
+ * 配送詳細(送料区分/配送方法セット/個別送料/置き配)はSKUごとに楽天 variant.shipping へ反映する(#3)。 */
+function VariantsSection() {
+  const { control, register } = useFormContext<FormValues>();
+  const { fields, append, remove } = useFieldArray({ control, name: "variants" });
+  const reg = (idx: number, field: string, opts?: Parameters<typeof register>[1]) =>
+    register(`variants.${idx}.${field}` as FieldPath<FormValues>, opts);
+  const cell = "rounded border border-slate-300 px-1 py-1";
+  const headers = [
+    "ラベル", "SKU管理番号", "NEコード", "JAN", "販売価格", "税率", "数量",
+    "送料", "送料区分1", "送料区分2", "配送方法セット", "個別送料", "置き配", "",
+  ];
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-slate-500">
+        1商品ページ(楽天 商品管理番号)配下の複数SKUを、SKUごとに価格・配送設定します（単品・セット・本数違い等）。
+        空のときは上の「販売価格」「送料区分」を使う単品扱いです。楽天から多SKU商品を取込むと自動で入ります。
+      </p>
+      {fields.length === 0 ? (
+        <p className="text-sm text-slate-400">SKUなし（単品）。「+ SKU追加」または楽天取込で追加できます。</p>
+      ) : (
+        <div className="overflow-x-auto border border-slate-200 rounded">
+          <table className="text-xs whitespace-nowrap">
+            <thead className="bg-slate-100 text-left">
+              <tr>{headers.map((h, i) => <th key={i} className="px-1.5 py-1.5 font-medium">{h}</th>)}</tr>
+            </thead>
+            <tbody>
+              {fields.map((f, idx) => (
+                <tr key={f.id} className="border-t border-slate-100">
+                  <td className="px-1"><input {...reg(idx, "variation_value")} className={`${cell} w-20`} /></td>
+                  <td className="px-1"><input {...reg(idx, "sku_manage_number")} className={`${cell} w-28 font-mono`} /></td>
+                  <td className="px-1"><input {...reg(idx, "ne_code")} className={`${cell} w-28 font-mono`} /></td>
+                  <td className="px-1"><input {...reg(idx, "jan_code")} className={`${cell} w-32 font-mono`} /></td>
+                  <td className="px-1"><input type="number" {...reg(idx, "selling_price", { valueAsNumber: true })} className={`${cell} w-20 text-right`} /></td>
+                  <td className="px-1">
+                    <select {...reg(idx, "tax_rate", { valueAsNumber: true })} className={`${cell} bg-white`}>
+                      <option value={8}>8%</option><option value={10}>10%</option>
+                    </select>
+                  </td>
+                  <td className="px-1"><input type="number" {...reg(idx, "quantity", { valueAsNumber: true })} className={`${cell} w-14 text-right`} /></td>
+                  <td className="px-1">
+                    <select {...reg(idx, "shipping_type")} className={`${cell} bg-white`}>
+                      <option value="送料別">送料別</option><option value="送料無料">送料無料</option>
+                    </select>
+                  </td>
+                  <td className="px-1"><input {...reg(idx, "postage_segment_1")} className={`${cell} w-14`} /></td>
+                  <td className="px-1"><input {...reg(idx, "postage_segment_2")} className={`${cell} w-14`} /></td>
+                  <td className="px-1"><input {...reg(idx, "shipping_method_group")} className={`${cell} w-24`} /></td>
+                  <td className="px-1"><input {...reg(idx, "individual_shipping_fee")} className={`${cell} w-16`} /></td>
+                  <td className="px-1 text-center"><input type="checkbox" {...reg(idx, "okihai")} /></td>
+                  <td className="px-1"><button type="button" onClick={() => remove(idx)} className="text-red-600 hover:underline">削除</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <Button
+        type="button"
+        variant="outline"
+        onClick={() =>
+          append({
+            sku_manage_number: "", ne_code: "", jan_code: "", selling_price: 0, tax_rate: 10, quantity: 1,
+            variation_value: "", shipping_type: "送料別", postage_segment_1: "", postage_segment_2: "",
+            shipping_method_group: "", individual_shipping_fee: "", okihai: true, attributes: [],
+          })
+        }
+      >
+        + SKU追加
+      </Button>
     </div>
   );
 }
