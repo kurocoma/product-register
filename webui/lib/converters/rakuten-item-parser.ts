@@ -1,5 +1,21 @@
-import type { ProductInput } from "@/lib/product/schema";
+import { VariantSchema, type ProductInput, type Variant } from "@/lib/product/schema";
 import { DEFAULT_RAKUTEN_STORE } from "@/lib/rakuten/store";
+
+/** variants.{id}.attributes[] → アプリ属性配列。多値属性は先頭値を採用（必須属性は単一値）、名前/値が空の項目は除外。 */
+function parseVariantAttributes(
+  rawAttrs: unknown,
+): { item: string; value: string; unit: string; requirement: string }[] {
+  if (!Array.isArray(rawAttrs)) return [];
+  return rawAttrs
+    .map((a) => {
+      const at = (a ?? {}) as { name?: unknown; values?: unknown; unit?: unknown };
+      const item = typeof at.name === "string" ? at.name : "";
+      const values = Array.isArray(at.values) ? at.values.filter((x): x is string => typeof x === "string") : [];
+      const unit = typeof at.unit === "string" ? at.unit : "";
+      return { item, value: values[0] ?? "", unit, requirement: "" };
+    })
+    .filter((a) => a.item !== "" && a.value !== "");
+}
 
 /** items.get の images[].location("/画像パス")を公開URLへ変換する。
  * 既に http(s) 完全URLならそのまま。GOLD は gold ドメイン、CABINET は image ドメイン。 */
@@ -75,21 +91,35 @@ export function parseRakutenItem(
 
       // 商品属性 variants.{id}.attributes[] → product.attributes。
       // これを取り込まないと、ジャンル必須属性が欠落して再登録(upsert)が IE0418 で失敗する。
-      // 多値属性はアプリの属性モデル(1属性1値)に合わせ先頭値を採用する（必須属性は単一値）。
-      const rawAttrs = v.attributes;
-      if (Array.isArray(rawAttrs) && rawAttrs.length > 0) {
-        const attrs = rawAttrs
-          .map((a) => {
-            const at = (a ?? {}) as { name?: unknown; values?: unknown; unit?: unknown };
-            const item = typeof at.name === "string" ? at.name : "";
-            const values = Array.isArray(at.values) ? at.values.filter((x): x is string => typeof x === "string") : [];
-            const unit = typeof at.unit === "string" ? at.unit : "";
-            return { item, value: values[0] ?? "", unit, requirement: "" };
-          })
-          .filter((a) => a.item !== "" && a.value !== "");
-        if (attrs.length > 0) out.attributes = attrs;
-      }
+      const attrs = parseVariantAttributes(v.attributes);
+      if (attrs.length > 0) out.attributes = attrs;
     }
   }
   return out;
+}
+
+/** 楽天 items.get の全 variant を Variant[] へパースする（多SKU取込 P2）。
+ * 各SKUの SKU管理番号(variantキー)・NEコード(merchantDefinedSkuId)・JAN(articleNumber.value)・
+ * 標準価格・送料無料/別・属性を抽出。1商品ページの全SKUを variants[] に格納する用途。
+ * 配送詳細(送料区分/配送方法セット等)は P4 で拡張。 */
+export function parseRakutenVariants(json: Record<string, unknown>): Variant[] {
+  const variants = json.variants as Record<string, Record<string, unknown>> | undefined;
+  if (!variants) return [];
+  return Object.entries(variants).map(([key, v]) => {
+    const merchantSku = typeof v.merchantDefinedSkuId === "string" ? v.merchantDefinedSkuId.trim() : "";
+    const art = v.articleNumber as { value?: unknown } | undefined;
+    const janRaw = typeof art?.value === "string" ? art.value.trim() : "";
+    const price = Number(v.standardPrice);
+    const ship = v.shipping as { postageIncluded?: boolean } | undefined;
+    return VariantSchema.parse({
+      sku_manage_number: key,
+      ne_code: merchantSku || key,
+      jan_code: /^\d{13}$/.test(janRaw) ? janRaw : "",
+      selling_price: Number.isFinite(price) ? Math.round(price) : 0,
+      tax_rate: 10,
+      quantity: 1,
+      shipping_type: ship?.postageIncluded ? "送料無料" : "送料別",
+      attributes: parseVariantAttributes(v.attributes),
+    });
+  });
 }

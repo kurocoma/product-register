@@ -4,7 +4,7 @@ import { upsertProduct } from "@/lib/product/repository";
 import type { ProductInput } from "@/lib/product/schema";
 import { getRakutenCredentialsFromEnv } from "@/lib/rakuten/credentials";
 import { getItem as getRakutenItem, searchManageNumberBySku } from "@/lib/rakuten/item-client";
-import { parseRakutenItem } from "@/lib/converters/rakuten-item-parser";
+import { parseRakutenItem, parseRakutenVariants } from "@/lib/converters/rakuten-item-parser";
 import { getYahooConfig, getYahooAccessToken } from "@/lib/yahoo/auth";
 import { getItem as getYahooItem } from "@/lib/yahoo/item-client";
 import { parseYahooItem } from "@/lib/converters/yahoo-item-parser";
@@ -55,6 +55,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ mall: s
     }
     const p = parseRakutenItem(got.json, targetSku ? { merchantSku: targetSku } : undefined);
     delete (p as { _variantId?: string })._variantId;
+    // 多SKU(P2): 1商品ページ配下の全SKUを variants[] に取込む（編集画面でまとめて価格・配送改定するため）。
+    p.variants = parseRakutenVariants(got.json);
     parsed = p;
   } else {
     const cfg = getYahooConfig();
@@ -80,13 +82,10 @@ export async function POST(req: Request, { params }: { params: Promise<{ mall: s
   const built = buildImportedProduct(mall, resolvedCode, parsed);
   if (!built.ok) return NextResponse.json({ ok: false, error: built.error }, { status: 422 });
 
-  // 3) 既存 NEコード照合（あれば作成せず既存を開かせる）
-  const { data: existing } = await supabase
-    .from("products")
-    .select("id")
-    .eq("user_id", user.id)
-    .eq("ne_code", built.neCode)
-    .maybeSingle();
+  // 3) 既存照合（あれば作成せず既存を開かせる）
+  //    楽天は「1商品ページ=1商品(多SKU)」なので、まず商品管理番号(ページ)で照合する。
+  //    同ページの別SKUを取り込んでも同一商品を開き、ページの二重作成を防ぐ。次に NEコードで照合。
+  const existing = await findExistingProduct(supabase, user.id, mall, built.product.rakuten_manage_number, built.neCode);
   if (existing?.id) {
     return NextResponse.json({ ok: true, existed: true, productId: existing.id, neCode: built.neCode });
   }
@@ -99,12 +98,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ mall: s
     // 同一 NEコードの同時 POST 競合（check-then-insert の TOCTOU）で UNIQUE 制約に弾かれた場合、
     // 既に作成済みの商品が存在するはず。再照合して存在すれば既存パスと同じく existed:true で開かせる
     // （冪等性: 二重作成は DB 制約で防がれており、敗者リクエストを 500 で落とさない）。
-    const { data: raced } = await supabase
-      .from("products")
-      .select("id")
-      .eq("user_id", user.id)
-      .eq("ne_code", built.neCode)
-      .maybeSingle();
+    const raced = await findExistingProduct(supabase, user.id, mall, built.product.rakuten_manage_number, built.neCode);
     if (raced?.id) {
       return NextResponse.json({ ok: true, existed: true, productId: raced.id, neCode: built.neCode });
     }
@@ -114,4 +108,32 @@ export async function POST(req: Request, { params }: { params: Promise<{ mall: s
     );
   }
   return NextResponse.json({ ok: true, existed: false, productId: saved.id, neCode: built.neCode });
+}
+
+/** 既存商品の照合。楽天は商品管理番号(ページ)優先→NEコード。多SKUの同ページ二重作成を防ぐ。
+ * rakuten_manage_number は extra(JSON)なので extra->>rakuten_manage_number で絞る。
+ * 同ページに複数レコードが残る旧データもあり得るため limit(1)（maybeSingleは複数行で例外になる）。 */
+async function findExistingProduct(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  userId: string,
+  mall: string,
+  manageNumber: string,
+  neCode: string,
+): Promise<{ id: string } | null> {
+  if (mall === "rakuten" && manageNumber) {
+    const { data } = await supabase
+      .from("products")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("extra->>rakuten_manage_number", manageNumber)
+      .limit(1);
+    if (data && data.length) return data[0] as { id: string };
+  }
+  const { data } = await supabase
+    .from("products")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("ne_code", neCode)
+    .limit(1);
+  return data && data.length ? (data[0] as { id: string }) : null;
 }
