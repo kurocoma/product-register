@@ -13,6 +13,7 @@ import { CsvDownloadPanel } from "@/components/csv/CsvDownloadPanel";
 import { ImageUploadPanel } from "./ImageUploadPanel";
 import { RegisterPanel } from "./RegisterPanel";
 import { MallEditPanel } from "./MallEditPanel";
+import { MallRelatedImportPanel } from "./MallRelatedImportPanel";
 
 export function ProductEditView({
   initial,
@@ -76,6 +77,7 @@ export function ProductEditView({
           <ImageUploadPanel productId={currentId} />
           <RegisterPanel productId={currentId} />
           <MallEditPanel productId={currentId} />
+          <MallRelatedImportPanel neCode={currentId ? data.ne_code : undefined} />
           <CsvDownloadPanel productId={currentId} />
         </div>
       </div>
