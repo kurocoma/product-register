@@ -47,19 +47,26 @@ export async function mergeItemMaster(
     if (selErr) throw new Error(selErr.message);
     const exMap = new Map((existing ?? []).map((r) => [r.ne_code as string, r as Record<string, unknown>]));
 
+    // upsert行は全行で同一の列集合にする（PostgRESTがバッチ内で列を統合し、欠落列にNULLを入れて
+    // NOT NULL違反になるのを防ぐ）。文字列列は ''、数値列は null、bool列は false を既定にする。
+    const STR_COLS = ["jan_code", "name", "category", "supplier", "zaiko_renkei", "daihyo_code"] as const;
+    const NUM_COLS = ["selling_price", "tax_rate", "cost_price"] as const; // nullable
+    const BOOL_COLS = ["is_set", "is_discontinued"] as const;
     const rows = codes.map((ne) => {
       const ex = exMap.get(ne);
       const { patch, sources } = map.get(ne)!;
       const exSources = Array.isArray(ex?.sources) ? (ex!.sources as string[]) : [];
       if (ex) updated++; else inserted++;
-      return {
-        ...(ex ?? {}),
-        ...patch,
+      const row: Record<string, unknown> = {
         user_id: userId,
         ne_code: ne,
         sources: [...new Set([...exSources, ...sources])],
         updated_at: new Date().toISOString(),
-      } as Record<string, unknown>;
+      };
+      for (const k of STR_COLS) row[k] = patch[k] !== undefined ? patch[k] : (ex?.[k] ?? "");
+      for (const k of NUM_COLS) row[k] = patch[k] !== undefined ? patch[k] : (ex?.[k] ?? null);
+      for (const k of BOOL_COLS) row[k] = patch[k] !== undefined ? patch[k] : (ex?.[k] ?? false);
+      return row;
     });
     const { error } = await supabase.from("ne_item_master").upsert(rows, { onConflict: "user_id,ne_code" });
     if (error) throw new Error(error.message);
