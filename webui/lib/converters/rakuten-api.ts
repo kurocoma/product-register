@@ -1,7 +1,36 @@
-import type { ProductInput } from "@/lib/product/schema";
+import { productVariants, type ProductInput, type Variant } from "@/lib/product/schema";
 import { baseCodeOf } from "./rakuten";
 import { buildCabinetFileName } from "./cabinet-path";
 import { buildRakutenImgList } from "./image-url";
+
+/** Variant → 楽天 variant.shipping。送料無料は postageIncluded のみ。送料別は
+ * 個別送料(fee) XOR 送料区分(postageSegment.local/overseas) を設定（排他、docs/楽天/04の制約）。
+ * 配送方法セット(shippingMethodGroup)は併用可。置き配(okihai)は ItemAPI に項目が無く反映対象外。 */
+function buildVariantShipping(v: Variant): Record<string, unknown> {
+  if (v.shipping_type === "送料無料") return { postageIncluded: true };
+  const shipping: Record<string, unknown> = { postageIncluded: false };
+  const fee = v.individual_shipping_fee?.trim();
+  if (fee) {
+    shipping.fee = fee; // 個別送料（送料区分とは排他）
+  } else {
+    const seg: Record<string, number> = {};
+    const s1 = Number(v.postage_segment_1);
+    const s2 = Number(v.postage_segment_2);
+    if (v.postage_segment_1?.trim() && Number.isFinite(s1)) seg.local = s1;
+    if (v.postage_segment_2?.trim() && Number.isFinite(s2)) seg.overseas = s2;
+    if (Object.keys(seg).length > 0) shipping.postageSegment = seg;
+  }
+  const grp = v.shipping_method_group?.trim();
+  if (grp) shipping.shippingMethodGroup = grp;
+  return shipping;
+}
+
+/** Variant の属性 → items.upsert の variants.{}.attributes[]（値が入っているものだけ、unit任意）。 */
+function buildVariantAttributes(v: Variant): { name: string; values: string[]; unit?: string }[] {
+  return (v.attributes || [])
+    .filter((a) => a.item && a.value)
+    .map((a) => (a.unit ? { name: a.item, values: [a.value], unit: a.unit } : { name: a.item, values: [a.value] }));
+}
 
 /** 楽天 variant キー(SKU管理番号 = variants.{key})。取込商品は実キー(rakuten_variant_id)を保持しており、
  * NEコード(merchantDefinedSkuId)と別物の外部作成商品でも正しいキーで upsert/patch する。
@@ -41,31 +70,30 @@ export type BuildUpsertOptions = {
   hideStock?: boolean;
 };
 
-/** ProductInput → items.upsert リクエストボディ（単一SKU通常商品）。
- * 注意: upsert は全置換。多SKUグループは将来対応（現状は1商品=1SKU）。在庫は InventoryAPI 別送（本体に含めない）。 */
+/** ProductInput → items.upsert リクエストボディ。
+ * 多SKU(variants[])は全SKUを variants{} に展開。単品(variants未設定)は productVariants() が
+ * フラットから1件合成するため従来と同一bodyになる（後方互換）。upsertは全置換。
+ * 在庫は InventoryAPI 別送（本体に含めない）。 */
 export function buildRakutenUpsertBody(p: ProductInput, opts: BuildUpsertOptions = {}): RakutenUpsertBody {
-  const variantId = rakutenVariantId(p);
   const imgList = buildRakutenImgList(baseCodeOf(p), p.image_count);
 
-  // articleNumber: 13桁JANがあれば value、無ければ店舗オリジナル(3)
-  const articleNumber = /^\d{13}$/.test(p.jan_code)
-    ? { value: p.jan_code }
-    : { exemptionReason: 3 };
-
-  // 商品属性 → variants.{id}.attributes[]（値が入っているものだけ）。
-  // ジャンル必須属性はここで満たす（「必須項目色付け」機能が product.attributes に項目/値/単位を保持）。
-  const attributes = (p.attributes || [])
-    .filter((a) => a.item && a.value)
-    .map((a) => (a.unit ? { name: a.item, values: [a.value], unit: a.unit } : { name: a.item, values: [a.value] }));
-
-  const variant: Record<string, unknown> = {
-    // システム連携用SKU番号 = NEコード。取込→編集→反映や再登録で NE連携番号を保持する。
-    merchantDefinedSkuId: p.ne_code,
-    standardPrice: String(p.selling_price),
-    articleNumber,
-    shipping: { postageIncluded: p.shipping_type === "送料無料" },
-  };
-  if (attributes.length > 0) variant.attributes = attributes;
+  // SKUごとに variants.{key} を組み立てる（key = SKU管理番号、無ければ NEコード）。
+  const variants: Record<string, unknown> = {};
+  for (const v of productVariants(p)) {
+    const key = v.sku_manage_number?.trim() || v.ne_code;
+    // articleNumber: 13桁JANがあれば value、無ければ店舗オリジナル(3)
+    const articleNumber = /^\d{13}$/.test(v.jan_code) ? { value: v.jan_code } : { exemptionReason: 3 };
+    const variant: Record<string, unknown> = {
+      // システム連携用SKU番号 = NEコード。取込→編集→反映や再登録で NE連携番号を保持する。
+      merchantDefinedSkuId: v.ne_code,
+      standardPrice: String(v.selling_price),
+      articleNumber,
+      shipping: buildVariantShipping(v),
+    };
+    const attributes = buildVariantAttributes(v);
+    if (attributes.length > 0) variant.attributes = attributes;
+    variants[key] = variant;
+  }
 
   const body: RakutenUpsertBody = {
     title: p.display_name,
@@ -75,7 +103,7 @@ export function buildRakutenUpsertBody(p: ProductInput, opts: BuildUpsertOptions
     salesDescription: imgList,
     images: buildImageLocations(p),
     payment: { taxIncluded: true, taxRate: String(p.tax_rate / 100) },
-    variants: { [variantId]: variant },
+    variants,
   };
   if (p.catch_copy_pc) body.tagline = p.catch_copy_pc;
   if (opts.hideItem) body.hideItem = true;
