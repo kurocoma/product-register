@@ -1,5 +1,34 @@
 import { z } from "zod";
 
+/** 商品属性(ジャンル必須属性等)の1項目。product共通・variant単位の双方で使う。 */
+export const AttributeSchema = z.object({
+  item: z.string().default(""),
+  value: z.string().default(""),
+  unit: z.string().default(""),
+  requirement: z.string().default(""), // 必須/いずれか必須/任意（UI強調用。CSV出力には影響しない）
+});
+
+/** SKU(variant)単位の項目。1商品ページ(楽天 商品管理番号)に複数SKUがぶら下がるケースで使う。
+ * 商品ページ共通(名前・説明・画像・カテゴリ)は ProductInput 側に残し、SKUごとに変わる
+ * 識別子・価格・配送をここに持つ。後方互換: variants 未設定なら productVariants() がフラットから1件合成。 */
+export const VariantSchema = z.object({
+  sku_manage_number: z.string().default(""), // 楽天 variant キー(SKU管理番号) = 旧 rakuten_variant_id
+  ne_code: z.string().default(""),           // 各SKUのNEコード(=システム連携用SKU番号 merchantDefinedSkuId)
+  jan_code: z.string().default(""),
+  selling_price: z.number().int().default(0),
+  tax_rate: z.union([z.literal(8), z.literal(10)]).default(10),
+  quantity: z.number().int().default(1),
+  variation_value: z.string().default(""),   // バリエーション項目選択肢ラベル(例 "1本"/"詰替セット")
+  // 配送(SKU別、#3)。楽天 variant.shipping へマッピングする。
+  shipping_type: z.string().default("送料別"),     // 送料無料/別 → postageIncluded
+  postage_segment_1: z.string().default(""),       // 送料区分1(postageSegment.local)
+  postage_segment_2: z.string().default(""),       // 送料区分2(postageSegment.overseas)
+  shipping_method_group: z.string().default(""),   // 配送方法セットID(shippingMethodGroup)
+  individual_shipping_fee: z.string().default(""), // 個別送料(shipping.fee)
+  okihai: z.boolean().default(true),               // 置き配 受付
+  attributes: z.array(AttributeSchema).default([]),
+});
+
 /** base スキーマ (派生フィールドなし、 react-hook-form の resolver 用) */
 export const ProductInputBaseSchema = z.object({
   // 基本情報
@@ -28,6 +57,10 @@ export const ProductInputBaseSchema = z.object({
   // 楽天 variant キー(SKU管理番号)。NEコード(=merchantDefinedSkuId)と別物の外部作成商品で、
   // upsert/patch の variants.{key} に使う実キーを保持する。空のとき ne_code を使う（後方互換）。
   rakuten_variant_id: z.string().default(""),
+
+  // 多SKU(variants[]): 1商品ページ(楽天 商品管理番号)配下の複数SKU。未設定(空配列)なら単品=従来動作。
+  // 消費側は productVariants() 経由で段階移行する(フラットから1件合成する後方互換あり)。
+  variants: z.array(VariantSchema).default([]),
 
   // 商品説明
   catch_copy_pc: z.string().default(""),
@@ -82,16 +115,7 @@ export const ProductInputBaseSchema = z.object({
 
   // 商品属性: 可変個数版（カテゴリIDからの自動補完で使用）。
   // 楽天ジャンルの推奨属性を item/value/unit の配列で保持する。空配列なら下記 1〜5 にフォールバック。
-  attributes: z
-    .array(
-      z.object({
-        item: z.string().default(""),
-        value: z.string().default(""),
-        unit: z.string().default(""),
-        requirement: z.string().default(""), // 必須/いずれか必須/任意（UI強調用。CSV出力には影響しない）
-      }),
-    )
-    .default([]),
+  attributes: z.array(AttributeSchema).default([]),
 
   // 商品属性 (1〜5) — 旧固定枠（後方互換。attributes が空のとき使われる）
   attribute_item_1: z.string().default(""),
@@ -120,6 +144,27 @@ export const ProductInputSchema = ProductInputBaseSchema.transform((p) => ({
 
 export type ProductInput = z.infer<typeof ProductInputSchema>;
 export type ProductInputBase = z.output<typeof ProductInputBaseSchema>;
+export type Variant = z.output<typeof VariantSchema>;
+
+/** 商品の SKU(variant) 一覧を統一的に取り出す。
+ * variants[] が1件以上あればそれを、無ければフラットフィールドから単一SKUを1件合成する（後方互換）。
+ * 全消費側(プレビュー/CSV/反映)はこのヘルパ経由で多SKU対応へ段階移行する。 */
+export function productVariants(p: ProductInput): Variant[] {
+  if (p.variants && p.variants.length > 0) return p.variants;
+  return [
+    VariantSchema.parse({
+      sku_manage_number: p.rakuten_variant_id || p.ne_code,
+      ne_code: p.ne_code,
+      jan_code: p.jan_code,
+      selling_price: p.selling_price,
+      tax_rate: p.tax_rate,
+      quantity: p.quantity,
+      variation_value: "",
+      shipping_type: p.shipping_type,
+      attributes: p.attributes ?? [],
+    }),
+  ];
+}
 
 export type ResolvedAttribute = { item: string; value: string; unit: string };
 
