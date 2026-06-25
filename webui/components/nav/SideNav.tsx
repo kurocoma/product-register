@@ -11,6 +11,7 @@ const items = [
   { href: "/csv", label: "CSV ダウンロード", icon: "📥" },
   { href: "/templates", label: "テンプレート管理", icon: "📋" },
   { href: "/masters", label: "マスタ取込", icon: "🗄" },
+  { href: "/masters/related", label: "関連商品抽出", icon: "🔎" },
   { href: "/history", label: "作業履歴", icon: "🕒" },
   { href: "/settings", label: "設定", icon: "⚙️" },
   { href: "/help", label: "ヘルプ", icon: "❓" },
