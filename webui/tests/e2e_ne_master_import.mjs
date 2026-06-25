@@ -30,7 +30,7 @@ async function post(cookie, source, fileBytes, fileName, query = "") {
 
 async function main() {
   const { data: list } = await admin.auth.admin.listUsers({ page: 1, perPage: 100 });
-  const user = list.users.find((u) => u.email === "kmzt.i-0001@kurocommerce.com");
+  const user = list.users.find((u) => u.email === "diag.probe.zzz@gmail.com");
   // 後始末（前回残骸）
   for (const t of ["ne_item_master", "ne_set_composition", "ne_mall_code"]) await admin.from(t).delete().eq("user_id", user.id);
 
@@ -53,9 +53,10 @@ async function main() {
   const excelMaster = "仕入先,JANコード,NEコード,仕入先CD,商品名,仕入れ価格,税率,カテゴリ,備品フラグ\n大宜味,4582218324032,a008-4032-1,,青切りシークヮーサー500ml,1500,8,飲料,\n";
   const r4 = await post(cookie, "excel-master", Buffer.from(excelMaster, "utf-8"), "em.csv");
   check("excel-master 取込", r4.status === 200 && r4.json.ok, JSON.stringify(r4.json).slice(0, 160));
-  const excelRakuten = "商品管理番号,商品番号,項目名,選択肢,JANコード,商品名,数量\naogiri-sh2,a008-4032-3,,,4582218324032,青切り,3\n";
+  // 同一ne_codeを2行(オプション行想定)→ (ne_code,mall)重複排除で upserted=1 になること(ON CONFLICT二重更新回避の回帰)
+  const excelRakuten = "商品管理番号,商品番号,項目名,選択肢,JANコード,商品名,数量\naogiri-sh2,a008-4032-3,色,赤,4582218324032,青切り,3\naogiri-sh2,a008-4032-3,色,青,4582218324032,青切り,3\n";
   const r5 = await post(cookie, "excel-mall", Buffer.from(excelRakuten, "utf-8"), "er.csv", "?mall=rakuten");
-  check("excel-mall(rakuten) 取込", r5.status === 200 && r5.json.ok && r5.json.upserted === 1, JSON.stringify(r5.json).slice(0, 160));
+  check("excel-mall(rakuten) 取込・重複ne_code排除でupserted=1", r5.status === 200 && r5.json.ok && r5.json.upserted === 1, JSON.stringify(r5.json).slice(0, 160));
 
   // 3) 検証
   const { data: item } = await admin.from("ne_item_master").select("*").eq("user_id", user.id).eq("ne_code", "a008-4032-1").maybeSingle();

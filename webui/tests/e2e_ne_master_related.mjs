@@ -29,7 +29,7 @@ const GOLDEN = ["4582469493006-4582469493402", "4582469493013-4582469493402", "I
 
 async function main() {
   const { data: list } = await admin.auth.admin.listUsers({ page: 1, perPage: 100 });
-  const user = list.users.find((u) => u.email === "kmzt.i-0001@kurocommerce.com");
+  const user = list.users.find((u) => u.email === "diag.probe.zzz@gmail.com");
   for (const t of ["ne_item_master", "ne_set_composition", "ne_mall_code"]) await admin.from(t).delete().eq("user_id", user.id);
 
   const jar = new Map();
