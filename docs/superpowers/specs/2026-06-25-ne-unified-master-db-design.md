@@ -24,7 +24,7 @@ Phase 1 が提供できれば、JAN入力解決・モール別コード出力・
 |---|---|---:|---|
 | NE 商品マスタ | `syohin_basic*.csv` | 773 | 単品の **売価(baika_tnk)**・税率・在庫 |
 | NE セット商品マスタ | `set_syohin*.csv` | 9,902セット/99,855行 | **セット構成(set↔component↔数量)**・セット**売価(set_baika_tnk)**・税率 |
-| NE 紐づけ表 | `himoduke*.csv` | 1,193 | **在庫連携フラグ・代表商品コード**・モールコード補完 |
+| NE 紐づけ表 | `himoduke*.csv` | 1,193 | **在庫連携フラグ(する/しない, 全件)・代表商品コード(37件)**。※モール列は楽天=全空/Yahoo118・Amazon81はJAN様の値で**管理番号ではない**→モールコード源には使わない |
 | Excel 商品マスタ | `商品管理シート.xlsm[商品マスタ]` | 816 | **JANコード**(NEコードで結合)・仕入価・カテゴリ・仕入先 |
 | Excel 終売品マスタ | `[終売品マスタ]` | 380 | **終売フラグ**(is_discontinued) |
 | Excel 商品コード一覧楽天 | `[商品コード一覧楽天]` | 3,043 | **楽天 商品管理番号**(商品番号=ne_code で結合, セットも網羅) |
@@ -35,7 +35,8 @@ Phase 1 が提供できれば、JAN入力解決・モール別コード出力・
 **正本の割り当て（合意済み）**:
 - JAN = Excel商品マスタ（NE商品マスタにJAN列なし）
 - 売価(selling) = NEマスタ（単品=baika_tnk / セット=set_baika_tnk）。※Excelの「仕入れ価格」は**原価**であり売価ではない
-- モール別コード = **Excelモール一覧（主・セットも網羅）** ＋ himoduke（補完・在庫連携・代表）
+- モール別コード = **Excelモール一覧（正本・セットも網羅）**。himodukeはモールコード源に**使わない**（楽天列は全空、Yahoo/Amazonは管理番号でなくJAN様）
+- 在庫連携(する/しない)・代表商品コード = himoduke（商品属性として `ne_item_master` に保持）
 - セット構成 = NEセットマスタ
 
 **取込形式**: すべて**CSV**で取込む。NE3マスタは既にCSV。Excelシートは「xlsx→CSV変換ヘルパ（openpyxlスクリプト）」または将来の自動DLツールがCSV化する。Node側に xlsx パーサ依存を持ち込まない。
@@ -58,7 +59,9 @@ Phase 1 が提供できれば、JAN入力解決・モール別コード出力・
 | supplier | text default '' | Excel商品マスタ(仕入先) |
 | is_set | boolean default false | NEセットマスタに set_syohin_code として存在するか |
 | is_discontinued | boolean default false | Excel終売品マスタに存在するか |
-| sources | text[] default '{}' | 由来（ne_single/ne_set/excel_master/excel_discon 等。デバッグ・カバレッジ用） |
+| zaiko_renkei | text default '' | himoduke 在庫連携（する/しない） |
+| daihyo_code | text default '' | himoduke 代表商品コード（37件のみ。Phase2の兄弟解決用） |
+| sources | text[] default '{}' | 由来（ne_single/ne_set/excel_master/excel_discon/himoduke 等。デバッグ・カバレッジ用） |
 | updated_at | timestamptz default now() | - |
 
 PK: `(user_id, ne_code)`。
@@ -78,7 +81,7 @@ PK: `(user_id, set_ne_code, component_ne_code)`。
 **index**: `(user_id, component_ne_code)` … 「単品→含むセット」逆引き高速化（Phase 2の本命クエリ）。
 同一(set,component)が複数行（数量分割）で来た場合は suryo を合算してupsert。
 
-### 3.3 `ne_mall_code`（モール別コード）
+### 3.3 `ne_mall_code`（モール別コード。正本=Excelモール一覧のみ）
 | 列 | 型 | 由来 |
 |---|---|---|
 | user_id | uuid | - |
@@ -86,10 +89,9 @@ PK: `(user_id, set_ne_code, component_ne_code)`。
 | mall | text | rakuten/yahoo/amazon/shimanoya |
 | manage_no | text default '' | 商品管理番号(URL)＝モール側の商品キー |
 | jan_code | text default '' | - |
-| zaiko_renkei | text default '' | himoduke 在庫連携（rakutenのみ補完） |
-| daihyo_code | text default '' | himoduke 代表商品コード |
 
 PK: `(user_id, ne_code, mall)`。index: `(user_id, ne_code)`。
+※在庫連携・代表商品コードは商品属性として `ne_item_master` 側に持つ（himoduke由来）。本テーブルはExcelモール一覧のみを源とする。
 
 ## 4. 取込フロー
 
@@ -101,7 +103,7 @@ PK: `(user_id, ne_code, mall)`。index: `(user_id, ne_code)`。
 ### 4.2 取込API（ソース別 POST、CSVをFormDataで受ける）
 - `POST /api/masters/import/ne-syohin` … `ne_item_master` の単品行を upsert（売価/税率/在庫）
 - `POST /api/masters/import/ne-set` … `ne_set_composition` を再構築＋`ne_item_master`にセット行を upsert（is_set=true, 売価=set_baika_tnk）
-- `POST /api/masters/import/ne-himoduke` … `ne_mall_code` に在庫連携・代表・補完コードを upsert
+- `POST /api/masters/import/ne-himoduke` … `ne_item_master` の `zaiko_renkei`(在庫連携) と `daihyo_code`(代表商品コード) をマージ更新（モールコードは扱わない）
 - `POST /api/masters/import/excel-master` … `ne_item_master` に JAN/原価/カテゴリ/仕入先を**マージ更新**（ne_codeで結合）
 - `POST /api/masters/import/excel-discon` … is_discontinued=true をマージ
 - `POST /api/masters/import/excel-mall?mall=rakuten|yahoo|amazon|shimanoya` … `ne_mall_code` に管理番号を upsert
@@ -113,7 +115,8 @@ runtime=nodejs。各APIは `{ ok, inserted, updated, skipped, unmatched, message
 - ne_item_master は**マージ**（複数ソースが別々の列を埋めるため、列単位で更新。例: excel-master取込はjan/原価/カテゴリのみ更新し、売価は触らない）。
 
 ### 4.4 パース・正規化
-- 共通CSVパーサ（クォート有無・CP932/UTF-8・BOM・空行に耐性）。NEセットマスタは**未クォートで商品名にカンマが入りうる**ため、`syohin_code`列がコード書式（`/^[A-Za-z0-9_-]+$/`）に合致するか検証し、外れる行はスキップしてカウント報告。
+- 共通CSVパーサ（クォート有無・CP932/UTF-8・BOM・空行に耐性）。
+- **NEセットマスタは未クォート（130+列）で商品名(col3)にカンマが入りうる**ため、汎用CSV分割に頼らず**列位置＋フィールド数許容**でパースする：先頭の `set_syohin_code`(col1)・`daihyo_syohin_code`(col2) は名より前で安全、`set_baika_tnk`(col4)以降は末尾からの相対位置で取得。さらに `set_syohin_code`(col1)/`syohin_code`(col6) がコード書式（`/^[A-Za-z0-9_-]+$/`）に合致するか検証し、外れる行はスキップしてカウント報告。（商品マスタ・himodukeはクォート済みで安全。）
 - 文字コード：取込時に UTF-8 へ正規化（CP932入力を許容）。
 - 全角コード/前後空白の trim。
 
@@ -122,9 +125,9 @@ runtime=nodejs。各APIは `{ ok, inserted, updated, skipped, unmatched, message
 - **単品/セットの存在**: NE商品マスタ→単品行、NEセットマスタの distinct set_syohin_code→セット行。
 - **JAN・原価・カテゴリ・仕入先**: Excel商品マスタを ne_code(=NEコード) で結合してマージ。**NEコードが空/備品フラグ行は除外**（Excel商品マスタの備品はNEコード空・JAN列に仕入先コードが入るため）。
 - **楽天 管理番号**: Excel商品コード一覧楽天の `商品番号(=ne_code)` で結合 → `manage_no`。セットも網羅。
-- **Yahoo/Amazon 管理番号**: Excel各一覧。ne_code列が無いため (a) 管理番号がne_codeに一致すればそれ、(b) JAN＋数量で ne_item_master/楽天一覧と突合、の順で best-effort 解決。解決不可は `unmatched` として件数報告（Phase 2の紐づけ漏れ材料）。himodukeのモール列も補完に使う。
+- **Yahoo/Amazon 管理番号**: Excel各一覧。ne_code列が無いため (a) 管理番号がne_codeに一致すればそれ、(b) JAN＋数量で ne_item_master/楽天一覧と突合、の順で best-effort 解決。解決不可は `unmatched` として件数報告（Phase 2の紐づけ漏れ材料）。
 - **しまのや**: Excelしまのや一覧の商品コード=ne_code。
-- **在庫連携・代表商品コード**: himoduke から rakuten 行に付与。
+- **在庫連携・代表商品コード**: himoduke から `ne_item_master`（該当ne_code行）の `zaiko_renkei`/`daihyo_code` に付与（モールコードではない）。
 
 ## 6. データ品質・エッジ
 
@@ -133,6 +136,7 @@ runtime=nodejs。各APIは `{ ok, inserted, updated, skipped, unmatched, message
 - 重複JAN：同一JANが複数ne_code（1本/3本等）に存在するのは正常。JAN→ne_code解決は**1対多**になりうるため、Yahoo/Amazonの JAN結合は「数量一致」を併用し、曖昧なものは unmatched 扱い。
 - セット構成の同一(set,component)重複行 → suryo合算。
 - 取込順序の独立性：どの順でも壊れない（ne_item_master はマージ、mall_code/composition は own-key upsert）。
+- **テーブル間にFKは張らない**（取込順非依存のため）。`ne_mall_code`/`ne_set_composition` が `ne_item_master` に未登録の `ne_code` を参照することは**正常**（例: Excel楽天一覧にあるがNEマスタ未登録のセット）。これはPhase 2で「カバレッジ欠落／紐づけ漏れ」として可視化する。
 
 ## 7. エラー処理
 
@@ -165,7 +169,7 @@ runtime=nodejs。各APIは `{ ok, inserted, updated, skipped, unmatched, message
 
 ## 11. 未解決事項・リスク
 
-1. **Yahoo/Amazon の ne_code 解決**：両一覧にne_code列が無く、JAN1対多のため曖昧。数量併用とhimoduke補完でカバーするが、残る未解決は unmatched 報告で運用補正（Phase 2の紐づけ漏れと統合）。
+1. **Yahoo/Amazon の ne_code 解決**：両一覧にne_code列が無く、JAN1対多のため曖昧。管理番号=ne_code一致→JAN＋数量突合の順で解決し、残る未解決は unmatched 報告で運用補正（Phase 2の紐づけ漏れと統合）。himodukeのYahoo/Amazon列はJAN様で管理番号でないため使わない。
 2. **Excelの取込運用**：当面は手動でシートをCSV化。自動DLツール完成で解消。
 3. **売価の鮮度**：NEマスタの売価が最新か（モール実価格との差異）は本Phase対象外。Phase 2/価格改定で別途突合余地。
 4. **マルチ店舗前提**：現状単一店舗運用。user_id分離で将来マルチ対応可。
