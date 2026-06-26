@@ -1,6 +1,6 @@
 import type { ProductInput, Variant } from "@/lib/product/schema";
 import type { ChangedField } from "@/lib/product/diff";
-import { rakutenVariantId, buildVariantShipping } from "./rakuten-api";
+import { rakutenVariantId, buildVariantShippingForPatch } from "./rakuten-api";
 
 /** 楽天 items.patch のボディ。変更されたフィールドだけを含む部分更新用。 */
 export type RakutenPatchBody = Record<string, unknown>;
@@ -17,9 +17,27 @@ const RAKUTEN_PATCHABLE = new Set([
   "shipping_type",
 ]);
 
-/** variant キー（SKU管理番号、無ければ NEコード）。 */
-function variantKey(v: Variant): string {
-  return v.sku_manage_number?.trim() || v.ne_code;
+/** variant キー（SKU管理番号、無ければ NEコード）。両方空なら ""。 */
+export function variantKey(v: Variant): string {
+  return v.sku_manage_number?.trim() || v.ne_code?.trim() || "";
+}
+
+/** SKU構成の変更（追加/削除/キー未入力）を検出する。
+ * items.patch は既存variantの値更新しかできず、SKUの追加(selectorValues/variantSelectors必須)・削除
+ * (未指定は保持され残存)を表現できない。これらがある場合は patch を中止し再登録(upsert=全置換)へ誘導する。 */
+export function detectVariantStructuralChange(
+  snap: Variant[] | undefined,
+  edited: Variant[] | undefined,
+): { added: string[]; removed: string[]; emptyKey: boolean } {
+  const e = edited ?? [];
+  if (e.length === 0) return { added: [], removed: [], emptyKey: false };
+  const editedKeys = new Set(e.map(variantKey).filter(Boolean));
+  const snapKeys = new Set((snap ?? []).map(variantKey).filter(Boolean));
+  return {
+    added: [...editedKeys].filter((k) => !snapKeys.has(k)),
+    removed: [...snapKeys].filter((k) => !editedKeys.has(k)),
+    emptyKey: e.some((v) => !variantKey(v)),
+  };
 }
 
 /** SKUの配送設定が snapshot(a) と edited(b) で変わったか。 */
@@ -88,17 +106,21 @@ export function buildRakutenPatchBody(
   const variants: Record<string, unknown> = {};
   const pv = p.variants ?? [];
   if (pv.length > 0) {
-    // 多SKU: 各SKUを snapshot.variants と比較して差分だけ送る
+    // 多SKU: 既存SKU(snapshotに有る)だけを差分patch。空キー・新規SKU(snapshotに無い)は送らない
+    // （patchはSKU追加を表現できずIE0156/0269になるため。構造変更は route 側ガードで再登録へ誘導）。
     const snapByKey = new Map((snapshot.variants ?? []).map((v) => [variantKey(v), v]));
     for (const v of pv) {
       const key = variantKey(v);
+      if (!key) continue; // キー未入力は送らない
       const s = snapByKey.get(key);
+      if (!s) continue; // snapshotに無い=新規SKUはpatch不可（再登録upsertへ）
       const vp: Record<string, unknown> = {};
-      if (!s || s.selling_price !== v.selling_price) vp.standardPrice = String(v.selling_price);
-      if (!s || s.jan_code !== v.jan_code) {
+      if (s.selling_price !== v.selling_price) vp.standardPrice = String(v.selling_price);
+      if (s.jan_code !== v.jan_code) {
         vp.articleNumber = /^\d{13}$/.test(v.jan_code) ? { value: v.jan_code } : { exemptionReason: 3 };
       }
-      if (variantShippingChanged(s, v)) vp.shipping = buildVariantShipping(v);
+      // patchはshipping objectをマージするため、モード切替時に旧キーが残らないようnull明示版を使う。
+      if (variantShippingChanged(s, v)) vp.shipping = buildVariantShippingForPatch(v);
       if (Object.keys(vp).length > 0) variants[key] = vp;
     }
   } else {

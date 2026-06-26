@@ -8,7 +8,7 @@ import { getRakutenCredentialsFromEnv } from "@/lib/rakuten/credentials";
 import { getItem as getRakutenItem, patchItem } from "@/lib/rakuten/item-client";
 import { parseRakutenItem, parseRakutenVariants } from "@/lib/converters/rakuten-item-parser";
 import { buildRakutenManageNumber } from "@/lib/converters/rakuten-api";
-import { buildRakutenPatchBody, diffVariants } from "@/lib/converters/rakuten-patch";
+import { buildRakutenPatchBody, diffVariants, detectVariantStructuralChange } from "@/lib/converters/rakuten-patch";
 import { EDITABLE_FIELDS } from "@/lib/product/diff";
 import { getYahooConfig, getYahooAccessToken } from "@/lib/yahoo/auth";
 import { getItem as getYahooItem, editItem, submitItem } from "@/lib/yahoo/item-client";
@@ -40,7 +40,13 @@ async function buildPlan(mall: Mall, product: ProductInput) {
       ...diffVariants(mallParsed.variants, product.variants),
     ];
     const { body, skipped } = buildRakutenPatchBody(changed, product, mallParsed);
-    return { mall, cred, key: manageNumber, changed, body, skipped, advanced: [] as string[] } as const;
+    // SKU構成変更(追加/削除/キー未入力)はpatchで表現できない→再登録(upsert)へ誘導するガード理由。
+    const sc = detectVariantStructuralChange(mallParsed.variants, product.variants);
+    const structural: string[] = [];
+    if (sc.added.length) structural.push(`SKU追加(${sc.added.join(", ")})`);
+    if (sc.removed.length) structural.push(`SKU削除(${sc.removed.join(", ")})`);
+    if (sc.emptyKey) structural.push("SKU管理番号/NEコード未入力のSKU");
+    return { mall, cred, key: manageNumber, changed, body, skipped, advanced: [] as string[], structural } as const;
   }
   const cfg = getYahooConfig();
   if (!cfg) return { error: "Yahoo 認証情報が未設定です", status: 500 } as const;
@@ -55,7 +61,7 @@ async function buildPlan(mall: Mall, product: ProductInput) {
   const mallParsed = parseYahooItem(got.raw);
   const changed = diffProduct(mallParsed, product);
   const { params, advanced, skipped } = buildYahooUpdateParams(got.raw, changed, product, { sellerId: cfg.sellerId });
-  return { mall, cfg, token, key: product.ne_code, changed, params, skipped, advanced } as const;
+  return { mall, cfg, token, key: product.ne_code, changed, params, skipped, advanced, structural: [] as string[] } as const;
 }
 
 /** GET = 反映プレビュー（書き込みなし）。差分・送信予定ボディ・警告を返す。 */
@@ -78,6 +84,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ mall: st
     changedFields: plan.changed.map((c: ChangedField) => ({ field: c.field, before: c.before, after: c.after })),
     skipped: plan.skipped,
     advanced: plan.advanced,
+    structural: plan.structural,
     willSend: mall === "rakuten" ? (plan as { body: unknown }).body : (plan as { params: unknown }).params,
     hasChanges: plan.changed.length > 0,
   });
@@ -101,6 +108,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ mall: s
   const plan = await buildPlan(mall, product);
   if ("error" in plan) return NextResponse.json({ ok: false, error: plan.error, key: plan.key }, { status: plan.status });
 
+  // 楽天: SKU構成の変更(追加/削除/キー未入力)は patch では送れない（追加=selectorValues必須でIE0156、
+  // 削除=未指定保持で残存、空キー=IE0220）。安全のため反映を中止し、再登録(楽天へ登録=upsert/全置換)へ誘導する。
+  // ※削除のみだと changed が空になり「変更なし」に紛れてサイレント乖離するため、noChange判定より前に置く。
+  if (plan.mall === "rakuten" && plan.structural.length > 0) {
+    return NextResponse.json({
+      ok: false,
+      error: `SKU構成の変更（${plan.structural.join(" / ")}）は「反映」では送れません。価格・配送のみの変更は「反映」で可能です。SKUの追加・削除を含む場合は「楽天へ登録」（全置換）で反映してください。`,
+      structural: plan.structural,
+    }, { status: 409 });
+  }
   if (plan.changed.length === 0) {
     return NextResponse.json({ ok: true, mall, key: plan.key, noChange: true, message: "変更はありません" });
   }

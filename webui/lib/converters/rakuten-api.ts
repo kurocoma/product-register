@@ -7,21 +7,55 @@ import { buildRakutenImgList } from "./image-url";
  * 個別送料(fee) XOR 送料区分(postageSegment.local/overseas) を設定（排他、docs/楽天/04の制約）。
  * 配送方法セット(shippingMethodGroup)は併用可。置き配(okihai)は ItemAPI に項目が無く反映対象外。 */
 export function buildVariantShipping(v: Variant): Record<string, unknown> {
-  if (v.shipping_type === "送料無料") return { postageIncluded: true };
-  const shipping: Record<string, unknown> = { postageIncluded: false };
-  const fee = v.individual_shipping_fee?.trim();
-  if (fee) {
-    shipping.fee = fee; // 個別送料（送料区分とは排他）
+  const shipping: Record<string, unknown> = {};
+  if (v.shipping_type === "送料無料") {
+    shipping.postageIncluded = true; // 送料無料時は fee/postageSegment 不可（排他）
   } else {
-    const seg: Record<string, number> = {};
-    const s1 = Number(v.postage_segment_1);
-    const s2 = Number(v.postage_segment_2);
-    if (v.postage_segment_1?.trim() && Number.isFinite(s1)) seg.local = s1;
-    if (v.postage_segment_2?.trim() && Number.isFinite(s2)) seg.overseas = s2;
-    if (Object.keys(seg).length > 0) shipping.postageSegment = seg;
+    shipping.postageIncluded = false;
+    const fee = v.individual_shipping_fee?.trim();
+    if (fee) {
+      shipping.fee = fee; // 個別送料（送料区分とは排他）
+    } else {
+      const seg: Record<string, number> = {};
+      const s1 = Number(v.postage_segment_1);
+      const s2 = Number(v.postage_segment_2);
+      if (v.postage_segment_1?.trim() && Number.isFinite(s1)) seg.local = s1;
+      if (v.postage_segment_2?.trim() && Number.isFinite(s2)) seg.overseas = s2;
+      if (Object.keys(seg).length > 0) shipping.postageSegment = seg;
+    }
   }
+  // 配送方法セットは送料無料/別どちらでも併用可（postageIncluded時も禁止されない）。
   const grp = v.shipping_method_group?.trim();
   if (grp) shipping.shippingMethodGroup = grp;
+  return shipping;
+}
+
+/** patch用 variant.shipping。楽天 items.patch は shipping(object)をマージ(省略キーは保持)するため
+ * (実機検証: 個別送料fee付きSKUに postageIncluded:true だけ送ると IE0153)、モード切替で旧値が残らないよう
+ * 設定しないキーを明示的に null で送ってクリアする(実機で null クリア成功を確認)。 */
+export function buildVariantShippingForPatch(v: Variant): Record<string, unknown> {
+  const grp = v.shipping_method_group?.trim();
+  const shipping: Record<string, unknown> = { shippingMethodGroup: grp || null };
+  if (v.shipping_type === "送料無料") {
+    shipping.postageIncluded = true;
+    shipping.fee = null;
+    shipping.postageSegment = null;
+    return shipping;
+  }
+  shipping.postageIncluded = false;
+  const fee = v.individual_shipping_fee?.trim();
+  if (fee) {
+    shipping.fee = fee;
+    shipping.postageSegment = null; // 個別送料とは排他→区分クリア
+    return shipping;
+  }
+  const seg: Record<string, number> = {};
+  const s1 = Number(v.postage_segment_1);
+  const s2 = Number(v.postage_segment_2);
+  if (v.postage_segment_1?.trim() && Number.isFinite(s1)) seg.local = s1;
+  if (v.postage_segment_2?.trim() && Number.isFinite(s2)) seg.overseas = s2;
+  shipping.fee = null; // 区分または無指定→個別送料クリア
+  shipping.postageSegment = Object.keys(seg).length > 0 ? seg : null;
   return shipping;
 }
 
@@ -96,7 +130,7 @@ export function buildRakutenUpsertBody(p: ProductInput, opts: BuildUpsertOptions
   // 多SKUは variantSelectors(バリエーション軸) + 各variantの selectorValues が必須(IE0269)。
   // 単軸とし、選択肢ラベルは variation_value（無ければ数量/連番）。重複・空は連番付与で一意化。
   const axisKey = "type";
-  const axisName = p.yahoo_variation_title?.trim() || "タイプ";
+  const axisName = (p.yahoo_variation_title?.trim() || "タイプ").slice(0, 32); // displayName は string(32)
   const labels = multi ? uniqueVariationLabels(vlist) : [];
 
   // SKUごとに variants.{key} を組み立てる（key = SKU管理番号、無ければ NEコード）。
