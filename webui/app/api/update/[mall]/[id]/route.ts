@@ -6,9 +6,10 @@ import type { ProductInput } from "@/lib/product/schema";
 import { diffProduct, type ChangedField } from "@/lib/product/diff";
 import { getRakutenCredentialsFromEnv } from "@/lib/rakuten/credentials";
 import { getItem as getRakutenItem, patchItem } from "@/lib/rakuten/item-client";
-import { parseRakutenItem } from "@/lib/converters/rakuten-item-parser";
+import { parseRakutenItem, parseRakutenVariants } from "@/lib/converters/rakuten-item-parser";
 import { buildRakutenManageNumber } from "@/lib/converters/rakuten-api";
-import { buildRakutenPatchBody } from "@/lib/converters/rakuten-patch";
+import { buildRakutenPatchBody, diffVariants } from "@/lib/converters/rakuten-patch";
+import { EDITABLE_FIELDS } from "@/lib/product/diff";
 import { getYahooConfig, getYahooAccessToken } from "@/lib/yahoo/auth";
 import { getItem as getYahooItem, editItem, submitItem } from "@/lib/yahoo/item-client";
 import { parseYahooItem } from "@/lib/converters/yahoo-item-parser";
@@ -28,7 +29,16 @@ async function buildPlan(mall: Mall, product: ProductInput) {
     if (!got.exists || !got.json) return { error: "モールに該当商品が存在しません", status: 404, key: manageNumber } as const;
     const mallParsed = parseRakutenItem(got.json);
     delete (mallParsed as { _variantId?: string })._variantId;
-    const changed = diffProduct(mallParsed, product);
+    // 多SKU: モール現状の全SKUを snapshot.variants に持たせ、SKU別に差分判定する。
+    mallParsed.variants = parseRakutenVariants(got.json);
+    // 多SKU商品は価格/JAN/送料をフラットでなく variants[] で扱うため、フラット差分からは除外（二重・誤検知防止）。
+    const flatFields = product.variants.length > 0
+      ? EDITABLE_FIELDS.filter((f) => !["selling_price", "jan_code", "shipping_type"].includes(f as string))
+      : EDITABLE_FIELDS;
+    const changed = [
+      ...diffProduct(mallParsed, product, flatFields),
+      ...diffVariants(mallParsed.variants, product.variants),
+    ];
     const { body, skipped } = buildRakutenPatchBody(changed, product, mallParsed);
     return { mall, cred, key: manageNumber, changed, body, skipped, advanced: [] as string[] } as const;
   }

@@ -134,7 +134,10 @@ export function parseRakutenVariants(json: Record<string, unknown>): Variant[] {
     const merchantSku = typeof v.merchantDefinedSkuId === "string" ? v.merchantDefinedSkuId.trim() : "";
     const art = v.articleNumber as { value?: unknown } | undefined;
     const janRaw = typeof art?.value === "string" ? art.value.trim() : "";
-    const ship = v.shipping as { postageIncluded?: boolean } | undefined;
+    const ship = v.shipping as
+      | { postageIncluded?: boolean; fee?: unknown; postageSegment?: { local?: unknown; overseas?: unknown }; shippingMethodGroup?: unknown }
+      | undefined;
+    const str = (x: unknown): string => (x != null && x !== "" ? String(x) : "");
     return VariantSchema.parse({
       sku_manage_number: key,
       ne_code: merchantSku || key,
@@ -143,7 +146,12 @@ export function parseRakutenVariants(json: Record<string, unknown>): Variant[] {
       tax_rate: 10,
       quantity: 1,
       variation_value: variationLabel(json, v),
+      // 配送詳細(送料無料/別・個別送料・送料区分1/2・配送方法セット)。snapshot比較と取込の両方に使う。
       shipping_type: ship?.postageIncluded ? "送料無料" : "送料別",
+      individual_shipping_fee: str(ship?.fee),
+      postage_segment_1: str(ship?.postageSegment?.local),
+      postage_segment_2: str(ship?.postageSegment?.overseas),
+      shipping_method_group: typeof ship?.shippingMethodGroup === "string" ? ship.shippingMethodGroup : "",
       attributes: parseVariantAttributes(v.attributes),
     });
   });

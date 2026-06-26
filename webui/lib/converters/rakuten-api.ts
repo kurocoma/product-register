@@ -6,7 +6,7 @@ import { buildRakutenImgList } from "./image-url";
 /** Variant → 楽天 variant.shipping。送料無料は postageIncluded のみ。送料別は
  * 個別送料(fee) XOR 送料区分(postageSegment.local/overseas) を設定（排他、docs/楽天/04の制約）。
  * 配送方法セット(shippingMethodGroup)は併用可。置き配(okihai)は ItemAPI に項目が無く反映対象外。 */
-function buildVariantShipping(v: Variant): Record<string, unknown> {
+export function buildVariantShipping(v: Variant): Record<string, unknown> {
   if (v.shipping_type === "送料無料") return { postageIncluded: true };
   const shipping: Record<string, unknown> = { postageIncluded: false };
   const fee = v.individual_shipping_fee?.trim();
