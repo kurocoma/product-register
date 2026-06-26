@@ -25,6 +25,20 @@ export function buildVariantShipping(v: Variant): Record<string, unknown> {
   return shipping;
 }
 
+/** 多SKUの選択肢ラベル一覧（variantSelectors.values / selectorValues 用）。
+ * variation_value 優先、無ければ数量(N本)、それも無ければ連番。空・重複は連番を付与して一意化(32字以内)。 */
+function uniqueVariationLabels(vlist: Variant[]): string[] {
+  const used = new Set<string>();
+  return vlist.map((v, i) => {
+    const base = (v.variation_value?.trim() || (v.quantity > 0 ? `${v.quantity}本` : "") || `タイプ${i + 1}`).slice(0, 32);
+    let label = base;
+    let n = 2;
+    while (used.has(label)) label = `${base.slice(0, 28)}(${n++})`;
+    used.add(label);
+    return label;
+  });
+}
+
 /** Variant の属性 → items.upsert の variants.{}.attributes[]（値が入っているものだけ、unit任意）。 */
 function buildVariantAttributes(v: Variant): { name: string; values: string[]; unit?: string }[] {
   return (v.attributes || [])
@@ -77,9 +91,17 @@ export type BuildUpsertOptions = {
 export function buildRakutenUpsertBody(p: ProductInput, opts: BuildUpsertOptions = {}): RakutenUpsertBody {
   const imgList = buildRakutenImgList(baseCodeOf(p), p.image_count);
 
+  const vlist = productVariants(p);
+  const multi = vlist.length > 1;
+  // 多SKUは variantSelectors(バリエーション軸) + 各variantの selectorValues が必須(IE0269)。
+  // 単軸とし、選択肢ラベルは variation_value（無ければ数量/連番）。重複・空は連番付与で一意化。
+  const axisKey = "type";
+  const axisName = p.yahoo_variation_title?.trim() || "タイプ";
+  const labels = multi ? uniqueVariationLabels(vlist) : [];
+
   // SKUごとに variants.{key} を組み立てる（key = SKU管理番号、無ければ NEコード）。
   const variants: Record<string, unknown> = {};
-  for (const v of productVariants(p)) {
+  vlist.forEach((v, i) => {
     const key = v.sku_manage_number?.trim() || v.ne_code;
     // articleNumber: 13桁JANがあれば value、無ければ店舗オリジナル(3)
     const articleNumber = /^\d{13}$/.test(v.jan_code) ? { value: v.jan_code } : { exemptionReason: 3 };
@@ -92,8 +114,9 @@ export function buildRakutenUpsertBody(p: ProductInput, opts: BuildUpsertOptions
     };
     const attributes = buildVariantAttributes(v);
     if (attributes.length > 0) variant.attributes = attributes;
+    if (multi) variant.selectorValues = { [axisKey]: labels[i] };
     variants[key] = variant;
-  }
+  });
 
   const body: RakutenUpsertBody = {
     title: p.display_name,
@@ -105,6 +128,9 @@ export function buildRakutenUpsertBody(p: ProductInput, opts: BuildUpsertOptions
     payment: { taxIncluded: true, taxRate: String(p.tax_rate / 100) },
     variants,
   };
+  if (multi) {
+    body.variantSelectors = [{ key: axisKey, displayName: axisName, values: labels.map((l) => ({ displayValue: l })) }];
+  }
   if (p.catch_copy_pc) body.tagline = p.catch_copy_pc;
   if (opts.hideItem) body.hideItem = true;
   if (opts.hideStock) {
