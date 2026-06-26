@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getProduct, dbRowToProductInput } from "@/lib/product/repository";
+import { productVariants } from "@/lib/product/schema";
 import { getRakutenCredentialsFromEnv } from "@/lib/rakuten/credentials";
 import { buildRakutenManageNumber, buildRakutenUpsertBody, validateUpsertBody } from "@/lib/converters/rakuten-api";
 import { upsertItem, getItem } from "@/lib/rakuten/item-client";
@@ -77,8 +78,12 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   }
 
   // 在庫数を設定（安全登録は 0）。商品登録成功後に InventoryAPI で別送。
+  // 多SKU: 全SKU分を upsert の variant キー(sku_manage_number||ne_code)で送る（在庫variantIdとupsert keyを一致させる）。
   const quantity = publish ? 0 : 0; // 当面は常に0（在庫連携は別トラック）
-  const inv = await bulkUpsertInventory(cred, [{ manageNumber, variantId: product.ne_code, quantity }]);
+  const inv = await bulkUpsertInventory(
+    cred,
+    productVariants(product).map((v) => ({ manageNumber, variantId: v.sku_manage_number?.trim() || v.ne_code, quantity })),
+  );
 
   return NextResponse.json({
     ok: true, mall: "rakuten", manageNumber, created: result.created, status: result.status,
