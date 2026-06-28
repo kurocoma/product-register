@@ -16,6 +16,8 @@ export const VariantSchema = z.object({
   ne_code: z.string().default(""),           // 各SKUのNEコード(=システム連携用SKU番号 merchantDefinedSkuId)
   jan_code: z.string().default(""),
   selling_price: z.number().int().default(0),
+  // SKU別の表示価格(二重価格)。未設定/0 なら販売価格に連動(displayPrice相当)。optional=既存variant互換。
+  display_price: z.number().int().optional(),
   tax_rate: z.union([z.literal(8), z.literal(10)]).default(10),
   quantity: z.number().int().default(1),
   variation_value: z.string().default(""),   // バリエーション項目選択肢ラベル(例 "1本"/"詰替セット")

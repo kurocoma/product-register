@@ -11,12 +11,29 @@ import { Input } from "@/components/ui/input";
 type Mall = "rakuten" | "yahoo";
 const MALL_LABEL: Record<Mall, string> = { rakuten: "楽天", yahoo: "Yahoo" };
 
+type StoredVariant = { sku_manage_number?: string; ne_code?: string; variation_value?: string; selling_price?: number; display_price?: number };
+type PriceRow = { key: string; variantIndex: number | null; label: string; selling: number; display: number };
+
+const variantsOf = (p: ProductRow): StoredVariant[] => ((p.extra as { variants?: StoredVariant[] })?.variants ?? []);
+const flatDisplay = (p: ProductRow) => {
+  const dp = Number((p.extra as { display_price?: number })?.display_price);
+  return dp > 0 ? dp : Number(p.selling_price);
+};
+const priceRows = (p: ProductRow): PriceRow[] => {
+  const vs = variantsOf(p);
+  if (vs.length === 0) return [{ key: p.id, variantIndex: null, label: "", selling: Number(p.selling_price), display: flatDisplay(p) }];
+  return vs.map((v, idx) => {
+    const selling = Number(v.selling_price ?? 0);
+    const dp = Number(v.display_price ?? 0);
+    return { key: `${p.id}:${idx}`, variantIndex: idx, label: v.variation_value || v.sku_manage_number || v.ne_code || `SKU${idx + 1}`, selling, display: dp > 0 ? dp : selling };
+  });
+};
+
 export function ProductList({ initial }: { initial: ProductRow[] }) {
   const [products, setProducts] = useState(initial);
   const [query, setQuery] = useState("");
   const [makerFilter, setMakerFilter] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  // 価格インライン編集の下書き（id → 文字列）。スムーズに打てるよう products とは別に保持。
   const [draft, setDraft] = useState<Record<string, { selling: string; display: string }>>({});
   const [saveState, setSaveState] = useState<Record<string, "saving" | "saved" | "error">>({});
   const [reflectMsg, setReflectMsg] = useState<Record<string, string>>({});
@@ -24,7 +41,6 @@ export function ProductList({ initial }: { initial: ProductRow[] }) {
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   const makers = useMemo(() => Array.from(new Set(products.map((p) => String(p.maker_code)))).sort(), [products]);
-
   const filtered = useMemo(() => {
     return products.filter((p) => {
       if (makerFilter && p.maker_code !== makerFilter) return false;
@@ -36,19 +52,7 @@ export function ProductList({ initial }: { initial: ProductRow[] }) {
     });
   }, [products, query, makerFilter]);
 
-  const isMulti = (p: ProductRow) => {
-    const v = (p.extra as { variants?: unknown[] })?.variants;
-    return Array.isArray(v) && v.length > 0;
-  };
-  const dispPriceOf = (p: ProductRow) => {
-    const dp = Number((p.extra as { display_price?: number })?.display_price);
-    return dp > 0 ? dp : Number(p.selling_price);
-  };
-  const draftOf = (p: ProductRow) => draft[p.id] ?? { selling: String(Number(p.selling_price)), display: String(dispPriceOf(p)) };
-
-  const toggleAll = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setSelected(e.target.checked ? new Set(filtered.map((p) => p.id)) : new Set());
-  };
+  const toggleAll = (e: React.ChangeEvent<HTMLInputElement>) => setSelected(e.target.checked ? new Set(filtered.map((p) => p.id)) : new Set());
   const toggleOne = (id: string) =>
     setSelected((prev) => {
       const next = new Set(prev);
@@ -57,31 +61,40 @@ export function ProductList({ initial }: { initial: ProductRow[] }) {
       return next;
     });
 
-  /** 価格編集 → 下書き更新 + 商品stateへ反映 + デバウンス自動保存。販売価格編集時は表示価格を同額に連動。 */
-  const editPrice = (p: ProductRow, field: "selling" | "display", value: string) => {
-    const cur = draftOf(p);
-    const next = { ...cur, [field]: value };
-    if (field === "selling") next.display = value; // 連動: 販売価格→表示価格
-    setDraft((d) => ({ ...d, [p.id]: next }));
+  /** 価格編集（フラット or 多SKUの1バリエーション）→ 下書き更新 + 商品stateへ反映 + デバウンス自動保存。
+   * 販売価格を変えると表示価格も同額に連動。 */
+  const editPrice = (p: ProductRow, r: PriceRow, field: "selling" | "display", value: string) => {
+    const base = draft[r.key] ?? { selling: String(r.selling), display: String(r.display) };
+    const next = { ...base, [field]: value };
+    if (field === "selling") next.display = value; // 連動
+    setDraft((d) => ({ ...d, [r.key]: next }));
 
     const selling = Math.max(0, Math.round(Number(next.selling)));
     const display = Math.max(0, Math.round(Number(next.display)));
-    setProducts((prev) => prev.map((x) => (x.id === p.id ? { ...x, selling_price: selling, extra: { ...x.extra, display_price: display } } : x)));
+    setProducts((prev) =>
+      prev.map((x) => {
+        if (x.id !== p.id) return x;
+        if (r.variantIndex == null) return { ...x, selling_price: selling, extra: { ...x.extra, display_price: display } };
+        const vs = variantsOf(x).map((v, i) => (i === r.variantIndex ? { ...v, selling_price: selling, display_price: display } : v));
+        const extra = { ...x.extra, variants: vs, ...(r.variantIndex === 0 ? { display_price: display } : {}) };
+        return { ...x, ...(r.variantIndex === 0 ? { selling_price: selling } : {}), extra };
+      }),
+    );
 
     if (!Number.isFinite(Number(next.selling)) || !Number.isFinite(Number(next.display))) return;
-    setSaveState((s) => ({ ...s, [p.id]: "saving" }));
-    clearTimeout(timers.current[p.id]);
-    timers.current[p.id] = setTimeout(async () => {
+    setSaveState((s) => ({ ...s, [r.key]: "saving" }));
+    clearTimeout(timers.current[r.key]);
+    timers.current[r.key] = setTimeout(async () => {
       try {
         const res = await fetch(`/api/products/${p.id}/price`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ selling_price: selling, display_price: display }),
+          body: JSON.stringify({ selling_price: selling, display_price: display, variantIndex: r.variantIndex ?? undefined }),
         });
         const j = await res.json();
-        setSaveState((s) => ({ ...s, [p.id]: res.ok && j.ok ? "saved" : "error" }));
+        setSaveState((s) => ({ ...s, [r.key]: res.ok && j.ok ? "saved" : "error" }));
       } catch {
-        setSaveState((s) => ({ ...s, [p.id]: "error" }));
+        setSaveState((s) => ({ ...s, [r.key]: "error" }));
       }
     }, 700);
   };
@@ -123,6 +136,13 @@ export function ProductList({ initial }: { initial: ProductRow[] }) {
     });
   };
 
+  const saveBadge = (key: string) =>
+    saveState[key] ? (
+      <div className={`text-right text-[10px] ${saveState[key] === "error" ? "text-red-600" : saveState[key] === "saving" ? "text-slate-400" : "text-green-700"}`}>
+        {saveState[key] === "saving" ? "保存中…" : saveState[key] === "saved" ? "✓自動保存" : "保存失敗"}
+      </div>
+    ) : null;
+
   return (
     <div className="p-6 space-y-4">
       <div className="flex items-center justify-between">
@@ -142,12 +162,10 @@ export function ProductList({ initial }: { initial: ProductRow[] }) {
         <table className="w-full text-sm">
           <thead className="bg-slate-100 text-left">
             <tr>
-              <th className="px-3 py-2 w-10">
-                <input type="checkbox" checked={selected.size > 0 && selected.size === filtered.length} onChange={toggleAll} />
-              </th>
+              <th className="px-3 py-2 w-10"><input type="checkbox" checked={selected.size > 0 && selected.size === filtered.length} onChange={toggleAll} /></th>
               <th className="px-3 py-2">NEコード</th>
               <th className="px-3 py-2">商品名</th>
-              <th className="px-3 py-2 text-right">販売価格 / 表示価格</th>
+              <th className="px-3 py-2 text-right">販売価格 / 表示価格<br /><span className="text-[10px] font-normal text-slate-400">多SKUはSKU別</span></th>
               <th className="px-3 py-2">反映</th>
               <th className="px-3 py-2 w-20">操作</th>
             </tr>
@@ -157,46 +175,39 @@ export function ProductList({ initial }: { initial: ProductRow[] }) {
               <tr><td colSpan={6} className="px-3 py-8 text-center text-slate-500">商品がありません。「+ 新規商品」から登録してください。</td></tr>
             )}
             {filtered.map((p) => {
-              const name = String(p.product_name).trim();
-              const neCode = String(p.ne_code).trim();
-              const d = draftOf(p);
+              const rows = priceRows(p);
+              const multi = variantsOf(p).length > 1;
               return (
                 <tr key={p.id} className="border-t border-slate-100 hover:bg-slate-50 align-top">
                   <td className="px-3 py-2"><input type="checkbox" checked={selected.has(p.id)} onChange={() => toggleOne(p.id)} /></td>
-                  <td className="px-3 py-2 font-mono">{neCode || <span className="text-slate-400">(未設定)</span>}</td>
+                  <td className="px-3 py-2 font-mono">{String(p.ne_code).trim() || <span className="text-slate-400">(未設定)</span>}</td>
                   <td className="px-3 py-2">
                     <Link href={`/products/${p.id}`} className="text-blue-600 hover:underline">
-                      {name || <span className="text-slate-400 italic">(名称未設定)</span>}
+                      {String(p.product_name).trim() || <span className="text-slate-400 italic">(名称未設定)</span>}
                     </Link>
                   </td>
-                  {/* 販売価格・表示価格 インライン編集（多SKUは編集画面でSKU別に） */}
                   <td className="px-3 py-2">
-                    {isMulti(p) ? (
-                      <div className="text-right text-slate-600">
-                        ¥{Number(p.selling_price).toLocaleString()}
-                        <Link href={`/products/${p.id}`} className="ml-1 text-[10px] text-amber-600 hover:underline">多SKU(編集)</Link>
-                      </div>
-                    ) : (
-                      <div className="space-y-1">
-                        <label className="flex items-center justify-end gap-1">
-                          <span className="text-[10px] text-slate-400 w-8 text-right">販売</span>
-                          <input type="number" value={d.selling} onChange={(e) => editPrice(p, "selling", e.target.value)}
-                            className="w-24 rounded border border-slate-300 px-1 py-0.5 text-right" />
-                        </label>
-                        <label className="flex items-center justify-end gap-1">
-                          <span className="text-[10px] text-slate-400 w-8 text-right">表示</span>
-                          <input type="number" value={d.display} onChange={(e) => editPrice(p, "display", e.target.value)}
-                            className="w-24 rounded border border-slate-300 px-1 py-0.5 text-right" />
-                        </label>
-                        {saveState[p.id] && (
-                          <div className={`text-right text-[10px] ${saveState[p.id] === "error" ? "text-red-600" : saveState[p.id] === "saving" ? "text-slate-400" : "text-green-700"}`}>
-                            {saveState[p.id] === "saving" ? "保存中…" : saveState[p.id] === "saved" ? "✓自動保存" : "保存失敗"}
+                    <div className="space-y-2">
+                      {multi && <div className="text-[10px] text-amber-600">{rows.length} バリエーション（SKU別に編集）</div>}
+                      {rows.map((r) => {
+                        const dr = draft[r.key] ?? { selling: String(r.selling), display: String(r.display) };
+                        return (
+                          <div key={r.key} className="space-y-0.5">
+                            {multi && r.label && <div className="text-[10px] text-slate-500 font-mono">{r.label}</div>}
+                            <label className="flex items-center justify-end gap-1">
+                              <span className="text-[10px] text-slate-400 w-8 text-right">販売</span>
+                              <input type="number" value={dr.selling} onChange={(e) => editPrice(p, r, "selling", e.target.value)} className="w-24 rounded border border-slate-300 px-1 py-0.5 text-right" />
+                            </label>
+                            <label className="flex items-center justify-end gap-1">
+                              <span className="text-[10px] text-slate-400 w-8 text-right">表示</span>
+                              <input type="number" value={dr.display} onChange={(e) => editPrice(p, r, "display", e.target.value)} className="w-24 rounded border border-slate-300 px-1 py-0.5 text-right" />
+                            </label>
+                            {saveBadge(r.key)}
                           </div>
-                        )}
-                      </div>
-                    )}
+                        );
+                      })}
+                    </div>
                   </td>
-                  {/* 反映（モール選択式） */}
                   <td className="px-3 py-2">
                     <div className="flex flex-col gap-1">
                       <div className="flex gap-1">
