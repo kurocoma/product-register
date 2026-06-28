@@ -42,6 +42,9 @@ export const ProductInputBaseSchema = z.object({
   tax_rate: z.union([z.literal(8), z.literal(10)]),
   cost_price: z.number().int().default(0),
   selling_price: z.number().int(),
+  // 表示価格(二重価格)。0/未設定なら販売価格に連動する（displayPrice() がフォールバック）。
+  // 一覧の販売価格を編集すると同額に同期、表示価格だけ手動上書きも可。
+  display_price: z.number().int().default(0),
 
   // 配送・カテゴリ
   shipping_type: z.string(),
@@ -145,6 +148,12 @@ export const ProductInputSchema = ProductInputBaseSchema.transform((p) => ({
 export type ProductInput = z.infer<typeof ProductInputSchema>;
 export type ProductInputBase = z.output<typeof ProductInputBaseSchema>;
 export type Variant = z.output<typeof VariantSchema>;
+
+/** 表示価格（二重価格）。display_price が正の値ならそれ、無ければ販売価格に連動。
+ * CSV(楽天 表示価格 / Yahoo original-price)や反映で「表示価格＝販売価格」を基本にしつつ別値も許す。 */
+export function displayPrice(p: { display_price?: number; selling_price: number }): number {
+  return p.display_price && p.display_price > 0 ? p.display_price : p.selling_price;
+}
 
 /** 商品の SKU(variant) 一覧を統一的に取り出す。
  * variants[] が1件以上あればそれを、無ければフラットフィールドから単一SKUを1件合成する（後方互換）。

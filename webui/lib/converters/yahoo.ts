@@ -1,4 +1,5 @@
 import type { ProductInput } from "@/lib/product/schema";
+import { displayPrice } from "@/lib/product/schema";
 import type { Converter } from "./base";
 import { ENCODING } from "./base";
 import { buildYahooImgListHtml, buildYahooItemImageUrls } from "./image-url";
@@ -64,6 +65,7 @@ export class YahooConverter implements Converter {
       console.warn(`ne_code=${p.ne_code}: yahoo_grouping_enabled=true だが unit が空`);
     }
     const taxInclusive = String(Math.floor(p.selling_price * (1 + p.tax_rate / 100) + 0.5));
+    const displayInclusive = String(Math.floor(displayPrice(p) * (1 + p.tax_rate / 100) + 0.5));
     const taxrateType = String(p.tax_rate / 100);
     const caption = buildCaption(p.ne_code, p.image_count, p.description_pc);
     const explanation = buildExplanation(p.free1, p.description_pc);
@@ -77,7 +79,7 @@ export class YahooConverter implements Converter {
       "path": p.yahoo_path,
       "name": p.display_name,
       "code": p.ne_code,
-      "original-price": taxInclusive,
+      "original-price": displayInclusive,
       "price": taxInclusive,
       "headline": p.catch_copy_yahoo,
       "caption": caption,

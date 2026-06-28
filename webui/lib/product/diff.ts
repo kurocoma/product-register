@@ -4,6 +4,7 @@ import type { ProductInput } from "@/lib/product/schema";
 export const EDITABLE_FIELDS: (keyof ProductInput)[] = [
   "display_name",
   "selling_price",
+  "display_price",
   "description_pc",
   "description_sp",
   "catch_copy_pc",

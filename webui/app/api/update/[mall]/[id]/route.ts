@@ -31,10 +31,12 @@ async function buildPlan(mall: Mall, product: ProductInput) {
     delete (mallParsed as { _variantId?: string })._variantId;
     // 多SKU: モール現状の全SKUを snapshot.variants に持たせ、SKU別に差分判定する。
     mallParsed.variants = parseRakutenVariants(got.json);
-    // 多SKU商品は価格/JAN/送料をフラットでなく variants[] で扱うため、フラット差分からは除外（二重・誤検知防止）。
-    const flatFields = product.variants.length > 0
-      ? EDITABLE_FIELDS.filter((f) => !["selling_price", "jan_code", "shipping_type"].includes(f as string))
-      : EDITABLE_FIELDS;
+    // 多SKU商品は価格/JAN/送料をフラットでなく variants[] で扱うため除外。
+    // 表示価格(display_price)は楽天ItemAPIに項目が無いため常に除外（CSVのみ・空patch防止。Yahooはoriginal_priceで反映）。
+    const rakutenExclude = product.variants.length > 0
+      ? ["selling_price", "jan_code", "shipping_type", "display_price"]
+      : ["display_price"];
+    const flatFields = EDITABLE_FIELDS.filter((f) => !rakutenExclude.includes(f as string));
     const changed = [
       ...diffProduct(mallParsed, product, flatFields),
       ...diffVariants(mallParsed.variants, product.variants),

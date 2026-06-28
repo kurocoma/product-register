@@ -1,4 +1,5 @@
 import type { ProductInput } from "@/lib/product/schema";
+import { displayPrice } from "@/lib/product/schema";
 import type { ChangedField } from "@/lib/product/diff";
 
 /** Yahoo editItem の form パラメータ。 */
@@ -128,6 +129,7 @@ export function xmlToEditItemParams(
 const OVERRIDE: Record<string, { param: string; get: (p: ProductInput) => string }> = {
   display_name: { param: "name", get: (p) => p.display_name },
   selling_price: { param: "price", get: (p) => String(p.selling_price) },
+  display_price: { param: "original_price", get: (p) => String(displayPrice(p)) },
   yahoo_category_id: { param: "product_category", get: (p) => p.yahoo_category_id },
   yahoo_path: { param: "path", get: (p) => p.yahoo_path },
   catch_copy_yahoo: { param: "headline", get: (p) => p.catch_copy_yahoo },
@@ -156,8 +158,8 @@ export function buildYahooUpdateParams(
     params[o.param] = v;
     // 商品説明(caption)は register 同様 SP用フリースペースとも同値にする（PC/SP不整合を防ぐ）。
     if (c.field === "description_pc") params.sp_additional = v;
-    // 通常購入販売価格(price)を変えたら表示価格(original_price)も同値にする（二重価格の旧値残りを防ぐ）。
-    if (c.field === "selling_price") params.original_price = v;
+    // 通常購入販売価格(price)を変えたら表示価格(original_price)も連動させる（display_price優先、無ければ販売価格）。
+    if (c.field === "selling_price") params.original_price = String(displayPrice(p));
   }
   return { params, advanced, skipped };
 }

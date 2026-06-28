@@ -1,5 +1,5 @@
 import type { ProductInput } from "@/lib/product/schema";
-import { resolveAttributes } from "@/lib/product/schema";
+import { resolveAttributes, displayPrice } from "@/lib/product/schema";
 import type { Converter } from "./base";
 import { ENCODING } from "./base";
 import { buildRakutenImgList } from "./image-url";
@@ -139,7 +139,7 @@ export class RakutenConverter implements Converter {
     row["バリエーション項目選択肢1"] = p.option_item_name;
 
     row["販売価格"] = String(p.selling_price);
-    row["表示価格"] = String(p.selling_price);
+    row["表示価格"] = String(displayPrice(p));
     row["二重価格文言管理番号"] = "1";
 
     row["再入荷お知らせボタン"] = "0";
