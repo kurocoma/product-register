@@ -81,6 +81,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ mall: s
   //    楽天で SKU検索により管理番号を解決した場合は、解決後の管理番号を rakuten_manage_number に使う。
   const built = buildImportedProduct(mall, resolvedCode, parsed);
   if (!built.ok) return NextResponse.json({ ok: false, error: built.error }, { status: 422 });
+  // 取込元モールを掲載済みに記録（反映ボタンの活性判定に使う）。
+  built.product.mall_listed = { ...built.product.mall_listed, [mall]: true };
 
   // 3) 既存照合（あれば作成せず既存を開かせる）
   //    楽天は「1商品ページ=1商品(多SKU)」なので、まず商品管理番号(ページ)で照合する。

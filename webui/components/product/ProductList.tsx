@@ -15,6 +15,15 @@ type StoredVariant = { sku_manage_number?: string; ne_code?: string; variation_v
 type PriceRow = { key: string; variantIndex: number | null; label: string; selling: number; display: number };
 
 const variantsOf = (p: ProductRow): StoredVariant[] => ((p.extra as { variants?: StoredVariant[] })?.variants ?? []);
+/** その商品が各モールに掲載済みか（反映ボタンの活性判定）。mall_listed優先、楽天は管理番号でフォールバック。 */
+const presenceOf = (p: ProductRow): Record<Mall, boolean> => {
+  const e = p.extra as { mall_listed?: { rakuten?: boolean; yahoo?: boolean }; rakuten_manage_number?: string };
+  const ml = e?.mall_listed ?? {};
+  return {
+    rakuten: !!ml.rakuten || !!(e?.rakuten_manage_number && String(e.rakuten_manage_number).trim()),
+    yahoo: !!ml.yahoo,
+  };
+};
 const flatDisplay = (p: ProductRow) => {
   const dp = Number((p.extra as { display_price?: number })?.display_price);
   return dp > 0 ? dp : Number(p.selling_price);
@@ -113,9 +122,19 @@ export function ProductList({ initial }: { initial: ProductRow[] }) {
     }
   };
 
+  const bulkTargets = (mall: Mall) =>
+    Array.from(selected).filter((id) => {
+      const p = products.find((x) => x.id === id);
+      return p && presenceOf(p)[mall];
+    });
+
   const reflectBulk = async (mall: Mall) => {
     if (bulk?.running) return;
-    const ids = Array.from(selected);
+    const ids = bulkTargets(mall);
+    if (ids.length === 0) {
+      setBulk({ running: false, mall, done: 0, total: 0, ok: 0, ng: 0 });
+      return;
+    }
     setBulk({ running: true, mall, done: 0, total: ids.length, ok: 0, ng: 0 });
     for (let i = 0; i < ids.length; i++) {
       const ok = await reflectOne(ids[i], mall);
@@ -211,8 +230,21 @@ export function ProductList({ initial }: { initial: ProductRow[] }) {
                   <td className="px-3 py-2">
                     <div className="flex flex-col gap-1">
                       <div className="flex gap-1">
-                        <button onClick={() => reflectOne(p.id, "rakuten")} className="rounded border border-rose-300 text-rose-700 px-1.5 py-0.5 text-xs hover:bg-rose-50">楽天へ反映</button>
-                        <button onClick={() => reflectOne(p.id, "yahoo")} className="rounded border border-purple-300 text-purple-700 px-1.5 py-0.5 text-xs hover:bg-purple-50">Yahooへ反映</button>
+                        {(["rakuten", "yahoo"] as Mall[]).map((m) => {
+                          const on = presenceOf(p)[m];
+                          const color = m === "rakuten" ? "border-rose-300 text-rose-700 hover:bg-rose-50" : "border-purple-300 text-purple-700 hover:bg-purple-50";
+                          return (
+                            <button
+                              key={m}
+                              onClick={() => on && reflectOne(p.id, m)}
+                              disabled={!on}
+                              title={on ? "" : `この商品は${MALL_LABEL[m]}に掲載がありません`}
+                              className={`rounded border px-1.5 py-0.5 text-xs ${on ? color : "border-slate-200 text-slate-300 cursor-not-allowed"}`}
+                            >
+                              {MALL_LABEL[m]}へ反映
+                            </button>
+                          );
+                        })}
                       </div>
                       {reflectMsg[p.id] && <span className="text-[10px] text-slate-600">{reflectMsg[p.id]}</span>}
                     </div>
@@ -234,12 +266,16 @@ export function ProductList({ initial }: { initial: ProductRow[] }) {
         <div className="rounded border border-slate-200 bg-white p-3 flex flex-wrap items-center gap-2 text-sm">
           <span className="font-medium">{selected.size} 件選択中</span>
           <span className="text-slate-300">|</span>
-          <span className="text-slate-600">一括反映:</span>
-          <button onClick={() => reflectBulk("rakuten")} disabled={bulk?.running} className="rounded bg-rose-600 px-3 py-1.5 text-white hover:bg-rose-700 disabled:opacity-50">楽天へ一括反映</button>
-          <button onClick={() => reflectBulk("yahoo")} disabled={bulk?.running} className="rounded bg-purple-600 px-3 py-1.5 text-white hover:bg-purple-700 disabled:opacity-50">Yahooへ一括反映</button>
+          <span className="text-slate-600">一括反映（掲載モールのみ対象）:</span>
+          <button onClick={() => reflectBulk("rakuten")} disabled={bulk?.running || bulkTargets("rakuten").length === 0} className="rounded bg-rose-600 px-3 py-1.5 text-white hover:bg-rose-700 disabled:opacity-50">
+            楽天へ一括反映（{bulkTargets("rakuten").length}件）
+          </button>
+          <button onClick={() => reflectBulk("yahoo")} disabled={bulk?.running || bulkTargets("yahoo").length === 0} className="rounded bg-purple-600 px-3 py-1.5 text-white hover:bg-purple-700 disabled:opacity-50">
+            Yahooへ一括反映（{bulkTargets("yahoo").length}件）
+          </button>
           {bulk && (
             <span className={bulk.running ? "text-blue-700" : "text-slate-600"}>
-              {bulk.running ? `反映中… ${bulk.done}/${bulk.total}（${MALL_LABEL[bulk.mall]}）` : `完了（${MALL_LABEL[bulk.mall]}）: 成功 ${bulk.ok} / 失敗 ${bulk.ng}`}
+              {bulk.running ? `反映中… ${bulk.done}/${bulk.total}（${MALL_LABEL[bulk.mall]}）` : bulk.total === 0 ? `${MALL_LABEL[bulk.mall]}掲載の選択商品がありません` : `完了（${MALL_LABEL[bulk.mall]}）: 成功 ${bulk.ok} / 失敗 ${bulk.ng}`}
             </span>
           )}
           <span className="text-slate-300">|</span>

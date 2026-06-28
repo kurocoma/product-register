@@ -55,6 +55,9 @@ export const ProductInputBaseSchema = z.object({
   lead_time: z.number().int(),
   mall_category_id: z.string(),
   store_category: z.string().default(""),
+  // モール掲載状況（反映ボタンの活性判定に使う）。取込/登録/反映成功で各モールを true にする。
+  // 楽天は rakuten_manage_number があれば掲載とみなす（後方互換のフォールバック）。
+  mall_listed: z.object({ rakuten: z.boolean().optional(), yahoo: z.boolean().optional() }).default({}),
   // モール識別子: 取込商品の実際の楽天 商品管理番号。
   // 非規約書式(maker-JAN下4桁以外)でも編集→反映で同一商品へ往復させるため保存する。
   // 空のとき buildRakutenManageNumber は従来どおり baseCodeOf を使う（新規登録・既存商品は後方互換）。
@@ -150,6 +153,19 @@ export const ProductInputSchema = ProductInputBaseSchema.transform((p) => ({
 export type ProductInput = z.infer<typeof ProductInputSchema>;
 export type ProductInputBase = z.output<typeof ProductInputBaseSchema>;
 export type Variant = z.output<typeof VariantSchema>;
+
+/** モール掲載状況。mall_listed を優先し、楽天は rakuten_manage_number があれば掲載とみなす（後方互換）。
+ * 反映ボタンの活性判定に使う（掲載モールだけ有効化）。 */
+export function mallPresence(p: {
+  mall_listed?: { rakuten?: boolean; yahoo?: boolean };
+  rakuten_manage_number?: string;
+}): { rakuten: boolean; yahoo: boolean } {
+  const ml = p.mall_listed ?? {};
+  return {
+    rakuten: !!ml.rakuten || !!(p.rakuten_manage_number && String(p.rakuten_manage_number).trim()),
+    yahoo: !!ml.yahoo,
+  };
+}
 
 /** 表示価格（二重価格）。display_price が正の値ならそれ、無ければ販売価格に連動。
  * CSV(楽天 表示価格 / Yahoo original-price)や反映で「表示価格＝販売価格」を基本にしつつ別値も許す。 */

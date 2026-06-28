@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getProduct, dbRowToProductInput } from "@/lib/product/repository";
+import { getProduct, dbRowToProductInput, upsertProduct } from "@/lib/product/repository";
 import { productVariants } from "@/lib/product/schema";
 import { getRakutenCredentialsFromEnv } from "@/lib/rakuten/credentials";
 import { buildRakutenManageNumber, buildRakutenUpsertBody, validateUpsertBody } from "@/lib/converters/rakuten-api";
@@ -75,6 +75,13 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const result = await upsertItem(cred, manageNumber, body);
   if (!result.ok) {
     return NextResponse.json({ ok: false, error: "items.upsert 失敗: " + result.message, status: result.status, detail: result.body }, { status: 502 });
+  }
+
+  // 楽天に掲載済みを記録（反映ボタン活性用）+ 実管理番号を保存（次回の編集→反映で同一商品へ往復）。
+  if (!product.mall_listed?.rakuten || product.rakuten_manage_number !== manageNumber) {
+    product.mall_listed = { ...product.mall_listed, rakuten: true };
+    product.rakuten_manage_number = manageNumber;
+    try { await upsertProduct(supabase, product, id); } catch { /* 記録失敗は登録自体を妨げない */ }
   }
 
   // 在庫数を設定（安全登録は 0）。商品登録成功後に InventoryAPI で別送。
