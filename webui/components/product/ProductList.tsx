@@ -15,6 +15,10 @@ export function ProductList({ initial }: { initial: ProductRow[] }) {
   const [query, setQuery] = useState("");
   const [makerFilter, setMakerFilter] = useState("");
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [priceMode, setPriceMode] = useState<"pct" | "yen" | "set">("pct");
+  const [priceValue, setPriceValue] = useState("");
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkMsg, setBulkMsg] = useState<string | null>(null);
 
   const makers = useMemo(() => {
     return Array.from(new Set(products.map((p) => String(p.maker_code)))).sort();
@@ -45,6 +49,44 @@ export function ProductList({ initial }: { initial: ProductRow[] }) {
       else next.add(id);
       return next;
     });
+  };
+
+  const MODE_LABEL = { pct: "％で増減", yen: "円で増減", set: "固定額に設定" } as const;
+
+  const applyBulkPrice = async () => {
+    const value = Number(priceValue);
+    if (!Number.isFinite(value)) {
+      setBulkMsg("変更値を数値で入力してください");
+      return;
+    }
+    if (priceMode !== "set" && value === 0) {
+      setBulkMsg("増減値を入力してください（例: 10 で +10%、-5 で -5%）");
+      return;
+    }
+    setBulkBusy(true);
+    setBulkMsg(null);
+    try {
+      const ids = Array.from(selected);
+      const res = await fetch("/api/products/bulk-price", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ids, mode: priceMode, value }),
+      });
+      const j = await res.json();
+      if (!res.ok || !j.ok) {
+        setBulkMsg(`失敗: ${j.error || `HTTP ${res.status}`}`);
+        return;
+      }
+      // 反映後の価格でリストを更新
+      const byId = new Map<string, number>((j.results || []).filter((r: { ok: boolean }) => r.ok).map((r: { id: string; sellingPrice: number }) => [r.id, r.sellingPrice]));
+      setProducts((prev) => prev.map((p) => (byId.has(p.id) ? { ...p, selling_price: byId.get(p.id)! } : p)));
+      setBulkMsg(`✓ ${j.updated} 件更新${j.failed ? ` / ${j.failed} 件失敗` : ""}（販売価格・表示価格を一括変更）`);
+      setPriceValue("");
+    } catch (e) {
+      setBulkMsg("通信エラー: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setBulkBusy(false);
+    }
   };
 
   const handleDelete = async (id: string) => {
@@ -168,14 +210,41 @@ export function ProductList({ initial }: { initial: ProductRow[] }) {
       </div>
 
       {selected.size > 0 && (
-        <div className="flex gap-2 text-sm text-slate-600">
-          {selected.size} 件選択中
-          <Link
-            href={`/csv?ids=${Array.from(selected).join(",")}`}
-            className="text-blue-600 hover:underline"
-          >
-            選択した商品を一括 CSV 出力
-          </Link>
+        <div className="rounded border border-slate-200 bg-white p-3 space-y-2">
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="font-medium">{selected.size} 件選択中</span>
+            <span className="text-slate-300">|</span>
+            <span className="text-slate-600">販売価格を一括編集:</span>
+            <select
+              value={priceMode}
+              onChange={(e) => setPriceMode(e.target.value as "pct" | "yen" | "set")}
+              className="rounded border border-slate-300 bg-white px-2 py-1.5 text-sm"
+            >
+              {(["pct", "yen", "set"] as const).map((m) => (
+                <option key={m} value={m}>{MODE_LABEL[m]}</option>
+              ))}
+            </select>
+            <input
+              type="number"
+              value={priceValue}
+              onChange={(e) => setPriceValue(e.target.value)}
+              placeholder={priceMode === "pct" ? "例: 10 (=+10%)" : priceMode === "yen" ? "例: 100 (=+100円)" : "例: 1980"}
+              className="w-40 rounded border border-slate-300 px-2 py-1.5 text-sm text-right"
+            />
+            <span className="text-slate-500">{priceMode === "pct" ? "%" : "円"}</span>
+            <Button onClick={applyBulkPrice} disabled={bulkBusy}>
+              {bulkBusy ? "適用中…" : "一括適用"}
+            </Button>
+            <span className="text-slate-300">|</span>
+            <Link href={`/csv?ids=${Array.from(selected).join(",")}`} className="text-blue-600 hover:underline">
+              選択を一括 CSV 出力
+            </Link>
+          </div>
+          {bulkMsg && <p className="text-sm text-slate-700">{bulkMsg}</p>}
+          <p className="text-[11px] text-slate-400">
+            販売価格と表示価格は連動します（CSV/Yahooの表示価格＝販売価格、Yahoo反映時も original_price を同期）。
+            多SKU商品は各SKUの販売価格にも同じ操作を適用します。値上げ後はモール編集の「反映」で各モールへ送れます。
+          </p>
         </div>
       )}
     </div>

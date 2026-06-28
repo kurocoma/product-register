@@ -26,6 +26,7 @@ export function RelatedImportSearch() {
   const [err, setErr] = useState<string | null>(null);
   const [importing, setImporting] = useState<string | null>(null);
   const [done, setDone] = useState<Record<string, { productId: string; existed: boolean }>>({});
+  const [bulk, setBulk] = useState<{ running: boolean; mall: Mall; done: number; total: number; ok: number; ng: number } | null>(null);
 
   const search = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -56,6 +57,39 @@ export function RelatedImportSearch() {
     } finally {
       setBusy(false);
     }
+  };
+
+  /** 表示中の全セットを指定モールから順次取込む（取込済みはスキップ）。失敗(モール未掲載等)は件数に集計。 */
+  const importAll = async (mall: Mall) => {
+    if (!sets || bulk?.running) return;
+    const targets = sets
+      .map((s) => ({ s, code: s.mall_codes[mall] || s.set_ne_code }))
+      .filter((x) => x.code);
+    setErr(null);
+    setBulk({ running: true, mall, done: 0, total: targets.length, ok: 0, ng: 0 });
+    for (let i = 0; i < targets.length; i++) {
+      const { s, code } = targets[i];
+      const key = `${s.set_ne_code}:${mall}`;
+      let ok = !!done[key];
+      if (!ok) {
+        try {
+          const res = await fetch(`/api/import/${mall}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ code }),
+          });
+          const j = await res.json();
+          if (res.ok && j.ok) {
+            setDone((prev) => ({ ...prev, [key]: { productId: j.productId, existed: !!j.existed } }));
+            ok = true;
+          }
+        } catch {
+          /* 失敗はngに集計 */
+        }
+      }
+      setBulk((b) => (b ? { ...b, done: i + 1, ok: b.ok + (ok ? 1 : 0), ng: b.ng + (ok ? 0 : 1) } : b));
+    }
+    setBulk((b) => (b ? { ...b, running: false } : b));
   };
 
   const importFromMall = async (mall: Mall, code: string, key: string) => {
@@ -104,7 +138,31 @@ export function RelatedImportSearch() {
       {notFound.length > 0 && (
         <p className="text-sm text-amber-700">未解決（マスタに無い）: <span className="font-mono">{notFound.join(", ")}</span></p>
       )}
-      {sets && <div className="text-sm text-slate-600">該当セット {sets.length} 件</div>}
+      {sets && sets.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-slate-600">該当セット {sets.length} 件</span>
+          <button
+            onClick={() => importAll("rakuten")}
+            disabled={bulk?.running}
+            className="rounded bg-rose-600 px-3 py-1.5 text-white hover:bg-rose-700 disabled:opacity-50"
+          >
+            すべて楽天から取込
+          </button>
+          <button
+            onClick={() => importAll("yahoo")}
+            disabled={bulk?.running}
+            className="rounded bg-purple-600 px-3 py-1.5 text-white hover:bg-purple-700 disabled:opacity-50"
+          >
+            すべてYahooから取込
+          </button>
+          {bulk && (
+            <span className={bulk.running ? "text-blue-700" : "text-slate-600"}>
+              {bulk.running ? `取込中… ${bulk.done}/${bulk.total}（${MALL_LABEL[bulk.mall]}）` : `完了（${MALL_LABEL[bulk.mall]}）: 成功 ${bulk.ok} 件 / 失敗 ${bulk.ng} 件`}
+            </span>
+          )}
+        </div>
+      )}
+      {sets && sets.length === 0 && <div className="text-sm text-slate-600">該当セット 0 件</div>}
 
       {sets && sets.length > 0 && (
         <div className="overflow-x-auto border border-slate-200 rounded">
