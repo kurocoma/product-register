@@ -46,7 +46,7 @@ export function ProductList({ initial }: { initial: ProductRow[] }) {
   const [draft, setDraft] = useState<Record<string, { selling: string; display: string }>>({});
   const [saveState, setSaveState] = useState<Record<string, "saving" | "saved" | "error">>({});
   const [reflectMsg, setReflectMsg] = useState<Record<string, string>>({});
-  const [bulk, setBulk] = useState<{ running: boolean; mall: Mall; done: number; total: number; ok: number; ng: number } | null>(null);
+  const [bulk, setBulk] = useState<{ running: boolean; mall: Mall; done: number; total: number; ok: number; ng: number; failed: string[] } | null>(null);
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   const makers = useMemo(() => Array.from(new Set(products.map((p) => String(p.maker_code)))).sort(), [products]);
@@ -132,13 +132,13 @@ export function ProductList({ initial }: { initial: ProductRow[] }) {
     if (bulk?.running) return;
     const ids = bulkTargets(mall);
     if (ids.length === 0) {
-      setBulk({ running: false, mall, done: 0, total: 0, ok: 0, ng: 0 });
+      setBulk({ running: false, mall, done: 0, total: 0, ok: 0, ng: 0, failed: [] });
       return;
     }
-    setBulk({ running: true, mall, done: 0, total: ids.length, ok: 0, ng: 0 });
+    setBulk({ running: true, mall, done: 0, total: ids.length, ok: 0, ng: 0, failed: [] });
     for (let i = 0; i < ids.length; i++) {
       const ok = await reflectOne(ids[i], mall);
-      setBulk((b) => (b ? { ...b, done: i + 1, ok: b.ok + (ok ? 1 : 0), ng: b.ng + (ok ? 0 : 1) } : b));
+      setBulk((b) => (b ? { ...b, done: i + 1, ok: b.ok + (ok ? 1 : 0), ng: b.ng + (ok ? 0 : 1), failed: ok ? b.failed : [...b.failed, ids[i]] } : b));
     }
     setBulk((b) => (b ? { ...b, running: false } : b));
   };
@@ -276,6 +276,11 @@ export function ProductList({ initial }: { initial: ProductRow[] }) {
           {bulk && (
             <span className={bulk.running ? "text-blue-700" : "text-slate-600"}>
               {bulk.running ? `反映中… ${bulk.done}/${bulk.total}（${MALL_LABEL[bulk.mall]}）` : bulk.total === 0 ? `${MALL_LABEL[bulk.mall]}掲載の選択商品がありません` : `完了（${MALL_LABEL[bulk.mall]}）: 成功 ${bulk.ok} / 失敗 ${bulk.ng}`}
+            </span>
+          )}
+          {bulk && !bulk.running && bulk.failed.length > 0 && (
+            <span className="w-full text-xs text-red-600">
+              失敗: {bulk.failed.map((id) => products.find((p) => p.id === id)?.ne_code || id).join(", ")}（各行の理由を確認。ジャンル必須属性の不足は商品編集で補完→再反映）
             </span>
           )}
           <span className="text-slate-300">|</span>

@@ -42,13 +42,15 @@ async function buildPlan(mall: Mall, product: ProductInput) {
       ...diffVariants(mallParsed.variants, product.variants),
     ];
     const { body, skipped } = buildRakutenPatchBody(changed, product, mallParsed);
+    // IE0418(ジャンル必須属性不足)時の再試行用に、属性を同梱したボディも用意する。
+    const bodyWithAttributes = buildRakutenPatchBody(changed, product, mallParsed, { includeAttributes: true }).body;
     // SKU構成変更(追加/削除/キー未入力)はpatchで表現できない→再登録(upsert)へ誘導するガード理由。
     const sc = detectVariantStructuralChange(mallParsed.variants, product.variants);
     const structural: string[] = [];
     if (sc.added.length) structural.push(`SKU追加(${sc.added.join(", ")})`);
     if (sc.removed.length) structural.push(`SKU削除(${sc.removed.join(", ")})`);
     if (sc.emptyKey) structural.push("SKU管理番号/NEコード未入力のSKU");
-    return { mall, cred, key: manageNumber, changed, body, skipped, advanced: [] as string[], structural } as const;
+    return { mall, cred, key: manageNumber, changed, body, bodyWithAttributes, skipped, advanced: [] as string[], structural } as const;
   }
   const cfg = getYahooConfig();
   if (!cfg) return { error: "Yahoo 認証情報が未設定です", status: 500 } as const;
@@ -135,9 +137,16 @@ export async function POST(req: Request, { params }: { params: Promise<{ mall: s
   const changedFields = plan.changed.map((c: ChangedField) => c.field);
 
   if (plan.mall === "rakuten") {
-    const result = await patchItem(plan.cred, plan.key, plan.body);
+    let result = await patchItem(plan.cred, plan.key, plan.body);
+    // IE0418(ジャンル必須属性不足)なら、商品側の属性を同梱して1回だけ再試行（属性が揃っていれば成功）。
+    if (!result.ok && /IE0418|mandatory attribute/i.test(result.message)) {
+      result = await patchItem(plan.cred, plan.key, plan.bodyWithAttributes);
+    }
     if (!result.ok) {
-      return NextResponse.json({ ok: false, error: "items.patch 失敗: " + result.message, status: result.status }, { status: 502 });
+      const hint = /IE0418|mandatory attribute/i.test(result.message)
+        ? "（楽天のジャンル必須属性が不足しています。商品編集の「商品属性」でカテゴリIDから属性を読み込み、不足項目を入力して再度反映してください）"
+        : "";
+      return NextResponse.json({ ok: false, error: "items.patch 失敗: " + result.message + hint, status: result.status }, { status: 502 });
     }
     await recordHistory(supabase, "edit", id, { via: "api_update", mall, key: plan.key, changedFields });
     return NextResponse.json({ ok: true, mall, key: plan.key, status: result.status, changedFields, skipped: plan.skipped });

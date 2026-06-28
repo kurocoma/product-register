@@ -1,6 +1,6 @@
 import type { ProductInput, Variant } from "@/lib/product/schema";
 import type { ChangedField } from "@/lib/product/diff";
-import { rakutenVariantId, buildVariantShippingForPatch } from "./rakuten-api";
+import { rakutenVariantId, buildVariantShippingForPatch, buildRakutenAttributes } from "./rakuten-api";
 
 /** 楽天 items.patch のボディ。変更されたフィールドだけを含む部分更新用。 */
 export type RakutenPatchBody = Record<string, unknown>;
@@ -84,6 +84,7 @@ export function buildRakutenPatchBody(
   changed: ChangedField[],
   p: ProductInput,
   snapshot: Partial<ProductInput> = {},
+  opts: { includeAttributes?: boolean } = {},
 ): { body: RakutenPatchBody; variantId: string; skipped: string[] } {
   const fields = new Set(changed.map((c) => c.field));
   // SKU別変更(field "SKU[...]")は variants 経由で扱うので skipped から除外する。
@@ -121,7 +122,14 @@ export function buildRakutenPatchBody(
       }
       // patchはshipping objectをマージするため、モード切替時に旧キーが残らないようnull明示版を使う。
       if (variantShippingChanged(s, v)) vp.shipping = buildVariantShippingForPatch(v);
-      if (Object.keys(vp).length > 0) variants[key] = vp;
+      if (Object.keys(vp).length > 0) {
+        // IE0418(ジャンル必須属性不足)時の再試行でのみ属性を同梱（通常は最小patch）。
+        if (opts.includeAttributes) {
+          const attrs = buildRakutenAttributes(v.attributes);
+          if (attrs.length > 0) vp.attributes = attrs;
+        }
+        variants[key] = vp;
+      }
     }
   } else {
     // 単品: 従来のフラットロジック（後方互換）
@@ -134,7 +142,13 @@ export function buildRakutenPatchBody(
     if (fields.has("shipping_type")) {
       variant.shipping = { postageIncluded: p.shipping_type === "送料無料" };
     }
-    if (Object.keys(variant).length > 0) variants[variantId] = variant;
+    if (Object.keys(variant).length > 0) {
+      if (opts.includeAttributes) {
+        const attrs = buildRakutenAttributes(p.attributes);
+        if (attrs.length > 0) variant.attributes = attrs;
+      }
+      variants[variantId] = variant;
+    }
   }
   if (Object.keys(variants).length > 0) body.variants = variants;
 

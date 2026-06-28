@@ -73,11 +73,18 @@ function uniqueVariationLabels(vlist: Variant[]): string[] {
   });
 }
 
-/** Variant の属性 → items.upsert の variants.{}.attributes[]（値が入っているものだけ、unit任意）。 */
-function buildVariantAttributes(v: Variant): { name: string; values: string[]; unit?: string }[] {
-  return (v.attributes || [])
-    .filter((a) => a.item && a.value)
+/** アプリ属性配列 → 楽天 variants.{}.attributes[]（item/value が入っているものだけ、unit任意）。
+ * ジャンル必須属性(総入数等)を満たすため、upsert だけでなく patch でも variant に同梱する。 */
+export function buildRakutenAttributes(
+  attrs: { item?: string; value?: string; unit?: string }[] | undefined,
+): { name: string; values: string[]; unit?: string }[] {
+  return (attrs || [])
+    .filter((a): a is { item: string; value: string; unit?: string } => !!a.item && !!a.value)
     .map((a) => (a.unit ? { name: a.item, values: [a.value], unit: a.unit } : { name: a.item, values: [a.value] }));
+}
+
+function buildVariantAttributes(v: Variant): { name: string; values: string[]; unit?: string }[] {
+  return buildRakutenAttributes(v.attributes);
 }
 
 /** 楽天 variant キー(SKU管理番号 = variants.{key})。取込商品は実キー(rakuten_variant_id)を保持しており、
