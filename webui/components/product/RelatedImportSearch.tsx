@@ -27,6 +27,16 @@ export function RelatedImportSearch() {
   const [importing, setImporting] = useState<string | null>(null);
   const [done, setDone] = useState<Record<string, { productId: string; existed: boolean }>>({});
   const [bulk, setBulk] = useState<{ running: boolean; mall: Mall; done: number; total: number; ok: number; ng: number } | null>(null);
+  const [checked, setChecked] = useState<Set<string>>(new Set());
+
+  const toggleChecked = (code: string) =>
+    setChecked((prev) => {
+      const next = new Set(prev);
+      if (next.has(code)) next.delete(code);
+      else next.add(code);
+      return next;
+    });
+  const toggleAll = (on: boolean) => setChecked(on && sets ? new Set(sets.map((s) => s.set_ne_code)) : new Set());
 
   const search = async (e?: React.FormEvent) => {
     e?.preventDefault();
@@ -59,12 +69,17 @@ export function RelatedImportSearch() {
     }
   };
 
-  /** 表示中の全セットを指定モールから順次取込む（取込済みはスキップ）。失敗(モール未掲載等)は件数に集計。 */
-  const importAll = async (mall: Mall) => {
+  /** チェックしたセットを指定モールから順次取込む（取込済みはスキップ）。失敗(モール未掲載等)は件数に集計。 */
+  const importChecked = async (mall: Mall) => {
     if (!sets || bulk?.running) return;
     const targets = sets
+      .filter((s) => checked.has(s.set_ne_code))
       .map((s) => ({ s, code: s.mall_codes[mall] || s.set_ne_code }))
       .filter((x) => x.code);
+    if (targets.length === 0) {
+      setErr("取込む項目にチェックを入れてください");
+      return;
+    }
     setErr(null);
     setBulk({ running: true, mall, done: 0, total: targets.length, ok: 0, ng: 0 });
     for (let i = 0; i < targets.length; i++) {
@@ -140,20 +155,20 @@ export function RelatedImportSearch() {
       )}
       {sets && sets.length > 0 && (
         <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="text-slate-600">該当セット {sets.length} 件</span>
+          <span className="text-slate-600">該当セット {sets.length} 件・チェック {checked.size} 件</span>
           <button
-            onClick={() => importAll("rakuten")}
-            disabled={bulk?.running}
+            onClick={() => importChecked("rakuten")}
+            disabled={bulk?.running || checked.size === 0}
             className="rounded bg-rose-600 px-3 py-1.5 text-white hover:bg-rose-700 disabled:opacity-50"
           >
-            すべて楽天から取込
+            チェックを楽天から取込
           </button>
           <button
-            onClick={() => importAll("yahoo")}
-            disabled={bulk?.running}
+            onClick={() => importChecked("yahoo")}
+            disabled={bulk?.running || checked.size === 0}
             className="rounded bg-purple-600 px-3 py-1.5 text-white hover:bg-purple-700 disabled:opacity-50"
           >
-            すべてYahooから取込
+            チェックをYahooから取込
           </button>
           {bulk && (
             <span className={bulk.running ? "text-blue-700" : "text-slate-600"}>
@@ -169,6 +184,13 @@ export function RelatedImportSearch() {
           <table className="w-full text-xs">
             <thead className="bg-slate-100 text-left">
               <tr>
+                <th className="px-2 py-2 w-8">
+                  <input
+                    type="checkbox"
+                    checked={!!sets && sets.length > 0 && checked.size === sets.length}
+                    onChange={(e) => toggleAll(e.target.checked)}
+                  />
+                </th>
                 <th className="px-2 py-2">セット商品コード</th>
                 <th className="px-2 py-2">セット名</th>
                 <th className="px-2 py-2 text-right">販売価格</th>
@@ -180,6 +202,13 @@ export function RelatedImportSearch() {
               {sets.map((s) => {
                 return (
                   <tr key={s.set_ne_code} className="border-t border-slate-100 align-top">
+                    <td className="px-2 py-2">
+                      <input
+                        type="checkbox"
+                        checked={checked.has(s.set_ne_code)}
+                        onChange={() => toggleChecked(s.set_ne_code)}
+                      />
+                    </td>
                     <td className="px-2 py-2 font-mono">{s.set_ne_code}</td>
                     <td className="px-2 py-2 max-w-xs">{s.set_name}</td>
                     <td className="px-2 py-2 text-right">{s.set_price ?? ""}</td>
