@@ -60,7 +60,12 @@ export function parseRakutenItem(
     if (typeof desc.pc === "string") out.description_pc = desc.pc;
     if (typeof desc.sp === "string") out.description_sp = desc.sp;
   }
-  if (typeof json.tagline === "string") out.catch_copy_pc = json.tagline;
+  // 楽天キャッチコピー(tagline)を PC用と Yahoo headline 用の両方へ反映する。
+  // headline は全角30・HTML不可だが item-mapper の fitYahooField が整形するため超過しても安全。
+  if (typeof json.tagline === "string") {
+    out.catch_copy_pc = json.tagline;
+    out.catch_copy_yahoo = json.tagline;
+  }
 
   // 商品画像 images[].location → 実画像URLとして image_url_1..20 + image_count に取り込む。
   // 実画像は thum01 や JAN名フォルダ等アプリの自動生成規約(thum02/{ne_code})と一致しないため、

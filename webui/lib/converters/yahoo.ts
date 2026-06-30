@@ -73,6 +73,9 @@ export class YahooConverter implements Converter {
     const variation1Title = p.yahoo_grouping_enabled ? p.yahoo_variation_title : "";
     const variation1Name = p.yahoo_grouping_enabled ? buildVariationName(p.quantity, p.unit) : "";
     const itemImageUrls = buildYahooItemImageUrls(p.ne_code, p.image_count);
+    // 重量: 送料無料=100 / それ以外=1（運用ルール）。送料アイコン(delivery)も重量連動：
+    // 100(=送料無料)なら 1(無料アイコン)、それ以外は 0(なし)。shipping_type は楽天 postageIncluded 由来。
+    const shipWeight = p.shipping_type === "送料無料" ? "100" : "1";
 
     const row: Record<string, string> = Object.fromEntries(YAHOO_COLUMNS.map((c) => [c, ""]));
     Object.assign(row, {
@@ -84,11 +87,10 @@ export class YahooConverter implements Converter {
       "headline": p.catch_copy_yahoo,
       "caption": caption,
       "explanation": explanation,
-      // 重量: 送料無料は 100、それ以外(送料別等)は 1（運用ルール）。shipping_type は楽天 postageIncluded 由来。
-      "ship-weight": p.shipping_type === "送料無料" ? "100" : "1",
+      "ship-weight": shipWeight,
       "taxable": "1",
       "jan": p.jan_code,
-      "delivery": "0",
+      "delivery": shipWeight === "100" ? "1" : "0",
       "condition": "0",
       "product-category": p.yahoo_category_id,
       "display": "1",
