@@ -67,6 +67,29 @@ export async function submitItem(
   return { ok: res.status === 200 && status === "OK", message: status || `HTTP ${res.status}` };
 }
 
+/** 在庫数を設定する（setStock）。Yahoo の在庫は editItem と別 API のため公開フローで明示的に送る。 */
+export async function setStock(
+  accessToken: string,
+  sellerId: string,
+  itemCode: string,
+  quantity: number,
+): Promise<{ ok: boolean; message: string }> {
+  const res = await fetch(`${BASE}/setStock`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      seller_id: sellerId,
+      item_code: itemCode,
+      quantity: String(Math.max(0, Math.floor(quantity))),
+    }),
+  });
+  const body = await res.text();
+  const status = tag(body, "Status");
+  if (res.status === 200 && status === "OK") return { ok: true, message: "OK" };
+  const errors = collectMessages(body, "Error");
+  return { ok: false, message: errors.length ? errors.join(" / ") : status || `HTTP ${res.status}` };
+}
+
 /** 商品を取得する（getItem）。存在しなければ null。差分プレビュー/マージ用。 */
 export async function getItem(
   accessToken: string,

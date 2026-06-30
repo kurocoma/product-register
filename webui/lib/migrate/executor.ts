@@ -48,6 +48,10 @@ export type ExecutorDeps = {
   validateYahoo: (params: Record<string, string>) => YahooValidation;
   /** Yahoo editItem 実行（editItem 相当）。dry-run では呼ばない。 */
   editYahoo: (params: Record<string, string>) => Promise<EditItemResult>;
+  /** Yahoo 在庫設定（setStock 相当・任意）。publish 時のみ・stockQuantity>0 のとき editItem 後に呼ぶ。 */
+  setStock?: (itemCode: string, quantity: number) => Promise<{ ok: boolean; message: string }>;
+  /** Yahoo 公開反映（submitItem 相当・任意）。publish 時のみ editItem(+setStock) 後に呼ぶ。 */
+  submitYahoo?: (itemCode: string) => Promise<{ ok: boolean; message: string }>;
   /** 画像同期（任意・ベストエフォート）。editItem の前に実行し、lib アップロード成功画像のみで
    *  item_image_urls を再構築する（it-14091 本解消）。
    *  後方互換: 戻り値 `uploaded`(アップロード成功した画像 index 群) は任意。未指定なら従来挙動
@@ -80,6 +84,8 @@ export type ExecutorOptions = {
    *  （公開中商品を一括移行で勝手に非表示化しない / AC-H02）。
    *  false=従来どおり既存にも安全既定 display="0" を明示送信する。新規商品は常に "0"。 */
   preserveExistingDisplay?: boolean;
+  /** publish=true のとき設定する在庫数（setStock）。>0 のときのみ送信する。既定 0（在庫設定しない）。 */
+  stockQuantity?: number;
 };
 
 /** per-item 実行関数を生成するファクトリ。
@@ -92,6 +98,9 @@ export function makePerItemExecutor(
   const publish = opts.publish === true; // 既定 false
   // 既定 true: 既存(forUpdate)の公開中商品を一括移行で非表示化しない（AC-H02）。
   const preserveExistingDisplay = opts.preserveExistingDisplay !== false;
+  // publish 時に設定する在庫数（>0 のときのみ setStock 送信）。
+  const stockQuantity =
+    typeof opts.stockQuantity === "number" && opts.stockQuantity >= 0 ? Math.floor(opts.stockQuantity) : 0;
   const safe = safeStateDefaults(publish);
 
   return async function perItem(item: { manageNumber: string }): Promise<MigrationItemResult> {
@@ -214,6 +223,10 @@ export function makePerItemExecutor(
     // 9c) Yahoo 登録パラメータ生成（安全既定 forceDisplay="0" AC-002）。
     const editParams = deps.buildYahooParams(product, { forUpdate: existed, forceDisplay });
 
+    // 9c-0) publish(公開で登録): display="1" を明示送信する。
+    //   forceDisplay は既存テスト(publish時 undefined)を尊重して触らず、最終 params 側で表示=表示にする。
+    if (publish) editParams.display = "1";
+
     // 9c-1) アップロード結果駆動で item_image_urls を再構築（A2/A3）。
     //   - 対象画像があったのに uploaded が空 → 壊れURLで登録せず failed（it-14091 再発防止）。
     //   - buildImageUrls 注入時のみ、成功 index のみで item_image_urls を上書き（未注入=後方互換）。
@@ -272,18 +285,37 @@ export function makePerItemExecutor(
     const editWarnNote =
       edit.warnings && edit.warnings.length ? "editItem警告: " + edit.warnings.join(" / ") : undefined;
 
-    // 9d) 履歴記録（公開(submitItem)は呼ばない＝安全側）
+    // 9c-3) publish(公開で登録): 在庫設定(setStock) → 公開反映(submitItem)。
+    //   どちらもベストエフォート。失敗は登録自体を失敗扱いにせず注意として surface し、
+    //   利用者がその商品だけ対処できるようにする（display=1/editItem 自体は成功している）。
+    const publishNotes: string[] = [];
+    if (publish) {
+      const itemCode = editParams.item_code;
+      if (deps.setStock && stockQuantity > 0) {
+        const st = await deps.setStock(itemCode, stockQuantity);
+        if (!st.ok) publishNotes.push("在庫設定(setStock)失敗: " + st.message);
+      }
+      if (deps.submitYahoo) {
+        const sub = await deps.submitYahoo(itemCode);
+        if (!sub.ok) publishNotes.push("公開反映(submitItem)失敗: " + sub.message);
+      }
+    }
+
+    // 9d) 履歴記録（publish 時は公開反映まで実施した旨を記録）
     if (deps.recordHistory) {
       await deps.recordHistory(existed ? "edit" : "create", productId, {
         mall: "yahoo",
         manageNumber,
         neCode,
+        published: publish,
+        stockQuantity: publish ? stockQuantity : undefined,
       });
     }
 
     const notes = [
       imageNote ? "画像同期に注意: " + imageNote : undefined,
       editWarnNote,
+      ...publishNotes,
     ].filter((n): n is string => Boolean(n));
 
     return {

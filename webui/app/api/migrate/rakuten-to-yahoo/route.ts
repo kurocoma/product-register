@@ -9,7 +9,7 @@ import { buildImportedProduct } from "@/lib/converters/mall-import";
 import { fetchYahooCategoryMapping } from "@/lib/product/category-mapping";
 import { getYahooConfig, getYahooAccessToken } from "@/lib/yahoo/auth";
 import { buildYahooEditItemParams, validateEditItemParams } from "@/lib/yahoo/item-mapper";
-import { editItem } from "@/lib/yahoo/item-client";
+import { editItem, setStock, submitItem } from "@/lib/yahoo/item-client";
 import { buildYahooItemImageUrls } from "@/lib/converters/image-url";
 import { buildYahooLibFileName, validateYahooFileName } from "@/lib/yahoo/lib-path";
 import { processForCabinet } from "@/lib/image/process";
@@ -27,15 +27,17 @@ export const runtime = "nodejs";
  * body: {
  *   manageNumbers: string | string[]  // 改行/カンマ/CSV1列・配列いずれも可
  *   dryRun?: boolean    // 既定 true（DB/モールへ書き込まないプレビュー）
- *   publish?: boolean   // 既定 false（安全既定: Yahoo display:0）。本セッションでは使わない
+ *   publish?: boolean   // 既定 false（安全既定: Yahoo display:0・非公開）。true=公開で登録
+ *   stockQuantity?: number // publish=true 時に設定する在庫数（>0 で setStock）。既定 0
  *   continueOnError?: boolean // 既定 true（1件失敗で全体を止めない）
  *   delayMs?: number    // 既定 300（item 間のレート制御待機ms。0で無効化可。AC-H01）
  *   preserveExistingDisplay?: boolean // 既定 true（既存公開商品を非表示化しない。AC-H02）
  * }
- * 返り値: { ok, dryRun, publish, delayMs, results[], summary, invalid[], duplicatesRemoved }
+ * 返り値: { ok, dryRun, publish, stockQuantity, delayMs, results[], summary, invalid[], duplicatesRemoved }
  *
  * カテゴリ未解決(null)・多SKU・高度設定は登録せず requires_manual に分類する。
- * 公開(submitItem)は呼ばない（安全側）。
+ * 既定(publish=false)は display:0・submitItem 非実行（安全側）。
+ * publish=true のときのみ display:1 + setStock(在庫) + submitItem(公開反映) を実行する。
  * 1リクエストの対象上限は MAX_ITEMS 件（超過は 400 で明示分割を促す。AC-H04）。
  */
 export async function POST(req: Request) {
@@ -49,6 +51,7 @@ export async function POST(req: Request) {
     manageNumbers?: unknown;
     dryRun?: unknown;
     publish?: unknown;
+    stockQuantity?: unknown;
     continueOnError?: unknown;
     delayMs?: unknown;
     preserveExistingDisplay?: unknown;
@@ -69,6 +72,9 @@ export async function POST(req: Request) {
 
   const dryRun = body.dryRun !== false; // 既定 true（安全）
   const publish = body.publish === true; // 既定 false（安全既定）
+  // publish=true のとき設定する在庫数（>0 のみ setStock）。負値・非数は 0（在庫設定なし）。
+  const stockQuantity =
+    typeof body.stockQuantity === "number" && body.stockQuantity >= 0 ? Math.floor(body.stockQuantity) : 0;
   const continueOnError = body.continueOnError !== false; // 既定 true（失敗継続）
   // レート制御の待機ms。安全な既定 300ms（過負荷防止 / AC-H01）。0以上の数値のみ採用。
   const delayMs =
@@ -152,13 +158,21 @@ export async function POST(req: Request) {
       }),
     validateYahoo: (params) => validateEditItemParams(params),
     editYahoo: (params) => editItem(token, params),
+    // 公開フロー（publish 時のみ executor が呼ぶ）: 在庫設定→公開反映。
+    setStock: (itemCode, quantity) => setStock(token, cfg.sellerId, itemCode, quantity),
+    submitYahoo: (itemCode) => submitItem(token, cfg.sellerId, itemCode),
     syncImage: (_productId, product) => syncYahooImages(token, cfg.sellerId, product),
     // item_image_urls を実 sellerId 基底(lib/{sellerId})＋アップロード成功 index のみで再構築（A3）。
     buildImageUrls: (neCode, indices) => buildYahooItemImageUrls(neCode, indices, cfg.sellerId),
     recordHistory: (action, productId, detail) => recordHistory(supabase, action, productId, detail),
   };
 
-  const executor = makePerItemExecutor(deps, { dryRun, publish, preserveExistingDisplay });
+  const executor = makePerItemExecutor(deps, {
+    dryRun,
+    publish,
+    preserveExistingDisplay,
+    stockQuantity,
+  });
   const results = await runItems(
     valid.map((m) => ({ manageNumber: m })),
     executor,
@@ -170,6 +184,7 @@ export async function POST(req: Request) {
     ok: true,
     dryRun,
     publish,
+    stockQuantity: publish ? stockQuantity : undefined,
     delayMs,
     results,
     summary,
