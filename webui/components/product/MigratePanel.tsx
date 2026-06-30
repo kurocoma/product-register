@@ -1,6 +1,17 @@
 "use client";
 
 import { useState } from "react";
+import { fullWidthLen } from "@/lib/product/text-fit";
+
+/** 文字数オーバーで切り詰められる項目（route の FieldTruncation と同形）。 */
+type Truncation = {
+  field: string;
+  label: string;
+  limit: number;
+  fullWidthLen: number;
+  original: string;
+  fitted: string;
+};
 
 /** API レスポンスの per-item 結果（route の MigrationItemResult と同形）。 */
 type ItemResult = {
@@ -10,7 +21,11 @@ type ItemResult = {
   ok: boolean;
   status: "migrate" | "requires_manual" | "skipped" | "failed" | "ok";
   error?: string;
+  truncations?: Truncation[];
 };
+
+/** リライト上書き: manageNumber → { field → 値 }。 */
+type Overrides = Record<string, Record<string, string>>;
 
 type Summary = {
   total: number;
@@ -59,6 +74,8 @@ export function MigratePanel() {
   const [busy, setBusy] = useState<null | "dry" | "commit" | "publish">(null);
   const [err, setErr] = useState<string | null>(null);
   const [data, setData] = useState<MigrateResponse | null>(null);
+  const [overrides, setOverrides] = useState<Overrides>({});
+  const [modalOpen, setModalOpen] = useState(false);
 
   /** mode: "dry"=プレビュー / "commit"=非公開登録(display:0) / "publish"=公開登録(display:1・在庫・反映) */
   const run = async (mode: "dry" | "commit" | "publish") => {
@@ -92,7 +109,13 @@ export function MigratePanel() {
       const res = await fetch("/api/migrate/rakuten-to-yahoo", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ manageNumbers, dryRun, publish, stockQuantity: publish ? qty : undefined }),
+        body: JSON.stringify({
+          manageNumbers,
+          dryRun,
+          publish,
+          stockQuantity: publish ? qty : undefined,
+          overrides,
+        }),
       });
       const j = (await res.json()) as MigrateResponse;
       if (!res.ok || !j.ok) {
@@ -110,6 +133,11 @@ export function MigratePanel() {
   };
 
   const s = data?.summary;
+
+  // 文字数オーバー（切り詰め）が出た商品。手動リライト用にモーダルで提示する。
+  const truncItems = (data?.results ?? []).filter((r) => r.truncations && r.truncations.length > 0);
+  const setOverride = (mn: string, field: string, value: string) =>
+    setOverrides((prev) => ({ ...prev, [mn]: { ...(prev[mn] ?? {}), [field]: value } }));
 
   const TONE: Record<string, string> = {
     green: "bg-green-50 border-green-300 text-green-800",
@@ -242,6 +270,24 @@ export function MigratePanel() {
         </div>
       )}
 
+      {truncItems.length > 0 && (
+        <div className="flex flex-wrap items-center gap-2 rounded border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+          <span className="font-semibold">
+            ⚠ 文字数オーバーで切り詰められる項目があります（{truncItems.length}件）
+          </span>
+          <button
+            type="button"
+            onClick={() => setModalOpen(true)}
+            className="rounded border border-amber-400 bg-white px-3 py-1 text-amber-800 hover:bg-amber-100"
+          >
+            ✏ 確認してリライト
+          </button>
+          <span className="text-xs">
+            ※リライトした内容は次の「実行/公開で登録」に反映されます（未編集なら自動で切り詰め）
+          </span>
+        </div>
+      )}
+
       {s && (
         <div className="flex flex-wrap items-center gap-3 text-sm text-slate-700">
           <span>対象 {s.total} 件</span>
@@ -295,6 +341,73 @@ export function MigratePanel() {
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {modalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="max-h-[85vh] w-full max-w-2xl space-y-4 overflow-y-auto rounded-lg bg-white p-5 shadow-xl">
+            <div className="flex items-center justify-between">
+              <div className="text-lg font-semibold">
+                ✏ 文字数オーバーのリライト（{truncItems.length}件）
+              </div>
+              <button
+                type="button"
+                onClick={() => setModalOpen(false)}
+                className="text-slate-500 hover:text-slate-800"
+                aria-label="閉じる"
+              >
+                ✕
+              </button>
+            </div>
+            <p className="text-xs text-slate-500">
+              上限を超える項目です。<strong>現在の値</strong>を参考に書き換えてください
+              （空欄や上限超過のままなら自動で切り詰めて登録します）。
+            </p>
+            {truncItems.map((r) => (
+              <div key={r.manageNumber} className="space-y-3 rounded border border-slate-200 p-3">
+                <div className="font-mono text-sm font-semibold">{r.manageNumber}</div>
+                {(r.truncations ?? []).map((t) => {
+                  const val = overrides[r.manageNumber]?.[t.field] ?? t.original;
+                  const len = fullWidthLen(val);
+                  const over = len > t.limit;
+                  return (
+                    <div key={t.field} className="space-y-1">
+                      <div className="flex items-center justify-between text-xs">
+                        <span className="font-medium text-slate-700">{t.label}</span>
+                        <span className={over ? "text-red-600" : "text-green-700"}>
+                          全角 {len.toFixed(1)} / 上限 {t.limit}
+                          {over ? "（超過）" : "（OK）"}
+                        </span>
+                      </div>
+                      <textarea
+                        value={val}
+                        onChange={(e) => setOverride(r.manageNumber, t.field, e.target.value)}
+                        rows={t.field === "explanation" ? 4 : 2}
+                        className="w-full rounded border border-slate-300 px-2 py-1 text-sm"
+                      />
+                      <div className="text-xs text-slate-400">
+                        未編集時の切り詰め後: <span className="font-mono">{t.fitted}</span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ))}
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setModalOpen(false)}
+                className="rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+              >
+                適用して閉じる
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

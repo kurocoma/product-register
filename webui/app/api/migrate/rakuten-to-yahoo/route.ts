@@ -9,7 +9,11 @@ import { buildImportedProduct } from "@/lib/converters/mall-import";
 import { fetchYahooCategoryMapping } from "@/lib/product/category-mapping";
 import { fetchYahooPostageSet, fetchYahooLeadTime } from "@/lib/product/shipping-mapping";
 import { getYahooConfig, getYahooAccessToken } from "@/lib/yahoo/auth";
-import { buildYahooEditItemParams, validateEditItemParams } from "@/lib/yahoo/item-mapper";
+import {
+  buildYahooEditItemParams,
+  validateEditItemParams,
+  detectYahooTruncations,
+} from "@/lib/yahoo/item-mapper";
 import { editItem, setStock, submitItem } from "@/lib/yahoo/item-client";
 import { buildYahooItemImageUrls } from "@/lib/converters/image-url";
 import { buildYahooLibFileName, validateYahooFileName } from "@/lib/yahoo/lib-path";
@@ -56,6 +60,7 @@ export async function POST(req: Request) {
     continueOnError?: unknown;
     delayMs?: unknown;
     preserveExistingDisplay?: unknown;
+    overrides?: unknown;
   } = {};
   try {
     body = (await req.json()) as typeof body;
@@ -82,6 +87,11 @@ export async function POST(req: Request) {
     typeof body.delayMs === "number" && body.delayMs >= 0 ? body.delayMs : 300;
   // 既存(forUpdate)の公開中 Yahoo 商品を非表示化しない既定（AC-H02）。
   const preserveExistingDisplay = body.preserveExistingDisplay !== false;
+  // 手動リライトの上書き（manageNumber → { name?/headline?/explanation? }）。
+  const overrides =
+    typeof body.overrides === "object" && body.overrides !== null
+      ? (body.overrides as Record<string, { name?: string; headline?: string; explanation?: string }>)
+      : {};
 
   const { valid, invalid, duplicatesRemoved } = parseManageNumbers(rawManage as string | string[]);
 
@@ -170,6 +180,8 @@ export async function POST(req: Request) {
         forceDisplay: o.forceDisplay,
       }),
     validateYahoo: (params) => validateEditItemParams(params),
+    // 文字数オーバーで切り詰められる項目（商品名/キャッチコピー/商品情報）を検出して結果へ載せる。
+    detectTruncations: (product) => detectYahooTruncations(product),
     editYahoo: (params) => editItem(token, params),
     // 公開フロー（publish 時のみ executor が呼ぶ）: 在庫設定→公開反映。
     setStock: (itemCode, quantity) => setStock(token, cfg.sellerId, itemCode, quantity),
@@ -185,6 +197,7 @@ export async function POST(req: Request) {
     publish,
     preserveExistingDisplay,
     stockQuantity,
+    overrides,
   });
   const results = await runItems(
     valid.map((m) => ({ manageNumber: m })),

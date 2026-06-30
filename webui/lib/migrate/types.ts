@@ -56,6 +56,17 @@ export type MigrationItemPlan = {
   missingRequiredYahooFields: string[];
 };
 
+/** 文字数上限で切り詰められた項目（dry-run 警告・手動リライト用）。
+ *  original=HTML処理後の元テキスト（リライト対象）、fitted=切詰後プレビュー。 */
+export type FieldTruncation = {
+  field: string;
+  label: string;
+  limit: number;
+  fullWidthLen: number;
+  original: string;
+  fitted: string;
+};
+
 /** per-item の実行結果（commit 後の1行）。 */
 export type MigrationItemResult = {
   manageNumber: string;
@@ -67,6 +78,8 @@ export type MigrationItemResult = {
   status: ItemStatus;
   /** 失敗/手動時の理由。 */
   error?: string;
+  /** 文字数上限で切り詰められる項目（dry-run で検出。空/未設定=切詰なし）。 */
+  truncations?: FieldTruncation[];
 };
 
 /** 移行全体の集計サマリ。total = 各カテゴリの合計。 */

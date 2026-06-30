@@ -90,6 +90,44 @@ export function fitYahooFieldLimits(params: Record<string, string>): Record<stri
   return out;
 }
 
+/** 文字数オーバーで切り詰められる項目（警告モーダル用）。
+ *  original=HTML処理後の元テキスト（利用者がリライトする対象）、fitted=切詰後プレビュー。 */
+export type YahooTruncation = {
+  field: "name" | "headline" | "explanation";
+  label: string;
+  limit: number;
+  fullWidthLen: number;
+  original: string;
+  fitted: string;
+};
+
+const TRUNCATION_TARGETS: { field: YahooTruncation["field"]; label: string }[] = [
+  { field: "name", label: "商品名" },
+  { field: "headline", label: "キャッチコピー" },
+  { field: "explanation", label: "商品情報(説明)" },
+];
+
+/** 商品が Yahoo 登録時に文字数上限で切り詰められる項目を検出する（dry-run の警告用）。
+ *  YahooConverter の整形前出力を上限と比較し、超過項目を元テキスト/切詰後つきで返す。 */
+export function detectYahooTruncations(p: ProductInput): YahooTruncation[] {
+  const row = new YahooConverter().convert([p])[0];
+  const out: YahooTruncation[] = [];
+  for (const { field, label } of TRUNCATION_TARGETS) {
+    const limit = YAHOO_FIELD_LIMITS[field];
+    const raw = row[field];
+    if (!limit || raw == null || raw === "") continue;
+    const base =
+      limit.html === "br-to-space" ? htmlToPlainText(raw) : limit.html ? stripHtml(raw) : raw;
+    const len = fullWidthLen(base);
+    const overByLen = len > limit.max;
+    const overByChars = limit.maxChars != null && [...base].length > limit.maxChars;
+    if (overByLen || overByChars) {
+      out.push({ field, label, limit: limit.max, fullWidthLen: len, original: base, fitted: fitYahooField(raw, limit) });
+    }
+  }
+  return out;
+}
+
 /** 整形後でも上限超過・必須空が残っていないか検証する（dry-run 事前検知用）。
  * 通常は fitYahooFieldLimits 適用後に呼ぶため違反は出ないが、必須が空のままなど
  * 整形では適合できないケースを surface するための honest なチェック。 */

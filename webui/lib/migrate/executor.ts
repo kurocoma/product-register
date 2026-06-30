@@ -13,7 +13,7 @@ import type { YahooCategoryMapping } from "@/lib/product/category-mapping";
 import type { EditItemResult } from "@/lib/yahoo/item-client";
 import { buildItemPlan } from "./plan";
 import { safeStateDefaults } from "./defaults";
-import type { MigrationItemResult } from "./types";
+import type { MigrationItemResult, FieldTruncation } from "./types";
 
 /** 楽天取込の解決結果。resolvedCode は SKU 検索で引き当てた実管理番号（入力と異なることがある）。 */
 export type ResolvedRakutenItem = { json: Record<string, unknown>; resolvedCode: string };
@@ -42,6 +42,9 @@ export type ExecutorDeps = {
     rakutenShippingGroup: string,
     rakutenDeliveryDateId: string,
   ) => Promise<{ postageSet?: number; leadTime?: number }>;
+  /** 文字数上限で切り詰められる項目の検出（任意・detectYahooTruncations 相当・純粋）。
+   *  注入時は dry-run/commit の結果に truncations を載せ、UI が警告モーダルで surface する。 */
+  detectTruncations?: (product: ProductInput) => FieldTruncation[];
   /** 既存アプリ商品の照合（管理番号→ne_code）。あれば二重作成しない（AC-007）。 */
   findExisting: (manageNumber: string, neCode: string) => Promise<{ id: string } | null>;
   /** 新規作成（upsertProduct 相当）。dry-run では呼ばない。 */
@@ -93,6 +96,9 @@ export type ExecutorOptions = {
   preserveExistingDisplay?: boolean;
   /** publish=true のとき設定する在庫数（setStock）。>0 のときのみ送信する。既定 0（在庫設定しない）。 */
   stockQuantity?: number;
+  /** 手動リライトの上書き。manageNumber → { name?/headline?/explanation? }。
+   *  文字数オーバー項目をユーザーがモーダルで書き換えた値を、登録前に商品へ反映する。 */
+  overrides?: Record<string, { name?: string; headline?: string; explanation?: string }>;
 };
 
 /** per-item 実行関数を生成するファクトリ。
@@ -108,6 +114,7 @@ export function makePerItemExecutor(
   // publish 時に設定する在庫数（>0 のときのみ setStock 送信）。
   const stockQuantity =
     typeof opts.stockQuantity === "number" && opts.stockQuantity >= 0 ? Math.floor(opts.stockQuantity) : 0;
+  const overrides = opts.overrides ?? {};
   const safe = safeStateDefaults(publish);
 
   return async function perItem(item: { manageNumber: string }): Promise<MigrationItemResult> {
@@ -138,6 +145,16 @@ export function makePerItemExecutor(
     }
     const product = built.product;
     const neCode = built.neCode;
+
+    // 3b) 手動リライトの上書き（文字数オーバー項目をユーザーが書き換えた値で差し替え）。
+    //     name→display_name、headline→catch_copy_yahoo、explanation→free1（YahooConverter の各出力元）。
+    const ov = overrides[manageNumber];
+    if (ov) {
+      if (typeof ov.name === "string" && ov.name.trim() !== "") product.display_name = ov.name;
+      if (typeof ov.headline === "string") product.catch_copy_yahoo = ov.headline;
+      if (typeof ov.explanation === "string") product.free1 = ov.explanation;
+    }
+
     // Yahoo グルーピング(バリエーション)等の高度設定は自動移行で誤反映しうる → 手動(AC-008)
     const hasAdvancedYahooSettings = product.yahoo_grouping_enabled === true;
 
@@ -185,6 +202,18 @@ export function makePerItemExecutor(
     const previewValid = deps.validateYahoo(previewParams);
     const missingRequiredYahooFields = previewValid.ok ? [] : previewValid.missing;
 
+    // 6b) 文字数オーバー検出（手動リライト警告用）。override 適用後の最終商品で判定。
+    //     検出は advisory（失敗しても移行は止めない）ため例外は握りつぶす。
+    let truncations: FieldTruncation[] | undefined;
+    if (deps.detectTruncations) {
+      try {
+        truncations = deps.detectTruncations(product);
+      } catch {
+        truncations = undefined;
+      }
+    }
+    const truncationField = truncations && truncations.length ? { truncations } : {};
+
     // 7) plan 判定（純関数）。requires_manual はここで確定し登録しない。
     const plan = buildItemPlan({
       manageNumber,
@@ -208,7 +237,14 @@ export function makePerItemExecutor(
 
     // 8) dry-run: 書き込みを一切行わず「移行可」として返す(AC-005)
     if (dryRun) {
-      return { manageNumber, productId: existing?.id, step: "register", ok: true, status: "migrate" };
+      return {
+        manageNumber,
+        productId: existing?.id,
+        step: "register",
+        ok: true,
+        status: "migrate",
+        ...truncationField,
+      };
     }
 
     // 9) commit
@@ -345,6 +381,7 @@ export function makePerItemExecutor(
       ok: true,
       status: "ok",
       error: notes.length ? "登録成功（" + notes.join(" / ") + "）" : undefined,
+      ...truncationField,
     };
   };
 }
