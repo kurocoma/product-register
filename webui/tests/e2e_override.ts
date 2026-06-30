@@ -1,6 +1,8 @@
 // 文字数オーバー手動リライト(override)の実機E2E。
 //   override 付きで commit(display=0) → Yahoo から読み戻して name/headline/explanation を照合 → 復元。
 // 使い方(webui): npx tsx tests/e2e_override.ts [--code=r0101-1]
+// 実機スクリプト（外部 supabase-ssr アダプタの緩い型のため any を許容）。
+/* eslint-disable @typescript-eslint/no-explicit-any */
 import { readFileSync } from "node:fs";
 (async () => {
   const env = readFileSync(new URL("../.env.local", import.meta.url), "utf8");
