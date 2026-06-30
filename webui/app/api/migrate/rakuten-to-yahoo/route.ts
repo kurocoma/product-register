@@ -10,6 +10,7 @@ import { fetchYahooCategoryMapping } from "@/lib/product/category-mapping";
 import { getYahooConfig, getYahooAccessToken } from "@/lib/yahoo/auth";
 import { buildYahooEditItemParams, validateEditItemParams } from "@/lib/yahoo/item-mapper";
 import { editItem } from "@/lib/yahoo/item-client";
+import { buildYahooItemImageUrls } from "@/lib/converters/image-url";
 import { buildYahooLibFileName, validateYahooFileName } from "@/lib/yahoo/lib-path";
 import { processForCabinet } from "@/lib/image/process";
 import { uploadLibImage } from "@/lib/yahoo/lib-image-client";
@@ -152,6 +153,8 @@ export async function POST(req: Request) {
     validateYahoo: (params) => validateEditItemParams(params),
     editYahoo: (params) => editItem(token, params),
     syncImage: (_productId, product) => syncYahooImages(token, cfg.sellerId, product),
+    // item_image_urls を実 sellerId 基底(lib/{sellerId})＋アップロード成功 index のみで再構築（A3）。
+    buildImageUrls: (neCode, indices) => buildYahooItemImageUrls(neCode, indices, cfg.sellerId),
     recordHistory: (action, productId, detail) => recordHistory(supabase, action, productId, detail),
   };
 
@@ -205,12 +208,14 @@ async function findExistingProduct(
 const MAX_IMAGE_BYTES = 30 * 1024 * 1024;
 
 /** 取込んだ実画像URL(image_url_1..image_count)を Yahoo 追加画像(lib)へ転送する。
- *  upload/yahoo-sync ルートと同等（it-14091 対策の画像準備）。ベストエフォート（失敗は理由を返す）。 */
+ *  upload/yahoo-sync ルートと同等（it-14091 対策の画像準備）。ベストエフォート（失敗は理由を返す）。
+ *  戻り値 `uploaded` = アップロードに成功した画像 index 群。executor がこれだけで item_image_urls を
+ *  再構築する（成功画像のみ参照し、壊れURLでの it-14091 再発を防ぐ）。 */
 async function syncYahooImages(
   token: string,
   sellerId: string,
   product: ProductInput,
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; uploaded: number[] }> {
   const count = Math.max(1, Math.min(20, product.image_count || 1));
   const sources: { index: number; url: string }[] = [];
   for (let i = 1; i <= count; i++) {
@@ -218,10 +223,11 @@ async function syncYahooImages(
     if (typeof u === "string" && u.trim()) sources.push({ index: i, url: u.trim() });
   }
   if (sources.length === 0) {
-    return { ok: false, error: "転送元の画像URL(image_url_N)がありません" };
+    return { ok: false, error: "転送元の画像URL(image_url_N)がありません", uploaded: [] };
   }
 
   const failed: string[] = [];
+  const uploaded: number[] = [];
   for (const s of sources) {
     try {
       const target = buildYahooLibFileName(product, s.index);
@@ -243,9 +249,12 @@ async function syncYahooImages(
       const jpeg = await processForCabinet(buf, { kind: "main" });
       const up = await uploadLibImage(token, sellerId, { fileName: target.fileName, jpeg });
       if (!up.ok) failed.push(`#${s.index}: ${up.message}`);
+      else uploaded.push(s.index);
     } catch (e) {
       failed.push(`#${s.index}: ${e instanceof Error ? e.message : String(e)}`);
     }
   }
-  return failed.length ? { ok: false, error: failed.join(" / ") } : { ok: true };
+  return failed.length
+    ? { ok: false, error: failed.join(" / "), uploaded }
+    : { ok: true, uploaded };
 }

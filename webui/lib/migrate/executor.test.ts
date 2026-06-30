@@ -132,8 +132,8 @@ describe("makePerItemExecutor — commit 正常系", () => {
       "buildImported",
       "findExisting",
       "upsert",
-      "editYahoo",
       "syncImage",
+      "editYahoo",
       "recordHistory",
     ]);
     expect(spies.recordHistory).toHaveBeenCalledWith(
