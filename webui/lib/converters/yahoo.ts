@@ -84,7 +84,8 @@ export class YahooConverter implements Converter {
       "headline": p.catch_copy_yahoo,
       "caption": caption,
       "explanation": explanation,
-      "ship-weight": "1",
+      // 重量: 送料無料は 100、それ以外(送料別等)は 1（運用ルール）。shipping_type は楽天 postageIncluded 由来。
+      "ship-weight": p.shipping_type === "送料無料" ? "100" : "1",
       "taxable": "1",
       "jan": p.jan_code,
       "delivery": "0",
