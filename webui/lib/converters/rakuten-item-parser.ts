@@ -84,6 +84,9 @@ export function parseRakutenItem(
       const merchantSku = typeof v.merchantDefinedSkuId === "string" ? v.merchantDefinedSkuId.trim() : "";
       out.ne_code = merchantSku || targetId;
       if (typeof v.standardPrice === "string") out.selling_price = parsePrice(v.standardPrice);
+      // 消費税率は楽天の実値(taxRate)を採用（軽減8%/標準10%の混在対応）。未返却時は既定10。
+      const tr = parseTaxRate(v.taxRate);
+      if (tr !== undefined) out.tax_rate = tr;
       const art = v.articleNumber as { value?: string } | undefined;
       if (art && typeof art.value === "string") out.jan_code = art.value;
       const ship = v.shipping as { postageIncluded?: boolean } | undefined;
@@ -103,6 +106,20 @@ export function parseRakutenItem(
 function parsePrice(raw: unknown): number {
   const n = Number(String(raw ?? "").replace(/,/g, ""));
   return Number.isFinite(n) ? Math.round(n) : 0;
+}
+
+/** 楽天 variant.taxRate（小数 0.08 / 文字列 "0.1"）→ アプリ tax_rate（百分率 8 / 10）。
+ * 食品の軽減税率(8%)と標準税率(10%)が商品ごとに混在するため楽天の実値を採用する。
+ * 想定外の値・欠落（既定便等で未返却）は undefined を返し、呼び出し側で安全既定(10)へ倒す。 */
+export function parseTaxRate(raw: unknown): 8 | 10 | undefined {
+  if (raw == null || raw === "") return undefined;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return undefined;
+  // 楽天は小数(0.08/0.1)。稀に百分率(8/10)で来ても拾えるよう正規化する。
+  const pct = n <= 1 ? Math.round(n * 100) : Math.round(n);
+  if (pct === 8) return 8;
+  if (pct === 10) return 10;
+  return undefined;
 }
 
 /** variant の選択肢ラベル(例 "24本"・多軸 "赤 / S")を組み立てる。
@@ -143,7 +160,7 @@ export function parseRakutenVariants(json: Record<string, unknown>): Variant[] {
       ne_code: merchantSku || key,
       jan_code: /^\d{13}$/.test(janRaw) ? janRaw : "",
       selling_price: parsePrice(v.standardPrice),
-      tax_rate: 10,
+      tax_rate: parseTaxRate(v.taxRate) ?? 10,
       quantity: 1,
       variation_value: variationLabel(json, v),
       // 配送詳細(送料無料/別・個別送料・送料区分1/2・配送方法セット)。snapshot比較と取込の両方に使う。
