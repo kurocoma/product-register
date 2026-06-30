@@ -141,6 +141,12 @@ export const ProductInputBaseSchema = z.object({
   attribute_item_5: z.string().default(""),
   attribute_value_5: z.string().default(""),
   attribute_unit_5: z.string().default(""),
+
+  // 商品オプション（項目選択肢）。楽天 customizationOptions → Yahoo options(自由文形式) 用。
+  // 各オプションは { name: 項目名, values: 選択肢[] }。永続化は extra JSONB へ。
+  customization_options: z
+    .array(z.object({ name: z.string(), values: z.array(z.string()) }))
+    .default([]),
 });
 
 /** transform 適用版 (is_single/is_set 派生フィールドを追加) */

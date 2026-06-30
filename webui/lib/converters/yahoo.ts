@@ -1,5 +1,6 @@
 import type { ProductInput } from "@/lib/product/schema";
 import { displayPrice } from "@/lib/product/schema";
+import { fitFullWidth } from "@/lib/product/text-fit";
 import type { Converter } from "./base";
 import { ENCODING } from "./base";
 import { buildYahooImgListHtml, buildYahooItemImageUrls } from "./image-url";
@@ -34,6 +35,34 @@ function resolveGroupingId(neCode: string, enabled: boolean): string {
 
 function buildVariationName(quantity: number, unit: string): string {
   return quantity === 1 ? `1${unit}` : `${quantity}${unit}セット`;
+}
+
+/** 商品オプション {name, values}[] → Yahoo options(自由文形式)文字列。
+ *  形式: `name#v1,v2|name2#...`（最大20項目/各100値・name/value 全角28・
+ *  使用不可文字(半角スペース/`<>;:&=#"\`/区切り `,|`)除去・合計20,000バイト以内）。 */
+function buildYahooOptions(opts: { name: string; values: string[] }[]): string {
+  if (!Array.isArray(opts) || opts.length === 0) return "";
+  // Yahoo の使用不可文字 + 構造区切り(, |)を除去（name/value とも）。
+  const sanitize = (s: string) => fitFullWidth(s.replace(/[ \t<>;:&=#"\\,|]/g, ""), 28);
+  const byteLen = (s: string) => new TextEncoder().encode(s).length;
+
+  const parts: string[] = [];
+  for (const o of opts.slice(0, 20)) {
+    const name = sanitize(o.name);
+    const values = o.values
+      .map(sanitize)
+      .filter((v) => v !== "")
+      .slice(0, 100);
+    if (name === "" || values.length === 0) continue;
+    parts.push(`${name}#${values.join(",")}`);
+  }
+  let result = parts.join("|");
+  // 合計20,000バイト超過時は末尾オプションから落とす。
+  while (parts.length > 0 && byteLen(result) > 20000) {
+    parts.pop();
+    result = parts.join("|");
+  }
+  return result;
 }
 
 function stripHtml(text: string): string {
@@ -87,6 +116,7 @@ export class YahooConverter implements Converter {
       "headline": p.catch_copy_yahoo,
       "caption": caption,
       "explanation": explanation,
+      "options": buildYahooOptions(p.customization_options),
       "ship-weight": shipWeight,
       "taxable": "1",
       "jan": p.jan_code,

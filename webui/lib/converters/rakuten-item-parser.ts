@@ -67,6 +67,25 @@ export function parseRakutenItem(
     out.catch_copy_yahoo = json.tagline;
   }
 
+  // 商品オプション(項目選択肢) customizationOptions → { name, values }[]。
+  // 選択肢を持つもののみ採用（Yahoo options=自由文形式へ後段で整形）。
+  const copts = json.customizationOptions;
+  if (Array.isArray(copts)) {
+    const options = copts
+      .map((o) => {
+        const opt = (o ?? {}) as { displayName?: unknown; selections?: unknown };
+        const name = typeof opt.displayName === "string" ? opt.displayName : "";
+        const values = Array.isArray(opt.selections)
+          ? opt.selections
+              .map((s) => (s && typeof s === "object" ? (s as { displayValue?: unknown }).displayValue : ""))
+              .filter((v): v is string => typeof v === "string" && v !== "")
+          : [];
+        return { name, values };
+      })
+      .filter((o) => o.name !== "" && o.values.length > 0);
+    if (options.length > 0) out.customization_options = options;
+  }
+
   // 商品画像 images[].location → 実画像URLとして image_url_1..20 + image_count に取り込む。
   // 実画像は thum01 や JAN名フォルダ等アプリの自動生成規約(thum02/{ne_code})と一致しないため、
   // 算出ではなく取得した実URLをそのまま保持する。
