@@ -84,10 +84,35 @@ export async function setStock(
     }),
   });
   const body = await res.text();
+  // setStock は <ResultSet ok="1" ng="0"> 形式（<Status> ではない）。ng=0 かつ Error 無しで成功。
+  const ng = body.match(/<ResultSet[^>]*\bng="(\d+)"/i)?.[1];
+  const errors = collectMessages(body, "Error");
+  if (res.status === 200 && ng === "0" && errors.length === 0) return { ok: true, message: "OK" };
+  return {
+    ok: false,
+    message: errors.length ? errors.join(" / ") : ng != null ? `ng=${ng}` : `HTTP ${res.status}`,
+  };
+}
+
+/** ストア編集をフロントへ公開（反映）する（reservePublish・全反映予約 mode=1）。
+ *  Yahoo の反映は商品単位でなくストア全体。editItem/setStock の後に1回だけ呼ぶ。
+ *  pm-05001(未反映の項目がない)は「既に反映済み」とみなして成功扱いにする。 */
+export async function reservePublish(
+  accessToken: string,
+  sellerId: string,
+): Promise<{ ok: boolean; message: string }> {
+  const res = await fetch(`${BASE}/reservePublish`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({ seller_id: sellerId, mode: "1" }),
+  });
+  const body = await res.text();
   const status = tag(body, "Status");
   if (res.status === 200 && status === "OK") return { ok: true, message: "OK" };
   const errors = collectMessages(body, "Error");
-  return { ok: false, message: errors.length ? errors.join(" / ") : status || `HTTP ${res.status}` };
+  const msg = errors.length ? errors.join(" / ") : status || `HTTP ${res.status}`;
+  if (/pm-05001/i.test(msg)) return { ok: true, message: "反映済み（未反映項目なし）" };
+  return { ok: false, message: msg };
 }
 
 /** 商品を取得する（getItem）。存在しなければ null。差分プレビュー/マージ用。 */

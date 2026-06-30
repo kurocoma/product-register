@@ -14,7 +14,7 @@ import {
   validateEditItemParams,
   detectYahooTruncations,
 } from "@/lib/yahoo/item-mapper";
-import { editItem, setStock, submitItem } from "@/lib/yahoo/item-client";
+import { editItem, setStock, reservePublish } from "@/lib/yahoo/item-client";
 import { buildYahooItemImageUrls } from "@/lib/converters/image-url";
 import { buildYahooLibFileName, validateYahooFileName } from "@/lib/yahoo/lib-path";
 import { processForCabinet } from "@/lib/image/process";
@@ -183,9 +183,9 @@ export async function POST(req: Request) {
     // 文字数オーバーで切り詰められる項目（商品名/キャッチコピー/商品情報）を検出して結果へ載せる。
     detectTruncations: (product) => detectYahooTruncations(product),
     editYahoo: (params) => editItem(token, params),
-    // 公開フロー（publish 時のみ executor が呼ぶ）: 在庫設定→公開反映。
+    // 公開フロー（publish 時のみ executor が呼ぶ）: 在庫設定（per item）。
+    // 公開反映(reservePublish)はストア全体反映のため per item では呼ばず、全件登録後に1回だけ実行する。
     setStock: (itemCode, quantity) => setStock(token, cfg.sellerId, itemCode, quantity),
-    submitYahoo: (itemCode) => submitItem(token, cfg.sellerId, itemCode),
     syncImage: (_productId, product) => syncYahooImages(token, cfg.sellerId, product),
     // item_image_urls を実 sellerId 基底(lib/{sellerId})＋アップロード成功 index のみで再構築（A3）。
     buildImageUrls: (neCode, indices) => buildYahooItemImageUrls(neCode, indices, cfg.sellerId),
@@ -206,6 +206,13 @@ export async function POST(req: Request) {
   );
   const summary = aggregate(results);
 
+  // 公開反映: publish かつ実登録成功が1件以上なら、ストア全体を1回だけフロント反映する（reservePublish）。
+  // Yahoo の反映は商品単位でなくストア単位のため、per item ではなくここで1回だけ呼ぶ。
+  let publishResult: { ok: boolean; message: string } | undefined;
+  if (publish && !dryRun && results.some((r) => r.ok)) {
+    publishResult = await reservePublish(token, cfg.sellerId);
+  }
+
   return NextResponse.json({
     ok: true,
     dryRun,
@@ -214,6 +221,7 @@ export async function POST(req: Request) {
     delayMs,
     results,
     summary,
+    publishResult,
     invalid,
     duplicatesRemoved,
   });

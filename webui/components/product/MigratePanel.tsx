@@ -41,6 +41,7 @@ type MigrateResponse = {
   dryRun?: boolean;
   publish?: boolean;
   stockQuantity?: number;
+  publishResult?: { ok: boolean; message: string };
   results?: ItemResult[];
   summary?: Summary;
   invalid?: { raw: string; reason: string }[];
@@ -166,11 +167,20 @@ export function MigratePanel() {
     }
     if (s.failed === 0 && s.requiresManual === 0) {
       if (data.publish) {
+        const pub = data.publishResult;
+        if (pub && !pub.ok) {
+          return {
+            tone: "amber",
+            icon: "⚠",
+            title: `登録成功・公開反映に失敗 — ${s.migrated} 件（display:1・在庫${data.stockQuantity ?? qty}）`,
+            msg: `フロント反映(reservePublish)が失敗: ${pub.message}。ストアクリエイターMgrで「全体を反映」を実行してください。`,
+          };
+        }
         return {
           tone: "green",
           icon: "✅",
-          title: `公開登録完了 — ${s.migrated} 件を公開しました（display:1・在庫${data.stockQuantity ?? qty}・反映）`,
-          msg: "Yahoo に表示・販売開始の状態で登録・反映しました。反映の最終状態はストアクリエイターMgrでご確認ください。",
+          title: `公開登録完了 — ${s.migrated} 件を公開（display:1・在庫${data.stockQuantity ?? qty}・反映予約）`,
+          msg: "Yahoo に表示・在庫設定・フロント反映(reservePublish)まで実行しました。反映完了まで数分かかる場合があります。ストアクリエイターMgrでご確認ください。",
         };
       }
       return {
