@@ -138,6 +138,11 @@ export function MigratePanel() {
   const truncItems = (data?.results ?? []).filter((r) => r.truncations && r.truncations.length > 0);
   const setOverride = (mn: string, field: string, value: string) =>
     setOverrides((prev) => ({ ...prev, [mn]: { ...(prev[mn] ?? {}), [field]: value } }));
+  // リライト済み（編集された）項目数。実行/公開で反映される旨を明示するため。
+  const editedCount = Object.values(overrides).reduce(
+    (n, fields) => n + Object.keys(fields).length,
+    0,
+  );
 
   const TONE: Record<string, string> = {
     green: "bg-green-50 border-green-300 text-green-800",
@@ -285,6 +290,11 @@ export function MigratePanel() {
           <span className="text-xs">
             ※リライトした内容は次の「実行/公開で登録」に反映されます（未編集なら自動で切り詰め）
           </span>
+          {editedCount > 0 && (
+            <span className="rounded bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-800">
+              ✏ {editedCount}項目リライト済み → 「実行/公開で登録」を押すと反映されます
+            </span>
+          )}
         </div>
       )}
 
