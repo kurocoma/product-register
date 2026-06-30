@@ -30,11 +30,27 @@ function toRakutenImageUrl(img: { type?: unknown; location?: unknown }): string 
 /** 楽天 items.get の JSON から、編集対象になる項目を ProductInput 部分へパースする。
  * 在庫数は items.get に含まれない（InventoryAPI 管轄）ため対象外。
  * 構造は実機 items.get で確認済み（docs/楽天/items.get.txt / 03-商品取得検索）。 */
+/** 楽天 ID 値(配送方法セット番号 shippingMethodGroup・納期管理番号 normalDeliveryDateId 等)は
+ *  文字列("10")でも数値(2)でも返るため、トリム済み文字列へ正規化する（空/欠落は ""）。 */
+export function rakutenIdToString(x: unknown): string {
+  if (typeof x === "number" && Number.isFinite(x)) return String(x);
+  if (typeof x === "string") return x.trim();
+  return "";
+}
+
 export function parseRakutenItem(
   json: Record<string, unknown>,
   opts?: { merchantSku?: string },
-): Partial<ProductInput> & { _variantId?: string } {
-  const out: Partial<ProductInput> & { _variantId?: string } = {};
+): Partial<ProductInput> & {
+  _variantId?: string;
+  _rakutenShippingGroup?: string;
+  _rakutenDeliveryDateId?: string;
+} {
+  const out: Partial<ProductInput> & {
+    _variantId?: string;
+    _rakutenShippingGroup?: string;
+    _rakutenDeliveryDateId?: string;
+  } = {};
 
   if (typeof json.title === "string") out.display_name = json.title;
   if (typeof json.genreId === "string") out.mall_category_id = json.genreId;
@@ -89,8 +105,11 @@ export function parseRakutenItem(
       if (tr !== undefined) out.tax_rate = tr;
       const art = v.articleNumber as { value?: string } | undefined;
       if (art && typeof art.value === "string") out.jan_code = art.value;
-      const ship = v.shipping as { postageIncluded?: boolean } | undefined;
+      const ship = v.shipping as { postageIncluded?: boolean; shippingMethodGroup?: unknown } | undefined;
       if (ship) out.shipping_type = ship.postageIncluded ? "送料無料" : "送料別";
+      // 配送方法セット番号・納期管理番号は Yahoo へのマッピング解決用に保持（数値/文字列両対応）。
+      out._rakutenShippingGroup = rakutenIdToString(ship?.shippingMethodGroup);
+      out._rakutenDeliveryDateId = rakutenIdToString(v.normalDeliveryDateId);
 
       // 商品属性 variants.{id}.attributes[] → product.attributes。
       // これを取り込まないと、ジャンル必須属性が欠落して再登録(upsert)が IE0418 で失敗する。
@@ -168,7 +187,7 @@ export function parseRakutenVariants(json: Record<string, unknown>): Variant[] {
       individual_shipping_fee: str(ship?.fee),
       postage_segment_1: str(ship?.postageSegment?.local),
       postage_segment_2: str(ship?.postageSegment?.overseas),
-      shipping_method_group: typeof ship?.shippingMethodGroup === "string" ? ship.shippingMethodGroup : "",
+      shipping_method_group: rakutenIdToString(ship?.shippingMethodGroup),
       attributes: parseVariantAttributes(v.attributes),
     });
   });

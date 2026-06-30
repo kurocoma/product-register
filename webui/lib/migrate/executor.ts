@@ -35,6 +35,13 @@ export type ExecutorDeps = {
   buildImported: (code: string, parsed: Partial<ProductInput>) => BuildImportedResult;
   /** 楽天ジャンルID → Yahoo カテゴリ（null=未解決。fetchYahooCategoryMapping 相当）。 */
   resolveCategory: (genreId: string) => Promise<YahooCategoryMapping | null>;
+  /** 配送・発送マッピング解決（任意）。楽天の配送方法セット番号・納期管理番号から
+   *  Yahoo postage_set(=delivery_method) と発送日数(lead_time) を解決する。
+   *  返り値が未指定の項目は現状維持（buildImported 既定 4/1）＝マッピング未投入でも後退しない。 */
+  resolveShipping?: (
+    rakutenShippingGroup: string,
+    rakutenDeliveryDateId: string,
+  ) => Promise<{ postageSet?: number; leadTime?: number }>;
   /** 既存アプリ商品の照合（管理番号→ne_code）。あれば二重作成しない（AC-007）。 */
   findExisting: (manageNumber: string, neCode: string) => Promise<{ id: string } | null>;
   /** 新規作成（upsertProduct 相当）。dry-run では呼ばない。 */
@@ -142,6 +149,19 @@ export function makePerItemExecutor(
       // 解決済み Yahoo カテゴリを商品へ反映（登録に必須）
       product.yahoo_category_id = category.yahoo_category_id;
       product.yahoo_path = category.yahoo_path;
+    }
+
+    // 4b) 配送方法セット・発送日のマッピング解決（任意）。楽天IDから Yahoo の
+    //     postage_set(=delivery_method) と発送日数(lead_time) を解決し product へ反映する。
+    //     未解決の項目は現状維持（buildImported 既定 4/1）＝マッピング未投入でも後退しない（安全側）。
+    if (deps.resolveShipping) {
+      const t = parsed as { _rakutenShippingGroup?: string; _rakutenDeliveryDateId?: string };
+      const ship = await deps.resolveShipping(
+        t._rakutenShippingGroup ?? "",
+        t._rakutenDeliveryDateId ?? "",
+      );
+      if (typeof ship.postageSet === "number") product.delivery_method = ship.postageSet;
+      if (typeof ship.leadTime === "number") product.lead_time = ship.leadTime;
     }
 
     // 5) 既存照合（読み取り。dry-run でも安全）。既存があれば作成せず尊重(AC-007)。

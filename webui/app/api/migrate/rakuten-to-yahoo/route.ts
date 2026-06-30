@@ -7,6 +7,7 @@ import { getItem as getRakutenItem, searchManageNumberBySku } from "@/lib/rakute
 import { parseRakutenItem, parseRakutenVariants } from "@/lib/converters/rakuten-item-parser";
 import { buildImportedProduct } from "@/lib/converters/mall-import";
 import { fetchYahooCategoryMapping } from "@/lib/product/category-mapping";
+import { fetchYahooPostageSet, fetchYahooLeadTime } from "@/lib/product/shipping-mapping";
 import { getYahooConfig, getYahooAccessToken } from "@/lib/yahoo/auth";
 import { buildYahooEditItemParams, validateEditItemParams } from "@/lib/yahoo/item-mapper";
 import { editItem, setStock, submitItem } from "@/lib/yahoo/item-client";
@@ -144,6 +145,18 @@ export async function POST(req: Request) {
     parseVariants: (json) => parseRakutenVariants(json),
     buildImported: (code, parsed) => buildImportedProduct("rakuten", code, parsed),
     resolveCategory: (genreId) => fetchYahooCategoryMapping(supabase, genreId),
+    // 配送方法セット番号→Yahoo postage_set、納期管理番号→発送日数 を解決（未投入なら null→現状維持）。
+    resolveShipping: async (group, deliveryDateId) => {
+      const [ps, lt] = await Promise.all([
+        fetchYahooPostageSet(supabase, group),
+        fetchYahooLeadTime(supabase, deliveryDateId),
+      ]);
+      const n = ps != null ? parseInt(ps, 10) : NaN;
+      return {
+        postageSet: Number.isFinite(n) ? n : undefined,
+        leadTime: lt != null ? lt : undefined,
+      };
+    },
     findExisting: (manageNumber, neCode) =>
       findExistingProduct(supabase, user.id, manageNumber, neCode),
     upsert: async (product) => {
