@@ -99,7 +99,7 @@ export function MigratePanel() {
         return;
       }
       const ok = window.confirm(
-        `【公開で登録】します。対象を Yahoo に display:1(表示)・在庫${qty}・公開反映(submitItem)で登録します。\n` +
+        `【公開で登録】します。対象を Yahoo に display:1(表示)・在庫${qty}・公開反映(reservePublish)で登録します。\n` +
           "→ 一般に表示され購入可能になります。よろしいですか？",
       );
       if (!ok) return;
@@ -208,7 +208,7 @@ export function MigratePanel() {
         楽天の<strong>商品管理番号</strong>を改行/カンマ/CSV1列で貼り付け、まず
         <strong>移行プレビュー(dry-run)</strong>で per-item の判定を確認してください。
         <strong>実行(登録)</strong>は <strong>display:0（非表示）・非公開</strong>で安全に登録します。
-        <strong className="text-emerald-700">公開で登録</strong>は <strong>display:1（表示）・在庫設定・公開反映(submitItem)</strong>まで行い、
+        <strong className="text-emerald-700">公開で登録</strong>は <strong>display:1（表示）・在庫設定・公開反映(reservePublish)</strong>まで行い、
         <strong className="text-emerald-700">実際に販売開始</strong>します（一般に表示・購入可能）。
       </p>
 
@@ -257,7 +257,7 @@ export function MigratePanel() {
           type="button"
           onClick={() => run("publish")}
           disabled={busy !== null}
-          title="display:1(表示)・在庫設定・公開反映(submitItem)まで行い、実際に販売開始します"
+          title="display:1(表示)・在庫設定・公開反映(reservePublish)まで行い、実際に販売開始します"
           className="rounded bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700 disabled:opacity-50"
         >
           {busy === "publish" ? "公開登録中…" : "🚀 公開で登録(display:1・在庫・反映)"}

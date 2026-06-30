@@ -3,7 +3,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getProduct, dbRowToProductInput } from "@/lib/product/repository";
 import { getYahooConfig, getYahooAccessToken } from "@/lib/yahoo/auth";
 import { buildYahooEditItemParams, validateEditItemParams } from "@/lib/yahoo/item-mapper";
-import { editItem, submitItem, getItem } from "@/lib/yahoo/item-client";
+import { editItem, getItem, setStock, reservePublish } from "@/lib/yahoo/item-client";
 
 export const runtime = "nodejs";
 
@@ -63,6 +63,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   // 安全登録が既定: display=0(非表示)。body.publish=true で公開(display=1)。
   // forceDisplay 明示指定があれば最優先（テスト用）。
   const publish: boolean = body?.publish === true;
+  // 公開(display=1)時に設定する在庫数（任意・>0 のときのみ setStock）。
+  const stockQuantity =
+    typeof body?.stockQuantity === "number" && body.stockQuantity >= 0 ? Math.floor(body.stockQuantity) : 0;
   const forceDisplay: string | undefined =
     typeof body?.forceDisplay === "string" ? body.forceDisplay : publish ? undefined : "0";
 
@@ -90,9 +93,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   let submitted = false;
   let submitMessage = "";
   if (doSubmit) {
-    const s = await submitItem(token, cfg.sellerId, product.ne_code);
+    // 公開(display=1)かつ在庫指定があれば在庫設定（購入可能化）。
+    let stockNote = "";
+    if (publish && stockQuantity > 0) {
+      const st = await setStock(token, cfg.sellerId, product.ne_code, stockQuantity);
+      if (!st.ok) stockNote = `在庫設定失敗: ${st.message} / `;
+    }
+    // フロント反映は reservePublish（全反映予約）。submitItem は存在しない誤APIのため使わない。
+    // 反映はストア全体単位（商品単位指定は不可）。
+    const s = await reservePublish(token, cfg.sellerId);
     submitted = s.ok;
-    submitMessage = s.message;
+    submitMessage = stockNote + s.message;
   }
 
   return NextResponse.json({

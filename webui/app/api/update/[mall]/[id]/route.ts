@@ -11,7 +11,7 @@ import { buildRakutenManageNumber } from "@/lib/converters/rakuten-api";
 import { buildRakutenPatchBody, diffVariants, detectVariantStructuralChange } from "@/lib/converters/rakuten-patch";
 import { EDITABLE_FIELDS } from "@/lib/product/diff";
 import { getYahooConfig, getYahooAccessToken } from "@/lib/yahoo/auth";
-import { getItem as getYahooItem, editItem, submitItem } from "@/lib/yahoo/item-client";
+import { getItem as getYahooItem, editItem, reservePublish } from "@/lib/yahoo/item-client";
 import { parseYahooItem } from "@/lib/converters/yahoo-item-parser";
 import { buildYahooUpdateParams } from "@/lib/converters/yahoo-patch";
 
@@ -160,7 +160,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ mall: s
   let submitted = false;
   let submitMessage = "";
   if (doSubmit) {
-    const s = await submitItem(plan.token, plan.cfg.sellerId, plan.key);
+    // フロント反映は reservePublish（全反映予約・ストア全体）。submitItem は存在しない誤APIのため使わない。
+    const s = await reservePublish(plan.token, plan.cfg.sellerId);
     submitted = s.ok;
     submitMessage = s.message;
   }
