@@ -7,6 +7,7 @@ import {
   stripHtml,
   htmlToPlainText,
 } from "@/lib/product/text-fit";
+import { sanitizeYahooHtml } from "@/lib/product/html-sanitize";
 
 /** editItem に存在せず CSV 専用の列（送らない）。docs/Yahoo/02 で確認済み。 */
 const CSV_ONLY = new Set(["pr-rate", "sort_priority"]);
@@ -18,21 +19,24 @@ export const YAHOO_REQUIRED = ["item_code", "path", "name", "product_category", 
  * 全角=1・半角=0.5。
  * - `html: true` … HTML 不可フィールド（タグを除去してから文字数を数える）。
  * - `html: "br-to-space"` … `<br>` を空白へ変換しつつ他タグを除去（区切りを空白で保持）。name 用。
+ * - `html: "sanitize"` … HTML 可フィールド（書式保持サニタイズ＝危険タグ除去・タグ閉じ補完・
+ *   タグ境界保持で全角 max へ切詰）。caption/abstract/additional1-3/sp_additional 用。
  * - `maxChars` … コードポイント数の上限（指定時は全角換算上限 max と二重で適用）。
  *   各文字は最大でも全角1幅なので「文字数<=maxChars」を満たせば、Yahoo 側が全角=1で数えても
  *   換算長<=maxChars を構造的に保証できる（自前カウントと Yahoo 実カウントの差を吸収）。
  * キーは editItem パラメータ名（toParamKey 後＝ハイフン→アンダースコア）。
  * path は階層構造のため別表（YAHOO_PATH_*）で扱う。 */
-type FieldLimit = { max: number; html?: boolean | "br-to-space"; maxChars?: number };
+type FieldLimit = { max: number; html?: boolean | "br-to-space" | "sanitize"; maxChars?: number };
 export const YAHOO_FIELD_LIMITS: Record<string, FieldLimit> = {
   name: { max: 75, html: "br-to-space", maxChars: 75 },
   headline: { max: 30, html: true },
   explanation: { max: 500, html: true },
-  abstract: { max: 500 },
-  caption: { max: 5000 },
-  additional1: { max: 5000 },
-  additional2: { max: 5000 },
-  additional3: { max: 5000 },
+  abstract: { max: 500, html: "sanitize" },
+  caption: { max: 5000, html: "sanitize" },
+  additional1: { max: 5000, html: "sanitize" },
+  additional2: { max: 5000, html: "sanitize" },
+  additional3: { max: 5000, html: "sanitize" },
+  sp_additional: { max: 5000, html: "sanitize" },
   meta_desc: { max: 80 },
   variation1_name: { max: 28 },
   variation2_name: { max: 28 },
@@ -50,6 +54,8 @@ const YAHOO_PATH_SEPARATOR = /\s*[:>›＞]\s*/;
 const YAHOO_NONEMPTY_REQUIRED = ["path", "name", "product_category"] as const;
 
 function fitYahooField(value: string, limit: FieldLimit): string {
+  // HTML 可フィールドは書式保持サニタイズ（危険タグ除去＋タグ閉じ補完＋タグ境界保持切詰）。
+  if (limit.html === "sanitize") return sanitizeYahooHtml(value, limit.max);
   let base = value;
   if (limit.html === "br-to-space") base = htmlToPlainText(value);
   else if (limit.html) base = stripHtml(value);
