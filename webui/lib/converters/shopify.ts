@@ -1,4 +1,5 @@
-import type { ProductInput } from "@/lib/product/schema";
+import type { ProductInput, Variant } from "@/lib/product/schema";
+import { productVariants } from "@/lib/product/schema";
 import type { Converter } from "./base";
 import { ENCODING } from "./base";
 
@@ -37,9 +38,12 @@ function baseCodeOf(p: ProductInput): string {
   return `${p.maker_code}-${p.jan_code.slice(-4)}`;
 }
 
-function priceWithTax(p: ProductInput): number {
+function priceWithTax(p: { selling_price: number; tax_rate: number }): number {
   return Math.round(p.selling_price * (1 + p.tax_rate / 100));
 }
+
+/** 1 SKU 行の元データ。多SKU商品は variants[] を展開し、フラット商品は1件合成（後方互換）。 */
+type SkuSlot = { p: ProductInput; v: Variant };
 
 function generateImageUrl(base: string, position: number): string {
   if (position === 1) return `${SHOPIFY_CDN_BASE}${base}-1.jpg`;
@@ -101,15 +105,19 @@ export class ShopifyConverter implements Converter {
 
   private expandGroup(base: string, members: ProductInput[]): Record<string, string>[] {
     const rep = members.find((p) => p.is_single) ?? members[0];
+    // 各商品の variants[] を SKU スロット列に展開（フラット商品は1件合成 → 従来の members と同数）。
+    const skus: SkuSlot[] = members.flatMap((p) => productVariants(p).map((v) => ({ p, v })));
     const maxImages = Math.max(...members.map((p) => p.image_count));
+    // SKU 数が画像数を超えても SKU 行を落とさない。
+    const rowCount = Math.max(maxImages, skus.length);
     const rows: Record<string, string>[] = [];
 
-    for (let pos = 1; pos <= maxImages; pos++) {
-      const imageUrl = generateImageUrl(base, pos);
+    for (let pos = 1; pos <= rowCount; pos++) {
+      const imageUrl = pos <= maxImages ? generateImageUrl(base, pos) : "";
       if (pos === 1) {
-        rows.push(this.buildFirstRow(base, rep, members[0], imageUrl));
-      } else if (pos - 1 < members.length) {
-        rows.push(this.buildVariantRow(base, members[pos - 1], imageUrl, pos));
+        rows.push(this.buildFirstRow(base, rep, skus[0], imageUrl, skus.length));
+      } else if (pos - 1 < skus.length) {
+        rows.push(this.buildVariantRow(base, skus[pos - 1], imageUrl, pos));
       } else {
         rows.push(this.buildImageOnlyRow(base, imageUrl, pos));
       }
@@ -123,26 +131,33 @@ export class ShopifyConverter implements Converter {
     return row;
   }
 
-  private fillVariantFields(row: Record<string, string>, p: ProductInput): void {
-    row["Option1 Value"] = getOption1Value(p);
-    row["Variant SKU"] = p.ne_code;
+  private fillVariantFields(row: Record<string, string>, { p, v }: SkuSlot): void {
+    // variation_value を持つ variant はそれを選択肢ラベルに（送料無料は接尾辞付き）。
+    // フラット商品の合成 variant は variation_value 空 → 従来の getOption1Value(p) にフォールバック。
+    row["Option1 Value"] = v.variation_value
+      ? v.shipping_type === "送料無料"
+        ? `${v.variation_value}(送料無料)`
+        : v.variation_value
+      : getOption1Value(p);
+    row["Variant SKU"] = v.ne_code;
     row["Variant Grams"] = "0.0";
     row["Variant Inventory Tracker"] = "shopify";
     row["Variant Inventory Qty"] = "0";
     row["Variant Inventory Policy"] = "deny";
     row["Variant Fulfillment Service"] = "manual";
-    row["Variant Price"] = String(priceWithTax(p));
+    row["Variant Price"] = String(priceWithTax(v));
     row["Variant Requires Shipping"] = "true";
     row["Variant Taxable"] = "true";
-    row["Variant Barcode"] = p.jan_code;
-    row["Variant Image"] = `${SHOPIFY_CDN_BASE}${p.ne_code}.jpg`;
+    row["Variant Barcode"] = v.jan_code;
+    row["Variant Image"] = `${SHOPIFY_CDN_BASE}${v.ne_code}.jpg`;
   }
 
   private buildFirstRow(
     base: string,
     rep: ProductInput,
-    firstVariant: ProductInput,
+    firstVariant: SkuSlot,
     imageUrl: string,
+    skuCount: number,
   ): Record<string, string> {
     const row = this.emptyRow(base);
     row["Title"] = rep.display_name;
@@ -150,7 +165,8 @@ export class ShopifyConverter implements Converter {
     row["Vendor"] = `${rep.maker_name}<br>商品コード:${base}`;
     row["Tags"] = `${rep.maker_name},税率${rep.tax_rate}%`;
     row["Published"] = "true";
-    row["Option1 Name"] = rep.variation_name ? "セット数を選んでください" : "Title";
+    // 多SKU(2件以上)は variation_name 未定義でもセレクタ名を出す（Shopify は複数variantにオプション名必須）。
+    row["Option1 Name"] = rep.variation_name || skuCount > 1 ? "セット数を選んでください" : "Title";
     row["Gift Card"] = "false";
     row["SEO Title"] = `${rep.product_name}|${SITE_NAME}`;
     row["SEO Description"] = `${rep.product_name}${SEO_DESC_SUFFIX}`;
@@ -166,14 +182,14 @@ export class ShopifyConverter implements Converter {
 
   private buildVariantRow(
     base: string,
-    variant: ProductInput,
+    sku: SkuSlot,
     imageUrl: string,
     position: number,
   ): Record<string, string> {
     const row = this.emptyRow(base);
     row["Image Src"] = imageUrl;
-    row["Image Position"] = String(position);
-    this.fillVariantFields(row, variant);
+    row["Image Position"] = imageUrl ? String(position) : "";
+    this.fillVariantFields(row, sku);
     return row;
   }
 
