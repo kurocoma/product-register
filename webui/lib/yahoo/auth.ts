@@ -21,12 +21,21 @@ export function getYahooConfig(): YahooConfig | null {
   return { clientId, clientSecret, refreshToken, sellerId };
 }
 
-// アクセストークンのプロセス内キャッシュ（有効期限の少し前まで再利用）
-let cached: { token: string; expiresAt: number } | null = null;
+// アクセストークンのプロセス内キャッシュ（有効期限の60秒前まで再利用）。
+// 資格情報(cfg)ごとにキーを分離し、異なるテナントのトークン取り違えを防ぐ
+// （現状は env 由来の単一テナントだが、cfg を引数で受ける以上ここで守るのが安全）。
+const tokenCache = new Map<string, { token: string; expiresAt: number }>();
 
-/** refresh_token からアクセストークンを取得する（有効ならキャッシュを返す）。 */
+function cacheKey(cfg: YahooConfig): string {
+  return `${cfg.clientId}\n${cfg.sellerId}\n${cfg.refreshToken}`;
+}
+
+/** refresh_token からアクセストークンを取得する（有効ならキャッシュを返す）。
+ * 一括登録の per-item 呼び出しでも初回以降はキャッシュヒットになる。 */
 export async function getYahooAccessToken(cfg: YahooConfig): Promise<string> {
   const now = Date.now();
+  const key = cacheKey(cfg);
+  const cached = tokenCache.get(key);
   if (cached && now < cached.expiresAt - 60_000) return cached.token;
 
   const res = await fetch(TOKEN_ENDPOINT, {
@@ -45,11 +54,11 @@ export async function getYahooAccessToken(cfg: YahooConfig): Promise<string> {
     // refresh_token 失効(invalid_grant/4102)はここに来る → 再認証が必要
     throw new Error(`Yahoo アクセストークン取得失敗: ${detail}`);
   }
-  cached = { token: json.access_token, expiresAt: now + (json.expires_in ?? 3600) * 1000 };
+  tokenCache.set(key, { token: json.access_token, expiresAt: now + (json.expires_in ?? 3600) * 1000 });
   return json.access_token;
 }
 
 /** テスト用: トークンキャッシュをクリアする。 */
 export function _clearYahooTokenCache() {
-  cached = null;
+  tokenCache.clear();
 }
