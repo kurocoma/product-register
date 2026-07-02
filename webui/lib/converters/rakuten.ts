@@ -1,5 +1,5 @@
-import type { ProductInput } from "@/lib/product/schema";
-import { resolveAttributes, displayPrice } from "@/lib/product/schema";
+import type { ProductInput, Variant } from "@/lib/product/schema";
+import { resolveAttributes, displayPrice, productVariants } from "@/lib/product/schema";
 import type { Converter } from "./base";
 import { ENCODING } from "./base";
 import { buildRakutenImgList } from "./image-url";
@@ -14,6 +14,14 @@ function soryo(shippingType: string): number {
 
 export function baseCodeOf(p: ProductInput): string {
   return `${p.maker_code}-${p.jan_code.slice(-4)}`;
+}
+
+/** CSV の商品管理番号。取込商品は実際の管理番号(rakuten_manage_number)を最優先で使い、
+ * 未保存（新規登録・既存商品）は従来どおり base_code。
+ * rakuten-api.ts の buildRakutenManageNumber と同じ規則（import 方向の都合でローカル実装）。 */
+function manageNumberOf(p: ProductInput): string {
+  const stored = p.rakuten_manage_number?.trim();
+  return stored || baseCodeOf(p);
 }
 
 /** 全行のキーを和集合で揃え、 欠損は空文字で埋める。 行 0 のキー順を保持。 */
@@ -41,10 +49,10 @@ export class RakutenConverter implements Converter {
   encoding = ENCODING.rakuten;
 
   convert(products: ProductInput[]): Record<string, string>[] {
-    // base_code でグループ化 (挿入順保持)
+    // 商品管理番号でグループ化 (挿入順保持)。取込商品は実管理番号、それ以外は base_code。
     const groups = new Map<string, ProductInput[]>();
     for (const p of products) {
-      const b = baseCodeOf(p);
+      const b = manageNumberOf(p);
       if (!groups.has(b)) groups.set(b, []);
       groups.get(b)!.push(p);
     }
@@ -57,7 +65,10 @@ export class RakutenConverter implements Converter {
 
       rows.push(this.buildParentRow(base, rep));
       for (const p of members) {
-        rows.push(this.buildChildRow(base, p));
+        // 多SKU商品は variants[] を子行に展開。フラット商品は1件合成（後方互換）。
+        for (const v of productVariants(p)) {
+          rows.push(this.buildChildRow(base, p, v));
+        }
       }
     }
     return normalizeRows(rows);
@@ -128,18 +139,28 @@ export class RakutenConverter implements Converter {
     return row;
   }
 
-  private buildChildRow(base: string, p: ProductInput): Record<string, string> {
+  private buildChildRow(base: string, p: ProductInput, v: Variant): Record<string, string> {
     const row: Record<string, string> = {};
+    // フラット商品(variants未設定)は product 側の値も参照する（後方互換）。
+    const flat = p.variants.length === 0;
+    const multiSku = p.variants.length > 1;
 
     row["商品管理番号（商品URL）"] = base;
-    row["SKU管理番号"] = p.ne_code;
-    row["システム連携用SKU番号"] = p.ne_code;
+    row["SKU管理番号"] = v.sku_manage_number;
+    row["システム連携用SKU番号"] = v.ne_code;
 
     row["バリエーション項目キー1"] = p.variation_key;
-    row["バリエーション項目選択肢1"] = p.option_item_name;
+    row["バリエーション項目選択肢1"] = v.variation_value || p.option_item_name;
 
-    row["販売価格"] = String(p.selling_price);
-    row["表示価格"] = String(displayPrice(p));
+    row["販売価格"] = String(v.selling_price);
+    // SKU別表示価格: variant.display_price 優先。フラット商品は product の二重価格に従来どおり連動。
+    const disp =
+      v.display_price && v.display_price > 0
+        ? v.display_price
+        : flat
+          ? displayPrice(p)
+          : v.selling_price;
+    row["表示価格"] = String(disp);
     row["二重価格文言管理番号"] = "1";
 
     row["再入荷お知らせボタン"] = "0";
@@ -155,18 +176,21 @@ export class RakutenConverter implements Converter {
     row["在庫切れ時出荷リードタイム"] = label;
     row["配送リードタイム"] = "自社倉庫";
     row["SKU倉庫指定"] = "0";
-    row["送料"] = String(soryo(p.shipping_type));
+    row["送料"] = String(soryo(v.shipping_type));
     row["単品配送設定使用"] = "0";
 
-    row["カタログID"] = p.jan_code;
+    row["カタログID"] = v.jan_code;
     // バリエーション（SKU軸）が定義されている場合のみ SKU画像を設定する。
     // 単一SKU（バリエーションなし）に SKU画像を入れると楽天側でエラーになるため空にする。
-    const hasVariation = p.variation_key.trim() !== "";
+    // 多SKU(variants 2件以上)は definition が無くてもバリエーションありとして扱う。
+    const hasVariation = p.variation_key.trim() !== "" || multiSku;
     row["SKU画像タイプ"] = hasVariation ? "CABINET" : "";
-    row["SKU画像パス"] = hasVariation ? `/thum02/${p.ne_code}.jpg` : "";
+    row["SKU画像パス"] = hasVariation ? `/thum02/${v.ne_code}.jpg` : "";
 
     // 商品属性: 値が入っている項目だけを連番で出力する（空項目は CSV に出さない）。
-    const attrs = resolveAttributes(p, { onlyWithValue: true });
+    // variant 側に属性があればそれを、無ければ product 側（後方互換）。
+    const vAttrs = v.attributes.filter((a) => a.item.trim() !== "" && a.value.trim() !== "");
+    const attrs = vAttrs.length > 0 ? vAttrs : resolveAttributes(p, { onlyWithValue: true });
     attrs.forEach((a, idx) => {
       const i = idx + 1;
       row[`商品属性（項目）${i}`] = a.item;
