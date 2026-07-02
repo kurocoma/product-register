@@ -16,8 +16,13 @@ export function RegisterPanel({ productId }: { productId?: string }) {
 
   if (!productId) {
     return (
-      <div className="bg-white border border-slate-200 rounded p-4 text-sm text-slate-500">
-        💡 商品を保存すると、モールAPI登録が有効になります
+      <div className="bg-white border border-slate-200 rounded p-4 text-sm text-slate-600 space-y-1">
+        <div className="font-semibold text-slate-700">🚀 モールAPI登録（保存後に使えます）</div>
+        <p>
+          まず <span className="font-medium">NEコード・商品名・JANコード・販売価格</span>{" "}
+          を入力して商品を保存してください。
+        </p>
+        <p>保存が完了すると、ここに楽天/Yahooへの登録ボタンが表示されます。</p>
       </div>
     );
   }

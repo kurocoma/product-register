@@ -13,6 +13,8 @@ import { CsvDownloadPanel } from "@/components/csv/CsvDownloadPanel";
 import { ImageUploadPanel } from "./ImageUploadPanel";
 import { RegisterPanel } from "./RegisterPanel";
 import { MallEditPanel } from "./MallEditPanel";
+import { NewProductChecklist } from "./NewProductChecklist";
+import { canAutoSaveNewProduct } from "@/lib/product/new-product-checklist";
 
 export function ProductEditView({
   initial,
@@ -39,7 +41,13 @@ export function ProductEditView({
     [currentId, router],
   );
 
-  const { status, savedAt, errorMessage, manualSave } = useAutoSave(data, save, 800);
+  // 新規作成時のみ: NEコード(保存の必須)が入るまで自動保存を開始しない
+  // （空のNEコードで保存エラーを出し続けない）。既存商品の編集は従来どおり常時自動保存。
+  const isNewEntry = !productId;
+  const autoSaveEnabled = !!currentId || canAutoSaveNewProduct(data);
+  const { status, savedAt, errorMessage, manualSave } = useAutoSave(data, save, 800, {
+    enabled: autoSaveEnabled,
+  });
 
   return (
     <div className="flex flex-col h-full">
@@ -52,12 +60,15 @@ export function ProductEditView({
           </div>
         </div>
         <div className="flex items-center gap-3">
-          <AutoSaveIndicator status={status} savedAt={savedAt} />
+          <AutoSaveIndicator status={status} savedAt={savedAt} draft={!autoSaveEnabled} />
           <Button onClick={manualSave} variant="outline">
             💾 保存
           </Button>
         </div>
       </div>
+
+      {/* 新規作成時のみ: 登録ステップ + 必須項目チェック（既存商品の編集画面には出さない） */}
+      {isNewEntry && <NewProductChecklist data={data} saved={!!currentId} />}
 
       {/* 保存エラーのバナー（NEコード必須・重複など） */}
       {status === "error" && errorMessage && (
@@ -87,10 +98,18 @@ export function ProductEditView({
 function AutoSaveIndicator({
   status,
   savedAt,
+  draft,
 }: {
   status: string;
   savedAt: Date | null;
+  /** 新規作成でNEコード未入力のため自動保存を待機している状態。 */
+  draft?: boolean;
 }) {
+  if (draft) {
+    return (
+      <span className="text-amber-600 text-sm">下書き（NEコードを入力すると自動保存が始まります）</span>
+    );
+  }
   if (status === "saving") return <span className="text-slate-500 text-sm">保存中…</span>;
   if (status === "error") return <span className="text-red-600 text-sm">⚠ 保存失敗</span>;
   if (savedAt) {
