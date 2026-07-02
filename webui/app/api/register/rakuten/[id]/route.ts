@@ -1,15 +1,16 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getProduct, dbRowToProductInput, upsertProduct } from "@/lib/product/repository";
-import { productVariants } from "@/lib/product/schema";
+import { getProduct, dbRowToProductInput } from "@/lib/product/repository";
 import { getRakutenCredentialsFromEnv } from "@/lib/rakuten/credentials";
-import { buildRakutenManageNumber, buildRakutenUpsertBody, validateUpsertBody } from "@/lib/converters/rakuten-api";
-import { upsertItem, getItem } from "@/lib/rakuten/item-client";
-import { bulkUpsertInventory } from "@/lib/rakuten/inventory-client";
+import {
+  dryRunRakutenRegister,
+  commitRakutenRegister,
+} from "@/lib/register/rakuten-register-service";
 
 export const runtime = "nodejs";
 
-/** GET = dry-run プレビュー（書き込みなし）。送信予定の upsert body と既存有無を返す。 */
+/** GET = dry-run プレビュー（書き込みなし）。送信予定の upsert body と既存有無を返す。
+ * ロジックは lib/register/rakuten-register-service.ts に集約（一括登録と共用）。 */
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const supabase = await createClient();
@@ -23,30 +24,12 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
   if (!row) return NextResponse.json({ ok: false, error: "商品が見つかりません" }, { status: 404 });
   const product = dbRowToProductInput(row);
 
-  const manageNumber = buildRakutenManageNumber(product);
-  const body = buildRakutenUpsertBody(product);
-  const valid = validateUpsertBody(manageNumber, body);
-
-  let exists = false;
-  try {
-    exists = (await getItem(cred, manageNumber)).exists;
-  } catch { /* プレビューは続行 */ }
-
-  return NextResponse.json({
-    ok: true,
-    dryRun: true,
-    mall: "rakuten",
-    manageNumber,
-    exists,
-    willOverwrite: exists,
-    valid: valid.ok,
-    missing: valid.ok ? [] : valid.missing,
-    body,
-  });
+  return NextResponse.json(await dryRunRakutenRegister(cred, product));
 }
 
-/** POST = commit（items.upsert 実行）。body: { hideItem?: boolean }
- * ⚠ upsert は全置換。多SKU商品の一部だけ送ると他SKUが消える。MVPは単一SKU前提。 */
+/** POST = commit（items.upsert 実行）。body: { publish?: boolean }
+ * 安全登録が既定: 倉庫(hideItem)・サーチ在庫非表示(hideStock)・在庫0。publish=true で公開。
+ * ⚠ upsert は全置換。多SKU商品は variants[] 全件を展開して送る。 */
 export async function POST(req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
   const supabase = await createClient();
@@ -56,44 +39,22 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   const cred = getRakutenCredentialsFromEnv();
   if (!cred) return NextResponse.json({ ok: false, error: "楽天 ESA 認証情報が未設定です" }, { status: 500 });
 
-  // 安全登録が既定: 倉庫(hideItem)・サーチ在庫非表示(hideStock)・在庫0。
-  // body.publish=true で公開状態にできる（その場合 hideItem/hideStock/在庫0 を解除）。
   const reqBody = await req.json().catch(() => ({}));
   const publish: boolean = reqBody?.publish === true;
-  const hideItem = !publish;
-  const hideStock = !publish;
 
   const row = await getProduct(supabase, id);
   if (!row) return NextResponse.json({ ok: false, error: "商品が見つかりません" }, { status: 404 });
   const product = dbRowToProductInput(row);
 
-  const manageNumber = buildRakutenManageNumber(product);
-  const body = buildRakutenUpsertBody(product, { hideItem, hideStock });
-  const valid = validateUpsertBody(manageNumber, body);
-  if (!valid.ok) return NextResponse.json({ ok: false, error: "必須項目が不足: " + valid.missing.join(", ") }, { status: 400 });
-
-  const result = await upsertItem(cred, manageNumber, body);
+  const result = await commitRakutenRegister(supabase, cred, product, id, { publish });
   if (!result.ok) {
-    return NextResponse.json({ ok: false, error: "items.upsert 失敗: " + result.message, status: result.status, detail: result.body }, { status: 502 });
+    if (result.kind === "api") {
+      return NextResponse.json(
+        { ok: false, error: result.error, status: result.apiStatus, detail: result.detail },
+        { status: 502 },
+      );
+    }
+    return NextResponse.json({ ok: false, error: result.error }, { status: 400 });
   }
-
-  // 楽天に掲載済みを記録（反映ボタン活性用）+ 実管理番号を保存（次回の編集→反映で同一商品へ往復）。
-  if (!product.mall_listed?.rakuten || product.rakuten_manage_number !== manageNumber) {
-    product.mall_listed = { ...product.mall_listed, rakuten: true };
-    product.rakuten_manage_number = manageNumber;
-    try { await upsertProduct(supabase, product, id); } catch { /* 記録失敗は登録自体を妨げない */ }
-  }
-
-  // 在庫数を設定（安全登録は 0）。商品登録成功後に InventoryAPI で別送。
-  // 多SKU: 全SKU分を upsert の variant キー(sku_manage_number||ne_code)で送る（在庫variantIdとupsert keyを一致させる）。
-  const quantity = publish ? 0 : 0; // 当面は常に0（在庫連携は別トラック）
-  const inv = await bulkUpsertInventory(
-    cred,
-    productVariants(product).map((v) => ({ manageNumber, variantId: v.sku_manage_number?.trim() || v.ne_code, quantity })),
-  );
-
-  return NextResponse.json({
-    ok: true, mall: "rakuten", manageNumber, created: result.created, status: result.status,
-    safeState: !publish, inventorySet: inv.ok, inventoryMessage: inv.ok ? `在庫${quantity}` : inv.message,
-  });
+  return NextResponse.json(result);
 }
