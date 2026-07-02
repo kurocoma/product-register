@@ -5,12 +5,11 @@ import {
   getProduct,
   listProducts,
 } from "@/lib/product/repository";
-import { RakutenConverter } from "@/lib/converters/rakuten";
+import { RakutenConverter, manageNumberOf } from "@/lib/converters/rakuten";
 import { NEConverter } from "@/lib/converters/ne";
 import { YahooConverter } from "@/lib/converters/yahoo";
 import { ShopifyConverter } from "@/lib/converters/shopify";
 import { writeCsv } from "@/lib/csv/writer";
-import type { ProductInput } from "@/lib/product/schema";
 
 const FILENAMES: Record<string, string> = {
   rakuten: "rakuten_normal_item.csv",
@@ -19,10 +18,6 @@ const FILENAMES: Record<string, string> = {
   yahoo: "yahoo.csv",
   shopify: "shopify.csv",
 };
-
-function baseCodeOf(p: ProductInput): string {
-  return `${p.maker_code}-${p.jan_code.slice(-4)}`;
-}
 
 export async function GET(
   req: Request,
@@ -38,11 +33,14 @@ export async function GET(
   if (!targetRow) return new NextResponse("Not found", { status: 404 });
   const target = dbRowToProductInput(targetRow);
 
-  // peers: 同じ base_code を持つ商品も含めて変換 (grouping/親子構造のため)
+  // peers: 同じページ(グループキー)を持つ商品も含めて変換 (grouping/親子構造のため)。
+  // キーは converter と同じ「実管理番号(rakuten_manage_number)優先、無ければ base_code」。
+  // 取込商品は maker/JAN が空で base_code が "-0000" に衝突するため、base_code 比較だと
+  // 無関係な取込商品が単品CSVに混入してしまう。
   const allRows = await listProducts(supabase);
   const peers = allRows
     .map((r) => dbRowToProductInput(r))
-    .filter((p) => baseCodeOf(p) === baseCodeOf(target));
+    .filter((p) => manageNumberOf(p) === manageNumberOf(target));
 
   let csvRows: Record<string, string>[];
   let encoding: "cp932" | "utf-8" | "utf-8-sig";

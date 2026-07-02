@@ -16,10 +16,11 @@ export function baseCodeOf(p: ProductInput): string {
   return `${p.maker_code}-${p.jan_code.slice(-4)}`;
 }
 
-/** CSV の商品管理番号。取込商品は実際の管理番号(rakuten_manage_number)を最優先で使い、
- * 未保存（新規登録・既存商品）は従来どおり base_code。
- * rakuten-api.ts の buildRakutenManageNumber と同じ規則（import 方向の都合でローカル実装）。 */
-function manageNumberOf(p: ProductInput): string {
+/** CSV の商品管理番号 = ページのグループキー。取込商品は実際の管理番号(rakuten_manage_number)を
+ * 最優先で使い、未保存（新規登録・既存商品）は従来どおり base_code。
+ * rakuten-api.ts の buildRakutenManageNumber と同じ規則（import 方向の都合でローカル実装）。
+ * CSVルートの peers 絞り込みもこのキーを使う（取込商品同士の base_code 衝突「-0000」対策）。 */
+export function manageNumberOf(p: ProductInput): string {
   const stored = p.rakuten_manage_number?.trim();
   return stored || baseCodeOf(p);
 }
