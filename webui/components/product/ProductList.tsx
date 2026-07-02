@@ -7,6 +7,7 @@ import { deleteProduct } from "@/lib/product/repository";
 import type { ProductRow } from "@/lib/product/repository";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { BulkRegisterPanel } from "./BulkRegisterPanel";
 
 type Mall = "rakuten" | "yahoo";
 const MALL_LABEL: Record<Mall, string> = { rakuten: "楽天", yahoo: "Yahoo" };
@@ -263,6 +264,7 @@ export function ProductList({ initial }: { initial: ProductRow[] }) {
       </div>
 
       {selected.size > 0 && (
+        <>
         <div className="rounded border border-slate-200 bg-white p-3 flex flex-wrap items-center gap-2 text-sm">
           <span className="font-medium">{selected.size} 件選択中</span>
           <span className="text-slate-300">|</span>
@@ -286,6 +288,29 @@ export function ProductList({ initial }: { initial: ProductRow[] }) {
           <span className="text-slate-300">|</span>
           <Link href={`/csv?ids=${Array.from(selected).join(",")}`} className="text-blue-600 hover:underline">選択を一括 CSV 出力</Link>
         </div>
+        {/* 一括登録（モールに新規作成/上書き更新）。上の「一括反映」（掲載済みへの変更反映）とは別機能 */}
+        <BulkRegisterPanel
+          selectedIds={Array.from(selected)}
+          onRegistered={(ids, mall) =>
+            setProducts((prev) =>
+              prev.map((p) =>
+                ids.includes(p.id)
+                  ? {
+                      ...p,
+                      extra: {
+                        ...p.extra,
+                        mall_listed: {
+                          ...((p.extra as { mall_listed?: Record<string, boolean> }).mall_listed ?? {}),
+                          [mall]: true,
+                        },
+                      },
+                    }
+                  : p,
+              ),
+            )
+          }
+        />
+        </>
       )}
     </div>
   );
