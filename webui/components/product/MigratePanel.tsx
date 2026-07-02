@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { fullWidthLen } from "@/lib/product/text-fit";
+import { countYahooField } from "@/lib/yahoo/item-mapper";
 
 /** 文字数オーバーで切り詰められる項目（route の FieldTruncation と同形）。 */
 type Truncation = {
@@ -393,15 +393,25 @@ export function MigratePanel() {
                 <div className="font-mono text-sm font-semibold">{r.manageNumber}</div>
                 {(r.truncations ?? []).map((t) => {
                   const val = overrides[r.manageNumber]?.[t.field] ?? t.original;
-                  const len = fullWidthLen(val);
-                  const over = len > t.limit;
+                  // 送信時（fitYahooField）と同一規則で判定する。name は全角換算に加え
+                  // 文字数(maxChars)でも切られるため、全角換算だけ見せると
+                  // 「OK 表示なのに登録時に切られる」誤解が起きる（実障害）。
+                  const c = countYahooField(t.field, val);
                   return (
                     <div key={t.field} className="space-y-1">
                       <div className="flex items-center justify-between text-xs">
                         <span className="font-medium text-slate-700">{t.label}</span>
-                        <span className={over ? "text-red-600" : "text-green-700"}>
-                          全角 {len.toFixed(1)} / 上限 {t.limit}
-                          {over ? "（超過）" : "（OK）"}
+                        <span className={c.over ? "text-red-600" : "text-green-700"}>
+                          <span className={c.overWidth ? "font-bold" : ""}>
+                            全角 {c.fullWidth.toFixed(1)} / {c.limit}
+                          </span>
+                          {c.maxChars != null && (
+                            <span className={c.overChars ? "font-bold" : ""}>
+                              {" ・文字数 "}
+                              {c.chars} / {c.maxChars}
+                            </span>
+                          )}
+                          {c.over ? "（超過 → このまま登録すると自動で切り詰め）" : "（OK）"}
                         </span>
                       </div>
                       <textarea

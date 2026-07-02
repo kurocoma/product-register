@@ -91,12 +91,16 @@ export function fitYahooFieldLimits(params: Record<string, string>): Record<stri
 }
 
 /** 文字数オーバーで切り詰められる項目（警告モーダル用）。
- *  original=HTML処理後の元テキスト（利用者がリライトする対象）、fitted=切詰後プレビュー。 */
+ *  original=HTML処理後の元テキスト（利用者がリライトする対象）、fitted=切詰後プレビュー。
+ *  charLen/maxChars: name は全角換算(max)に加えコードポイント数(maxChars)でも切るため、
+ *  「全角換算はOKなのに文字数超過で切られる」ケースを UI が正しく示せるよう両方を露出する。 */
 export type YahooTruncation = {
   field: "name" | "headline" | "explanation";
   label: string;
   limit: number;
   fullWidthLen: number;
+  charLen: number;
+  maxChars?: number;
   original: string;
   fitted: string;
 };
@@ -119,13 +123,68 @@ export function detectYahooTruncations(p: ProductInput): YahooTruncation[] {
     const base =
       limit.html === "br-to-space" ? htmlToPlainText(raw) : limit.html ? stripHtml(raw) : raw;
     const len = fullWidthLen(base);
+    const charLen = [...base].length;
     const overByLen = len > limit.max;
-    const overByChars = limit.maxChars != null && [...base].length > limit.maxChars;
+    const overByChars = limit.maxChars != null && charLen > limit.maxChars;
     if (overByLen || overByChars) {
-      out.push({ field, label, limit: limit.max, fullWidthLen: len, original: base, fitted: fitYahooField(raw, limit) });
+      out.push({
+        field,
+        label,
+        limit: limit.max,
+        fullWidthLen: len,
+        charLen,
+        maxChars: limit.maxChars,
+        original: base,
+        fitted: fitYahooField(raw, limit),
+      });
     }
   }
   return out;
+}
+
+/** リライトUIのライブカウンタ用: 値を送信時と同じ前処理（<br>→空白/タグ除去）で数え、
+ *  全角換算(max)・文字数(maxChars)の両上限に対する超過を判定する純関数。
+ *  UI がここを使う限り「表示上OKなのに送信時に切られる」不一致は起きない。 */
+export function countYahooField(
+  field: string,
+  value: string,
+): {
+  fullWidth: number;
+  chars: number;
+  limit: number;
+  maxChars?: number;
+  overWidth: boolean;
+  overChars: boolean;
+  over: boolean;
+} {
+  const limit = YAHOO_FIELD_LIMITS[field];
+  if (!limit) {
+    // 未知フィールドは判定不能 → 超過なし扱い（UI を壊さない安全側）。
+    return {
+      fullWidth: fullWidthLen(value),
+      chars: [...value].length,
+      limit: Infinity,
+      maxChars: undefined,
+      overWidth: false,
+      overChars: false,
+      over: false,
+    };
+  }
+  const base =
+    limit.html === "br-to-space" ? htmlToPlainText(value) : limit.html ? stripHtml(value) : value;
+  const fullWidth = fullWidthLen(base);
+  const chars = [...base].length;
+  const overWidth = fullWidth > limit.max;
+  const overChars = limit.maxChars != null && chars > limit.maxChars;
+  return {
+    fullWidth,
+    chars,
+    limit: limit.max,
+    maxChars: limit.maxChars,
+    overWidth,
+    overChars,
+    over: overWidth || overChars,
+  };
 }
 
 /** 整形後でも上限超過・必須空が残っていないか検証する（dry-run 事前検知用）。

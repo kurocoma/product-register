@@ -65,4 +65,16 @@ describe("makePerItemExecutor — 手動リライト override / 切り詰め検�
     const r = await makePerItemExecutor(deps, { dryRun: true })({ manageNumber: "a-1" });
     expect(r.truncations).toBeUndefined();
   });
+
+  it("commit: 履歴 detail に実際に送信した商品名(sentName)を記録する", async () => {
+    const recordHistory = vi.fn(async () => {});
+    const { deps } = makeDeps({ recordHistory });
+    const r = await makePerItemExecutor(deps, { dryRun: false })({ manageNumber: "a-1" });
+    expect(r.ok).toBe(true);
+    expect(recordHistory).toHaveBeenCalledWith(
+      "create",
+      "P-1",
+      expect.objectContaining({ sentName: "n" }), // buildYahooParams スタブの name
+    );
+  });
 });

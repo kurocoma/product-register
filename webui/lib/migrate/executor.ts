@@ -365,6 +365,9 @@ export function makePerItemExecutor(
         neCode,
         published: publish,
         stockQuantity: publish ? stockQuantity : undefined,
+        // 実際に editItem へ送信した商品名（整形・切り詰め後）。
+        // 「何が送られたか分からない」障害調査を履歴から可能にする。
+        sentName: editParams.name,
       });
     }
 

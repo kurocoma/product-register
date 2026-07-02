@@ -63,6 +63,9 @@ export type FieldTruncation = {
   label: string;
   limit: number;
   fullWidthLen: number;
+  /** コードポイント数（name は maxChars でも切るため、UI が両方示せるよう露出）。 */
+  charLen?: number;
+  maxChars?: number;
   original: string;
   fitted: string;
 };
