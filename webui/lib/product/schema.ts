@@ -199,6 +199,14 @@ export function productVariants(p: ProductInput): Variant[] {
   ];
 }
 
+/** SKU(variant) の表示価格（二重価格）。variant.display_price 優先。
+ * フラット商品(variants未設定)は product の二重価格に従来どおり連動し、
+ * 実 variants を持つ商品で未設定なら販売価格に連動する。CSV/プレビューの共通規則。 */
+export function variantDisplayPrice(p: ProductInput, v: Variant): number {
+  if (v.display_price && v.display_price > 0) return v.display_price;
+  return p.variants.length === 0 ? displayPrice(p) : v.selling_price;
+}
+
 export type ResolvedAttribute = { item: string; value: string; unit: string };
 
 /** 商品属性を統一的に取り出す。

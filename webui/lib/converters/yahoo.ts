@@ -1,5 +1,5 @@
 import type { ProductInput } from "@/lib/product/schema";
-import { displayPrice } from "@/lib/product/schema";
+import { productVariants, variantDisplayPrice } from "@/lib/product/schema";
 import { fitFullWidth } from "@/lib/product/text-fit";
 import type { Converter } from "./base";
 import { ENCODING } from "./base";
@@ -93,24 +93,27 @@ export class YahooConverter implements Converter {
     if (p.yahoo_grouping_enabled && !p.unit) {
       console.warn(`ne_code=${p.ne_code}: yahoo_grouping_enabled=true だが unit が空`);
     }
-    const taxInclusive = String(Math.floor(p.selling_price * (1 + p.tax_rate / 100) + 0.5));
-    const displayInclusive = String(Math.floor(displayPrice(p) * (1 + p.tax_rate / 100) + 0.5));
-    const taxrateType = String(p.tax_rate / 100);
-    const caption = buildCaption(p.ne_code, p.image_count, p.description_pc);
+    // 多SKU商品は variants[0] を代表として従来どおり1行出力する
+    // （設計書: Yahoo の多SKUは subcode_param で将来対応。フラット商品は1件合成=従来値）。
+    const v = productVariants(p)[0];
+    const taxInclusive = String(Math.floor(v.selling_price * (1 + v.tax_rate / 100) + 0.5));
+    const displayInclusive = String(Math.floor(variantDisplayPrice(p, v) * (1 + v.tax_rate / 100) + 0.5));
+    const taxrateType = String(v.tax_rate / 100);
+    const caption = buildCaption(v.ne_code, p.image_count, p.description_pc);
     const explanation = buildExplanation(p.free1, p.description_pc);
-    const groupingId = resolveGroupingId(p.ne_code, p.yahoo_grouping_enabled);
+    const groupingId = resolveGroupingId(v.ne_code, p.yahoo_grouping_enabled);
     const variation1Title = p.yahoo_grouping_enabled ? p.yahoo_variation_title : "";
-    const variation1Name = p.yahoo_grouping_enabled ? buildVariationName(p.quantity, p.unit) : "";
-    const itemImageUrls = buildYahooItemImageUrls(p.ne_code, p.image_count);
+    const variation1Name = p.yahoo_grouping_enabled ? buildVariationName(v.quantity, p.unit) : "";
+    const itemImageUrls = buildYahooItemImageUrls(v.ne_code, p.image_count);
     // 重量: 送料無料=100 / それ以外=1（運用ルール）。送料アイコン(delivery)も重量連動：
     // 100(=送料無料)なら 1(無料アイコン)、それ以外は 0(なし)。shipping_type は楽天 postageIncluded 由来。
-    const shipWeight = p.shipping_type === "送料無料" ? "100" : "1";
+    const shipWeight = v.shipping_type === "送料無料" ? "100" : "1";
 
     const row: Record<string, string> = Object.fromEntries(YAHOO_COLUMNS.map((c) => [c, ""]));
     Object.assign(row, {
       "path": p.yahoo_path,
       "name": p.display_name,
-      "code": p.ne_code,
+      "code": v.ne_code,
       "original-price": displayInclusive,
       "price": taxInclusive,
       "headline": p.catch_copy_yahoo,
@@ -119,7 +122,7 @@ export class YahooConverter implements Converter {
       "options": buildYahooOptions(p.customization_options),
       "ship-weight": shipWeight,
       "taxable": "1",
-      "jan": p.jan_code,
+      "jan": v.jan_code,
       "delivery": shipWeight === "100" ? "1" : "0",
       "condition": "0",
       "product-category": p.yahoo_category_id,

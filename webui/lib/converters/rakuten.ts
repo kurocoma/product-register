@@ -1,5 +1,5 @@
 import type { ProductInput, Variant } from "@/lib/product/schema";
-import { resolveAttributes, displayPrice, productVariants } from "@/lib/product/schema";
+import { resolveAttributes, productVariants, variantDisplayPrice } from "@/lib/product/schema";
 import type { Converter } from "./base";
 import { ENCODING } from "./base";
 import { buildRakutenImgList } from "./image-url";
@@ -141,8 +141,6 @@ export class RakutenConverter implements Converter {
 
   private buildChildRow(base: string, p: ProductInput, v: Variant): Record<string, string> {
     const row: Record<string, string> = {};
-    // フラット商品(variants未設定)は product 側の値も参照する（後方互換）。
-    const flat = p.variants.length === 0;
     const multiSku = p.variants.length > 1;
 
     row["商品管理番号（商品URL）"] = base;
@@ -153,14 +151,7 @@ export class RakutenConverter implements Converter {
     row["バリエーション項目選択肢1"] = v.variation_value || p.option_item_name;
 
     row["販売価格"] = String(v.selling_price);
-    // SKU別表示価格: variant.display_price 優先。フラット商品は product の二重価格に従来どおり連動。
-    const disp =
-      v.display_price && v.display_price > 0
-        ? v.display_price
-        : flat
-          ? displayPrice(p)
-          : v.selling_price;
-    row["表示価格"] = String(disp);
+    row["表示価格"] = String(variantDisplayPrice(p, v));
     row["二重価格文言管理番号"] = "1";
 
     row["再入荷お知らせボタン"] = "0";
