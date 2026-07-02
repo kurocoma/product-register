@@ -4,10 +4,10 @@ import { useState } from "react";
 import Link from "next/link";
 import type { BulkItemResult, BulkResponse, Mall } from "@/lib/register/types";
 import { selectCommitTargets } from "@/lib/register/bulk-plan";
+import { runBulkRegisterSequential, type BulkRunProgress } from "@/lib/register/bulk-run";
+import { missingFieldLabels } from "@/lib/register/missing-labels";
 
 const MALL_LABEL: Record<Mall, string> = { rakuten: "楽天", yahoo: "Yahoo" };
-
-type Progress = { done: number; total: number; ok: number; ng: number };
 
 /** 商品一覧の一括モール登録パネル（複数選択時のみ表示）。
  * 「一括反映」（掲載済み商品への変更反映）とは別機能: こちらは未掲載/既存の商品を
@@ -26,7 +26,7 @@ export function BulkRegisterPanel({
   const [checked, setChecked] = useState<BulkResponse | null>(null);
   const [checkedIdsKey, setCheckedIdsKey] = useState<string>("");
   const [commitResults, setCommitResults] = useState<BulkItemResult[]>([]);
-  const [progress, setProgress] = useState<Progress | null>(null);
+  const [progress, setProgress] = useState<BulkRunProgress | null>(null);
   const [publish, setPublish] = useState(false);
   const [submitYahoo, setSubmitYahoo] = useState(false);
   const [overwrite, setOverwrite] = useState(false);
@@ -93,58 +93,53 @@ export function BulkRegisterPanel({
     setSubmitNote(null);
     setProgress({ done: 0, total: targets.length, ok: 0, ng: 0 });
 
-    const done: BulkItemResult[] = [];
-    const okIds: string[] = [];
-    // モールAPIに負荷をかけないため1件ずつ順番に送信する（並列にしない）
-    for (let i = 0; i < targets.length; i++) {
-      const t = targets[i];
-      const isLast = i === targets.length - 1;
-      try {
-        const res = await fetch(`/api/register/bulk/${mall}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            ids: [t.id],
-            dryRun: false,
-            publish,
-            overwrite,
-            // Yahooの「反映」はストア全体単位のため、最後の1件の処理後に1回だけ予約する
-            submit: mall === "yahoo" && submitYahoo && isLast,
-          }),
-        });
-        const j = (await res.json()) as BulkResponse & { error?: string };
-        const r: BulkItemResult = j?.results?.[0] ?? {
-          id: t.id,
-          ne_code: t.ne_code,
-          product_name: t.product_name,
-          ok: false,
-          error: j?.error || `HTTP ${res.status}`,
-        };
-        done.push(r);
-        if (r.ok) okIds.push(t.id);
-        if (typeof j?.submitted === "boolean") {
-          setSubmitNote(
-            j.submitted
-              ? "✓ Yahooに反映を予約しました（公開処理はYahoo側で順次実行されます）"
-              : `Yahooへの反映は保留: ${j.submitMessage ?? ""}`,
+    // 1件ずつ順番に登録し、Yahooの「反映」は全件完了後に1回だけ予約する
+    // （最後の1件が失敗しても、先行して成功した商品の反映が漏れないようにする）
+    const { okIds, submit } = await runBulkRegisterSequential(
+      targets,
+      { submit: mall === "yahoo" && submitYahoo },
+      {
+        registerOne: async (t) => {
+          const res = await fetch(`/api/register/bulk/${mall}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids: [t.id], dryRun: false, publish, overwrite }),
+          });
+          const j = (await res.json()) as BulkResponse & { error?: string };
+          return (
+            j?.results?.[0] ?? {
+              id: t.id,
+              ne_code: t.ne_code,
+              product_name: t.product_name,
+              ok: false,
+              error: j?.error || `HTTP ${res.status}`,
+            }
           );
-        }
-      } catch (e) {
-        done.push({
-          id: t.id,
-          ne_code: t.ne_code,
-          product_name: t.product_name,
-          ok: false,
-          error: "通信エラー: " + (e instanceof Error ? e.message : String(e)),
-        });
-      }
-      setCommitResults([...done]);
-      setProgress({
-        done: i + 1,
-        total: targets.length,
-        ok: done.filter((r) => r.ok).length,
-        ng: done.filter((r) => !r.ok).length,
-      });
+        },
+        reserveSubmit: async () => {
+          const res = await fetch(`/api/register/bulk/yahoo`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "submit" }),
+          });
+          const j = await res.json().catch(() => null);
+          return {
+            submitted: j?.submitted === true,
+            submitMessage: j?.submitMessage ?? j?.error ?? `HTTP ${res.status}`,
+          };
+        },
+        onProgress: (p, results) => {
+          setCommitResults(results);
+          setProgress(p);
+        },
+      },
+    );
+    if (submit) {
+      setSubmitNote(
+        submit.submitted
+          ? `✓ Yahooに反映を予約しました（登録成功 ${okIds.length} 件、公開処理はYahoo側で順次実行されます）`
+          : `Yahooへの反映は保留: ${submit.submitMessage ?? ""}`,
+      );
     }
     if (okIds.length > 0) onRegistered?.(okIds, mall);
     setBusy(null);
@@ -153,6 +148,9 @@ export function BulkRegisterPanel({
   const judgeLabel = (r: BulkItemResult, committed: boolean) => {
     if (committed) {
       if (r.ok) return <span className="text-green-700">✓ {r.action === "update" ? "上書き更新しました" : "新規登録しました"}</span>;
+      if (r.missing && r.missing.length > 0) {
+        return <span className="text-red-600">✗ 必須項目不足: {missingFieldLabels(r.missing).join("、")}</span>;
+      }
       return <span className="text-red-600">✗ {r.error || "失敗"}</span>;
     }
     if (r.ok) {
@@ -163,7 +161,7 @@ export function BulkRegisterPanel({
       );
     }
     if (r.missing && r.missing.length > 0) {
-      return <span className="text-red-600">必須項目不足: {r.missing.join(", ")}</span>;
+      return <span className="text-red-600">必須項目不足: {missingFieldLabels(r.missing).join("、")}</span>;
     }
     return <span className="text-red-600">✗ {r.error || "判定できません"}</span>;
   };

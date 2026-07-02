@@ -22,11 +22,14 @@ const MAX_BULK = 100;
 
 /** POST = 複数商品の一括モール登録。
  * body: { ids: string[], dryRun?: boolean(既定true), publish?: boolean, submit?: boolean, overwrite?: boolean }
+ *       または { action: "submit" }（Yahoo のみ: 登録なしで反映予約だけを行う）
  * - dryRun 既定 true（実登録は dryRun:false を明示したときだけ。安全側既定）。
  * - 商品ごとに try/catch し、1件の失敗で全体を止めない（部分失敗でも HTTP 200 + ok:true）。
  * - モールAPIへは逐次実行（同時多発リクエストを送らない）。
  * - 既存商品の上書きは overwrite を明示したときだけ（既定はスキップ）。
- * - Yahoo の反映(submit)はストア全体単位のため、全件処理後に1回だけ予約する。 */
+ * - Yahoo の反映(submit)はストア全体単位のため、全件処理後に1回だけ予約する。
+ *   フロントが1件ずつ POST する場合は、全件完了後に action:"submit" を1回呼ぶ
+ *   （予約の成否を最終件の登録成否に依存させない）。 */
 export async function POST(req: Request, { params }: { params: Promise<{ mall: string }> }) {
   const { mall: mallParam } = await params;
   if (mallParam !== "rakuten" && mallParam !== "yahoo") {
@@ -39,6 +42,24 @@ export async function POST(req: Request, { params }: { params: Promise<{ mall: s
   if (!user) return NextResponse.json({ ok: false, error: "未ログインです" }, { status: 401 });
 
   const body = await req.json().catch(() => ({}));
+
+  // 反映予約のみ（action:"submit"）: 一括登録ループの完了後にフロントが1回だけ呼ぶ薄い口。
+  // 予約の成否を最終商品の登録成否から切り離す（先行して成功した商品の反映漏れを防ぐ）。
+  if (body?.action === "submit") {
+    if (mall !== "yahoo") {
+      return NextResponse.json(
+        { ok: false, error: "反映予約(action: submit)はYahooのみ対応しています" },
+        { status: 400 },
+      );
+    }
+    const submitCfg = getYahooConfig();
+    if (!submitCfg) {
+      return NextResponse.json({ ok: false, error: "Yahoo 認証情報が未設定です" }, { status: 500 });
+    }
+    const s = await reserveYahooPublish(submitCfg);
+    return NextResponse.json({ ok: true, mall, submitted: s.ok, submitMessage: s.message });
+  }
+
   const ids: string[] = Array.isArray(body?.ids)
     ? (body.ids as unknown[]).filter((x): x is string => typeof x === "string" && x.length > 0)
     : [];
