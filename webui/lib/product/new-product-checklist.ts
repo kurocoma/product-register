@@ -6,6 +6,7 @@
  *   ここでは入力段階でその代表項目を非エンジニア向けの日本語で案内する。 */
 
 import type { ProductInput } from "@/lib/product/schema";
+import { mallPresence } from "@/lib/product/schema";
 import { validateForSave } from "@/lib/product/repository";
 
 /** 新規ページの JAN 初期値（未入力扱いにするプレースホルダ）。 */
@@ -98,6 +99,14 @@ export function missingRequiredItems(p: ProductInput): ChecklistItem[] {
 /** 新規商品の自動保存を開始してよいか。
  * 保存の必須要件（validateForSave = NEコード）を単一の源泉として使う。
  * NEコードが空のまま自動保存してエラーを出し続ける挙動を防ぐ（既存商品の編集には影響しない）。 */
+/** 登録ステップ6「モール登録」の達成判定。掲載状況の単一源泉 mallPresence
+ * （mall_listed 優先・楽天は rakuten_manage_number フォールバック）に揃える。
+ * どちらかのモールに掲載済みなら達成とする。 */
+export function mallRegistrationDone(p: ProductInput): boolean {
+  const m = mallPresence(p);
+  return m.rakuten || m.yahoo;
+}
+
 export function canAutoSaveNewProduct(p: ProductInput): boolean {
   return validateForSave(p).ok;
 }

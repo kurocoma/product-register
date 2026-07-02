@@ -1,7 +1,11 @@
 "use client";
 
 import type { ProductInput } from "@/lib/product/schema";
-import { newProductChecklist, missingRequiredItems } from "@/lib/product/new-product-checklist";
+import {
+  newProductChecklist,
+  missingRequiredItems,
+  mallRegistrationDone,
+} from "@/lib/product/new-product-checklist";
 
 /** 新規商品登録の「登録ステップ + 必須項目チェック」パネル。
  * 新規作成時（/products/new から入ったとき）だけ表示し、既存商品の編集画面には出さない。
@@ -18,7 +22,8 @@ export function NewProductChecklist({ data, saved }: { data: ProductInput; saved
     { no: 3, label: "カテゴリ・属性", done: stepDone(3) },
     { no: 4, label: "画像（任意）", done: optionalStepDone(4) },
     { no: 5, label: "保存", done: saved },
-    { no: 6, label: "モール登録", done: false },
+    // 掲載状況（mall_listed / 楽天は管理番号フォールバック）から判定。登録成功で ✓ になる。
+    { no: 6, label: "モール登録", done: mallRegistrationDone(data) },
   ];
 
   const neCodeMissing = missing.some((i) => i.key === "ne_code");

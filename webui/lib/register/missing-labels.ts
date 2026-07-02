@@ -34,6 +34,11 @@ export const MISSING_FIELD_LABELS: Record<string, string> = {
 export function missingFieldLabel(field: string): string {
   const exact = MISSING_FIELD_LABELS[field];
   if (exact) return exact;
+  // 「path カテゴリ名「…」が全角20を超過」は汎用の先頭置換だと
+  // 「Yahooカテゴリ（パス）カテゴリ名…」と冗長になるため専用の言い換えを持つ。
+  if (field.startsWith("path カテゴリ名")) {
+    return `Yahooカテゴリ名${field.slice("path カテゴリ名".length)}`;
+  }
   const m = field.match(/^(\S+) (.+)$/);
   if (m) {
     const head = MISSING_FIELD_LABELS[m[1]];
