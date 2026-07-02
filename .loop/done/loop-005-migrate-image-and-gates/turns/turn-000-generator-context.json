@@ -1,0 +1,14 @@
+{
+  "agent_id": "a684a034898c92c8e",
+  "agent_type": "eval-loop-generator (real custom agent, Agent tool fork)",
+  "role": "generator",
+  "loop": "loop-005-migrate-image-and-gates",
+  "iteration": 0,
+  "input_files": [".loop/current/task.md", ".loop/current/turns/turn-000-plan.md"],
+  "forbidden_files": ["turn-*-eval.json / score / consecutive / feedback", "acceptance/criteria/eval-schema (変更禁止)", "yahoo.ts(YahooConverter)変更禁止"],
+  "context_strategy": "fork (fresh context, no parent/score history)",
+  "previous_thread_reused": false,
+  "within_turn_resumes": 2,
+  "notes": "Bundle A+B 実装。A5 で既存 executor.test.ts の effects 期待配列のみ syncImage↔editYahoo 入替(誤順序を固定していた spec の是正・git diff で1箇所のみ確認)。新規テスト3本は Bash 作成。dep 拡張(syncImage uploaded?/buildImageUrls?)は後方互換。A4 リトライ既定待機1500ms。",
+  "sandbox_or_permission_mode": "acceptEdits. global pretool_global_guard.py active"
+}

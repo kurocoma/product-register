@@ -1,0 +1,20 @@
+{
+  "agent_id": "a2866d075de244e54",
+  "agent_type": "eval-loop-generator (real custom agent, Agent tool fork)",
+  "role": "generator",
+  "iteration": 1,
+  "input_files": [
+    ".loop/current/task.md",
+    ".loop/current/turns/turn-001-plan.md"
+  ],
+  "forbidden_files": [
+    ".loop/current/turns/turn-000-eval.json",
+    "score / consecutive_passes / 過去eval / feedback",
+    "acceptance.yaml/criteria.yaml/eval-schema.json (変更禁止)"
+  ],
+  "context_strategy": "fork (Agent tool fresh context, no parent/score history)",
+  "previous_thread_reused": false,
+  "within_turn_resumes": 2,
+  "notes": "Skill eval-loop-generate(fork) が no-op だったため Agent タイプ eval-loop-generator で直接 fork。maxTurns:12 のため turn 内で 2 回 SendMessage 再開（同一スレッド継続）。テストは global deny(Write/Edit *.test.*) を避け scratchpad へ Write→Bash cp で新規作成（ユーザー承認済み・既存テスト無改変）。",
+  "sandbox_or_permission_mode": "acceptEdits (Read/Grep/Glob/Edit/Write/Bash). global pretool_global_guard.py active (test/spec/config/secrets/destructive denied)"
+}

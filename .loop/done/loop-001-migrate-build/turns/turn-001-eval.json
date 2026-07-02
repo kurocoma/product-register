@@ -1,0 +1,82 @@
+{
+  "score": 83,
+  "quality": {
+    "overall": 83,
+    "breakdown": {
+      "correctness": 74,
+      "regression_safety": 95,
+      "test_quality": 80,
+      "maintainability": 86,
+      "integration_fit": 87,
+      "risk_control": 84
+    }
+  },
+  "hard_gate_findings": [
+    {
+      "id": "webui_lint",
+      "passed": true,
+      "detail": "cd webui && npm run lint -> exit 0. 8 warnings, all pre-existing (templates/page.tsx, preview/*, ProductForm, repository.test, tests/*.mjs). 0 errors. New lib/migrate/* and app/api/migrate/* produce no lint output."
+    },
+    {
+      "id": "webui_typecheck",
+      "passed": true,
+      "detail": "cd webui && npx tsc --noEmit -> exit 0. No type errors; injected deps/types in executor.ts and route.ts match existing signatures (buildYahooEditItemParams/validateEditItemParams/editItem/EditItemResult/getItem/searchManageNumberBySku/upsertProduct/recordHistory/fetchYahooCategoryMapping)."
+    },
+    {
+      "id": "webui_unit",
+      "passed": true,
+      "detail": "cd webui && npm run test -> exit 0. 24 files / 180 tests passed (includes new manage-numbers/plan/defaults/result/executor tests; pre-existing 139 still green)."
+    },
+    {
+      "id": "webui_build",
+      "passed": true,
+      "detail": "cd webui && npm run build -> exit 0. Route table lists 'f /api/migrate/rakuten-to-yahoo' (dynamic, nodejs runtime). Static pages generated, no build error."
+    }
+  ],
+  "evidence": [
+    "$ git status --porcelain / git diff --stat HEAD -> only NEW untracked dirs webui/lib/migrate/ and webui/app/api/migrate/; zero tracked-file modifications => AC-006 backward compat confirmed (no existing route/test touched).",
+    "webui/lib/migrate/result.ts:13-30 aggregate() switch handles ok/requires_manual/skipped/failed but has NO case for status='migrate'; comment claims 'migrate ... 結果配列には通常現れない' which is false for the default dry-run path.",
+    "webui/lib/migrate/executor.ts:153-155 dry-run returns { status:'migrate', ok:true }; therefore a default dry-run over N migratable items yields summary={total:N, migrated:0, requiresManual:0, skipped:0, failed:0} -> misleading preview totals (the exact flow this session must validate). Untested: executor.test.ts:106-116 asserts per-item status only, result.test.ts never aggregates a 'migrate' status.",
+    "webui/app/api/migrate/rakuten-to-yahoo/route.ts:80-94 getYahooAccessToken only called when !dryRun; route.ts:64-66 dryRun/publish/continueOnError safe defaults => AC-005 dry-run performs no token fetch; executor dry-run returns before upsert/editYahoo/syncImage/recordHistory => no DB/mall writes.",
+    "webui/lib/migrate/executor.ts:75-79 forceDisplay=String(safeStateDefaults(publish).yahooDisplay)='0' when publish=false, passed to buildYahooParams at preview (l.127) and commit (l.168); verified by executor.test.ts:146-156 (commit) and :158-165 (publish=true => forceDisplay undefined) => AC-002 display:0.",
+    "webui/lib/migrate/executor.ts:113-150 category=null -> categoryResolved=false -> buildItemPlan -> action='requires_manual', step='category', no upsert/editYahoo (executor.test.ts:169-179) => AC-004; variants>1 (l.100) and yahoo_grouping_enabled (l.110) -> requires_manual (executor.test.ts:181-207) => AC-008.",
+    "webui/lib/migrate/executor.ts:123-165 findExisting!=null -> existed=true -> reuses existing.id, skips upsert (executor.test.ts:210-222) => AC-007; route.ts:156-178 findExistingProduct mirrors app/api/import/[mall]/route.ts:118-141 (rakuten_manage_number then ne_code).",
+    "webui/lib/migrate/result.ts:42-65 runItems continueOnError catches throw into status='failed' and continues; executor.test.ts:267-285 asserts ['a','boom','c'] order + summary {total:3,migrated:2,failed:1} => AC-003.",
+    "webui/app/api/migrate/rakuten-to-yahoo/route.ts:56-62 accepts string|string[]; parseManageNumbers (manage-numbers.ts) splits newline/comma/CSV, dedups, validates 32-char/charset; returns results+summary+invalid+duplicatesRemoved; MigrationItemResult has manageNumber/productId/step/ok/error(+status) => AC-001 shape.",
+    "Grep webui/components/** for migrate|rakuten-to-yahoo|一括移行 -> No files found: the task's required product-list UI panel (paste -> dry-run preview -> execute -> result table) is NOT implemented; feature is API/logic only.",
+    "webui/lib/migrate/defaults.ts:12-17 + types.ts:80-89 safeStateDefaults returns stock:0, but executor.ts only consumes registerPublish/yahooDisplay; safe.stock is never applied and YahooConverter (lib/converters/yahoo.ts) emits keep-stock:'1' with no quantity field => AC-002 '在庫0' not literally enforced (safety relies solely on display=0)."
+  ],
+  "feedback": "1) Fix the dry-run summary defect (highest priority, it breaks the session's primary flow): add a 'migratable' field to MigrationSummary and count status='migrate' in result.ts aggregate(), OR map dry-run executor output to a counted bucket; then add a test asserting the dry-run summary over a mix of migrate/requires_manual/failed (current aggregate tests never exercise 'migrate'). 2) Implement the required UI panel under webui/components/product/ (textarea/CSV paste -> POST dry-run -> per-item preview table with reasons -> Execute -> results+summary table), wired to /api/migrate/rakuten-to-yahoo; this is a stated user-visible deliverable currently missing. 3) Resolve the 在庫0 gap: either explicitly force stock to 0 in safe mode (set product.quantity=0 / send the appropriate stock param) and test it, or delete the unused safeStateDefaults.stock field and document that display=0 is the sole safety mechanism because editItem carries no stock column. 4) Add a route-level test (mock @/lib/rakuten/item-client, @/lib/yahoo/*, supabase) covering: dry-run does not fetch the Yahoo token, resolveRakutenItem SKU-search fallback, and syncYahooImages best-effort behavior — route deps wiring and syncYahooImages are currently untested. 5) Add throttling/concurrency control between items (task requires レート制御); runItems is sequential but has no inter-item delay/backoff for mall API load. 6) Minor cleanup: remove the unused 'submit' MigrationStep and the dead safe.stock to keep the contract honest.",
+  "passed": false,
+  "evaluator_skill": "eval-loop-evaluator",
+  "evaluated_artifacts": [
+    "webui/lib/migrate/executor.ts",
+    "webui/lib/migrate/executor.test.ts",
+    "webui/app/api/migrate/rakuten-to-yahoo/route.ts",
+    "webui/lib/migrate/types.ts",
+    "webui/lib/migrate/manage-numbers.ts",
+    "webui/lib/migrate/plan.ts",
+    "webui/lib/migrate/defaults.ts",
+    "webui/lib/migrate/result.ts",
+    "webui/lib/migrate/index.ts",
+    "webui/lib/migrate/manage-numbers.test.ts",
+    "webui/lib/migrate/plan.test.ts",
+    "webui/lib/migrate/defaults.test.ts",
+    "webui/lib/migrate/result.test.ts"
+  ],
+  "risks": [
+    "Dry-run preview summary reports migrated=0 for fully-migratable items, misleading operators during the safety-validation step that precedes any live migration.",
+    "Requested product-list UI panel is absent, so the feature is not usable by the end user as specified (only callable via raw API).",
+    "在庫0 is not enforced in safe mode; if a Yahoo item defaults to in-stock, only display=0 prevents exposure — single layer of safety vs the task's intended double safety.",
+    "No inter-item throttle/backoff; a large commit run could hit Rakuten/Yahoo API rate limits despite sequential processing.",
+    "route.ts deps wiring (resolveRakutenItem SKU fallback, syncYahooImages, findExistingProduct duplication) is untested; regressions there would not be caught by the current suite."
+  ],
+  "recommended_next_changes": [
+    "Count status='migrate' in aggregate() (add MigrationSummary.migratable) and add a dry-run summary test.",
+    "Build the components/product migrate panel and wire it to /api/migrate/rakuten-to-yahoo (dry-run preview + execute + results table).",
+    "Enforce or explicitly document the 在庫0 safe default (apply safe.stock or remove the dead field).",
+    "Add a mocked route-level integration test (dry-run no token, SKU fallback, image best-effort).",
+    "Introduce a configurable delay/concurrency cap between items for mall-API rate control.",
+    "Remove dead code (unused 'submit' step, unused safe.stock) to keep the type contract accurate."
+  ]
+}

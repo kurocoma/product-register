@@ -1,0 +1,29 @@
+quality_axes:
+  correctness:
+    weight: 30
+    description: "本番ハードニング要件(レート制御の実配線・既存公開商品の display 保持・skipped契約の honest化・大量入力ガード)を正しく満たすか。route の commit/dry-run 挙動が仕様通りか"
+  regression_safety:
+    weight: 20
+    description: "既存の一括移行フロー・単品ルート・既存テスト(189)・後方互換を壊していないか。共有化/抽出を行う場合も既存外部挙動を不変に保つか"
+  test_quality:
+    weight: 15
+    description: "意味のある単体/統合テストが追加/維持されているか(レート制御の待機回数・display保持・skipped・バッチ分割)。テストの緩和や trivial 化が無いか"
+  maintainability:
+    weight: 15
+    description: "変更が読みやすく局所的で将来保守しやすいか。設定(delay/batch)の表現が明快で、型・契約が実態と一致(dead path が無い)か"
+  integration_fit:
+    weight: 10
+    description: "既存設計(register/yahoo の forceDisplay 規約・runItems I/F・supabase認証・recordHistory・converter再利用・MigratePanel)に整合しているか"
+  risk_control:
+    weight: 10
+    description: "モールAPI過負荷防止(レート制御)・既存公開商品の不用意な非表示化防止・大量入力のタイムアウト/部分commit対策・安全既定/秘密情報非露出 が適切か"
+
+threshold: 90
+
+scoring_rules:
+  - "score と quality.overall は一致させる"
+  - "hard gate 失敗時は passed=false(記録器が再計算する)。evidence と矛盾させない"
+  - "前回比でなく絶対評価する"
+  - "plan への忠実さでなく task と criteria への適合を評価する"
+  - "作る係の report でなく、実物とコマンド結果を証拠にする"
+  - "テストが通っていても設計・互換・保守・セキュリティ問題があれば減点する"

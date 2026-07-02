@@ -1,0 +1,25 @@
+{
+  "agent_id": "a8353f8cec3919b96",
+  "agent_type": "eval-loop-evaluator (real custom agent, Agent tool fork)",
+  "role": "evaluator",
+  "iteration": 1,
+  "input_files": [
+    ".loop/current/task.md",
+    ".loop/current/acceptance.yaml",
+    ".loop/current/criteria.yaml",
+    ".loop/current/eval-schema.json",
+    "webui/lib/migrate/*.ts (+ *.test.ts)",
+    "webui/app/api/migrate/rakuten-to-yahoo/route.ts"
+  ],
+  "forbidden_inputs": [
+    "turn-*-report.md (generator report)",
+    "turn-*-plan.md",
+    "過去 score / 過去 eval (turn-*-eval.json)",
+    "feedback / 司令塔・generator の会話"
+  ],
+  "context_strategy": "fork (fresh context, no parent/generator history)",
+  "previous_thread_reused": false,
+  "within_turn_resumes": 1,
+  "verification_run": "read-only: npm run lint/test/build, npx tsc --noEmit, git status/diff（破壊系は guard_evaluator_bash.py が拒否）",
+  "result": "score=83, passed=false（schema VALID）。出力はトランスクリプト(JSONL)から evaluator_skill/quality を含む最終メッセージを抽出し turn-001-eval.json へ保存。HTMLエンティティ除去済み。"
+}

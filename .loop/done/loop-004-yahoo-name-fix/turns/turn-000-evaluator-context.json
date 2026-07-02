@@ -1,0 +1,14 @@
+{
+  "agent_id": "ad561e8d38f825d4b",
+  "agent_type": "eval-loop-evaluator (real custom agent, Agent tool fork)",
+  "role": "evaluator",
+  "loop": "loop-004-yahoo-name-fix",
+  "iteration": 0,
+  "input_files": [".loop/current/task.md", ".loop/current/acceptance.yaml", ".loop/current/criteria.yaml", ".loop/current/eval-schema.json", "webui/lib/product/text-fit.ts (+ tests)", "webui/lib/yahoo/item-mapper.ts (+ item-mapper-name.test.ts)"],
+  "forbidden_inputs": ["turn-*-report.md / plan / 過去 score・eval / feedback / 司令塔・generator 会話"],
+  "context_strategy": "fork (fresh context)",
+  "previous_thread_reused": false,
+  "within_turn_resumes": 1,
+  "verification_run": "read-only: npm run test(243)/tsc(0)/lint(0)/build(0)/git diff + node 検証(REAL_NAME 整形を実証)",
+  "result": "score=93, passed=true（schema VALID）。AC-N01..N05 充足。出力はトランスクリプトから抽出して turn-000-eval.json へ保存。"
+}

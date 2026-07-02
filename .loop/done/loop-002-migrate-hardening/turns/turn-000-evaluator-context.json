@@ -1,0 +1,24 @@
+{
+  "agent_id": "aaad9d2cc1e05f613",
+  "agent_type": "eval-loop-evaluator (real custom agent, Agent tool fork)",
+  "role": "evaluator",
+  "loop": "loop-002-migrate-hardening",
+  "iteration": 0,
+  "input_files": [
+    ".loop/current/task.md",
+    ".loop/current/acceptance.yaml",
+    ".loop/current/criteria.yaml",
+    ".loop/current/eval-schema.json",
+    "webui/app/api/migrate/rakuten-to-yahoo/route.ts (+ route-rate.test.ts)",
+    "webui/lib/migrate/executor.ts (+ executor-display.test.ts)",
+    "webui/lib/migrate/result.ts (+ result-skip.test.ts)"
+  ],
+  "forbidden_inputs": [
+    "turn-*-report.md / turn-*-plan.md / 過去 score・eval / feedback / 司令塔・generator 会話"
+  ],
+  "context_strategy": "fork (fresh context, no parent/generator history)",
+  "previous_thread_reused": false,
+  "within_turn_resumes": 1,
+  "verification_run": "read-only: npm run test(201)/tsc(0)/lint(0)/build(0)/git diff（破壊系は guard が拒否）",
+  "result": "score=92, passed=true（schema VALID）。AC-H01..H06 充足。出力はトランスクリプトから抽出・HTMLエンティティ除去して turn-000-eval.json へ保存。"
+}

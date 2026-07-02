@@ -1,0 +1,77 @@
+{
+  "score": 92,
+  "quality": {
+    "overall": 92,
+    "breakdown": {
+      "correctness": 93,
+      "regression_safety": 95,
+      "test_quality": 92,
+      "maintainability": 90,
+      "integration_fit": 93,
+      "risk_control": 90
+    }
+  },
+  "hard_gate_findings": [
+    {
+      "id": "webui_lint",
+      "passed": true,
+      "detail": "$ cd webui && npm run lint -> 0 errors, 8 pre-existing warnings (ProductForm.tsx watch hook, repository.test.ts MAIN_KEYS, e2e *.mjs unused vars) all unrelated to migrate files. exit 0."
+    },
+    {
+      "id": "webui_typecheck",
+      "passed": true,
+      "detail": "$ cd webui && npx tsc --noEmit -> exit 0 (no type errors)."
+    },
+    {
+      "id": "webui_unit",
+      "passed": true,
+      "detail": "$ cd webui && npm run test -> 29 files, 201 tests passed (baseline 189 + 12 new from route-rate/executor-display/result-skip)."
+    },
+    {
+      "id": "webui_build",
+      "passed": true,
+      "detail": "$ cd webui && npm run build -> exit 0 (Next.js production build completed, all routes compiled including /api/migrate/rakuten-to-yahoo)."
+    }
+  ],
+  "evidence": [
+    "AC-H01 wiring: route.ts:73-74 computes delayMs = (typeof body.delayMs==='number' && >=0) ? body.delayMs : 300; route.ts:159-163 calls runItems(..., {continueOnError, delayMs}); result.ts:72 'if (i>0 && delayMs>0) await sleep(delayMs)' applies wait between items (count=items-1), sleep injectable (result.ts:65-68). Delay applies regardless of dryRun so dry-run getItem connections are also throttled.",
+    "AC-H01 tests: route-rate.test.ts:102-129 asserts default delayMs=300, body override 0, invalid -5 -> 300, and response.delayMs; result-summary.test.ts:48-58 injects sleep and asserts waited==[50,50] for 3 items (= effective-1), and default (no delayMs) -> slept==0 (regression).",
+    "AC-H02 logic: executor.ts:135-140 forceDisplay = (existed && preserveExistingDisplay) ? undefined : (safe.registerPublish ? undefined : String(safe.yahooDisplay)); preserveExistingDisplay defaults true (executor.ts:82, route.ts:76). Consistent with single-item register/yahoo route convention: item-mapper.ts:40-44 sets display=forceDisplay when defined else deletes display when forUpdate. executor passes forUpdate:existed (executor.ts:143,184).",
+    "AC-H02 tests: executor-display.test.ts -> existed=true preserve default -> forceDisplay undefined (l.70-80); new -> '0' (l.82-90); preserve=false existed -> '0' (l.92-100); publish=true -> undefined (l.102-110). Existing executor.test.ts:146 still asserts forceDisplay='0' for default makeDeps (findExisting->null, new item, executor.test.ts:50) -> NOT weakened.",
+    "AC-H03 honest 'skipped': result.ts:92-103 when continueOnError=false and a returned item has status='failed', remaining items pushed as status='skipped', step='import', error '前段の失敗により中断（continueOnError=false）'; continueOnError=true path untouched (no skipped). types.ts:15 ItemStatus 'skipped' now has a live emit path (dead path resolved). result-skip.test.ts asserts skipped emit + order + aggregate {skipped:2}, true-mode regression (skipped:0), requires_manual does not abort.",
+    "AC-H04 guard: route.ts:82-92 MAX_ITEMS=200; if valid.length>200 returns 400 {ok:false,error contains count and 200, count}; runItems NOT reached. route-rate.test.ts:131-149 asserts 201 -> 400 with count 201 and message containing '201'/'200' and runItems not called; exactly 200 -> 200 and runItems called once.",
+    "AC-H05 backward-compat: 201 unit tests green; single-item app/api/register/yahoo/[id]/route.ts unchanged; migrate route never imports/calls submitItem (only editItem at route.ts:12,153); dry-run returns before any write (executor.ts:169-171, no upsert/editYahoo); runItems lib default delayMs=0 keeps lib-level behavior identical. git status: new files only under webui/lib/migrate, webui/app/api/migrate, webui/components/product/MigratePanel.tsx (products/page.tsx +2 lines to surface panel, within target scope).",
+    "AC-H06 test reality: 3 new files invoke real units (POST handler with mocked external deps + spied real runItems; real makePerItemExecutor with fake deps; real runItems with injected sleep), assert behavior not implementation trivia. Not trivial/tautological."
+  ],
+  "feedback": "All six ACs are met and all four hard gates are green; no blocking issues. To raise robustness further next iteration: (1) AC-H04 is a reject-at-200 operational guard, not true chunking — large bulk (>200) still requires manual splitting; consider server-side batching/pagination so >200 inputs can complete safely. (2) Rate control is preventive delay only; add 429/5xx detection with exponential backoff + bounded retry in runItems (or executor) so a transient mall rate-limit does not become a per-item 'failed'. (3) Within a single item, resolveRakutenItem can call getItem twice (+ searchManageNumberBySku) with no inter-call delay — a minor request burst per item not throttled by the between-items delay. (4) Extract magic numbers (MAX_ITEMS=200, default delayMs=300) into named exported constants so route and tests share one source of truth. (5) Optionally surface delayMs/preserveExistingDisplay/MAX_ITEMS limit in MigratePanel UI and add one test asserting the dry-run path still applies the between-item delay (currently only implied).",
+  "passed": true,
+  "evaluator_skill": "eval-loop-evaluator",
+  "evaluated_artifacts": [
+    "webui/app/api/migrate/rakuten-to-yahoo/route.ts",
+    "webui/lib/migrate/executor.ts",
+    "webui/lib/migrate/result.ts",
+    "webui/lib/migrate/types.ts",
+    "webui/lib/migrate/defaults.ts",
+    "webui/lib/migrate/index.ts",
+    "webui/app/api/migrate/rakuten-to-yahoo/route-rate.test.ts",
+    "webui/lib/migrate/executor-display.test.ts",
+    "webui/lib/migrate/result-skip.test.ts",
+    "webui/lib/migrate/result-summary.test.ts",
+    "webui/lib/migrate/executor.test.ts",
+    "webui/lib/yahoo/item-mapper.ts",
+    "webui/app/api/register/yahoo/[id]/route.ts"
+  ],
+  "risks": [
+    "MAX_ITEMS=200 hard reject (not chunking): inputs >200 cannot complete in one request and require manual splitting; not ideal for full bulk migration of large catalogs.",
+    "No 429/5xx backoff-retry: a transient mall rate-limit during commit surfaces as per-item status='failed' rather than being retried; fixed delay is preventive only.",
+    "Per-item request burst: getItem + searchManageNumberBySku + getItem within one item are not throttled by the between-items delay.",
+    "Existing published items: when existed && preserveExistingDisplay, editItem still overwrites content fields (price/name/category) from rakuten data while preserving visibility — could overwrite manual Yahoo edits (pre-existing AC-007 behavior, out of this scope)."
+  ],
+  "recommended_next_changes": [
+    "Add server-side batching/chunking so inputs above the recommended limit can be processed safely instead of a hard 400 reject.",
+    "Add 429/5xx detection with bounded exponential backoff + retry inside runItems/executor so transient rate-limits do not become 'failed'.",
+    "Throttle or short-circuit the second getItem in resolveRakutenItem to avoid intra-item request bursts.",
+    "Promote MAX_ITEMS (200) and default delayMs (300) to named exported constants shared by route and tests.",
+    "Surface delayMs / preserveExistingDisplay / item limit in MigratePanel and add a test asserting the between-item delay also applies on the dry-run path."
+  ]
+}

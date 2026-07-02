@@ -1,0 +1,76 @@
+{
+  "score": 92,
+  "quality": {
+    "overall": 92,
+    "breakdown": {
+      "correctness": 94,
+      "regression_safety": 93,
+      "test_quality": 92,
+      "maintainability": 92,
+      "integration_fit": 90,
+      "risk_control": 88
+    }
+  },
+  "hard_gate_findings": [
+    {
+      "id": "webui_lint",
+      "passed": true,
+      "detail": "$ cd webui && npm run lint -> exit 0 (0 errors, 8 pre-existing warnings in ProductForm.tsx/repository.test.ts/e2e mjs, unrelated to migrate)"
+    },
+    {
+      "id": "webui_typecheck",
+      "passed": true,
+      "detail": "$ cd webui && npx tsc --noEmit -> exit 0 (clean)"
+    },
+    {
+      "id": "webui_unit",
+      "passed": true,
+      "detail": "$ cd webui && npm run test -> 29 files / 201 tests passed (baseline 189 + 12 new: route-rate.test 5, executor-display.test 4, result-skip.test 3)"
+    },
+    {
+      "id": "webui_build",
+      "passed": true,
+      "detail": "$ cd webui && npm run build -> exit 0; route /api/migrate/rakuten-to-yahoo compiled (ƒ dynamic)"
+    }
+  ],
+  "evidence": [
+    "AC-H01 wiring: route.ts:73-74 delayMs = (typeof body.delayMs===number && >=0) ? body.delayMs : 300 (default 300, body override, negative/non-number rounded to 300); route.ts:159-163 runItems(valid.map(...), executor, { continueOnError, delayMs }); result.ts:70-72 `if (i>0 && delayMs>0) await sleep(delayMs)` waits between items only (not before first / after last).",
+    "AC-H01 tests: route-rate.test.ts:5-8 spies runItems via vi.fn(actual.runItems); l.102-113 default->delayMs 300 & response.delayMs 300; l.115-124 body 0 -> 0; l.126-129 -5 -> 300. Actual sleep wait-count proven in result-summary.test.ts:48-58 (delayMs:50, 3 items -> waited=[50,50]) and unchanged-default in l.37-46 (slept=0).",
+    "AC-H01 dry-run getItem throttle: route always passes delayMs to runItems regardless of dryRun; in dry-run perItem still calls deps.resolveRakutenItem (getRakutenItem) per item (executor.ts:89), so 300ms is applied between items in dry-run too. Residual: intra-item getItem fallback (route.ts:123-131 getItem -> searchManageNumberBySku -> getItem) is not throttled within a single item.",
+    "AC-H02 logic: executor.ts:135-140 forceDisplay = (existed && preserveExistingDisplay)?undefined : safe.registerPublish?undefined : String(safe.yahooDisplay); passed with forUpdate=existed to deps.buildYahooParams (l.143,184). item-mapper.ts:40-44 forceDisplay undefined + forUpdate true -> delete params.display (preserve); forceDisplay '0' -> display='0'. So existing+preserve(default) preserves Yahoo display; new -> '0'.",
+    "AC-H02 tests: executor-display.test.ts:70-80 existed -> all forceDisplay undefined; l.82-90 new -> '0'; l.92-100 preserve:false existing -> '0' (opt-out); l.102-110 publish:true -> undefined. preserveExistingDisplay default true at route.ts:76 and executor.ts:82.",
+    "AC-H02 integration: leverages documented forUpdate convention (item-mapper.ts:18-19 'display を送らず既存の公開/非公開状態を保持'). Note divergence: single route app/api/register/yahoo/[id]/route.ts:66-67 defaults forceDisplay='0' even on update (forces display=0), whereas bulk migrate's new default preserves; this is a deliberate, documented choice safer for bulk, and the forUpdate mechanism itself stays consistent.",
+    "AC-H03 skipped emit: result.ts:90-103 on continueOnError=false && result.status==='failed', remaining items pushed as {status:'skipped', step:'import', error:'前段の失敗により中断（continueOnError=false）'} -> resolves previously-dead ItemStatus 'skipped' (types.ts:15). continueOnError=true default leaves all items processed unchanged.",
+    "AC-H03 tests: result-skip.test.ts:17-46 failed at 'b' -> seen=[a,b], statuses [ok,failed,skipped,skipped], aggregate {skipped:2,failed:1,migrated:1}; l.48-59 continueOnError=true -> skipped:0 (regression preserved); l.61-74 requires_manual does not abort.",
+    "AC-H04 guard: route.ts:82-92 MAX_ITEMS=200; valid.length>200 -> 400 {ok:false,error:`対象が多すぎます(${n}件)。200件以下に分割してください`,count} and runItems NOT invoked. route-rate.test.ts:131-149 201 items -> 400, count 201, error contains '201' & '200', runItems not called; 200 items -> 200 + runItems called.",
+    "AC-H05 backward compat: existing executor.test.ts (AC-002 expects forceDisplay '0' l.146-156, dry-run no writes l.106-116), result.test.ts, result-summary.test.ts, plan/defaults/manage-numbers tests all unmodified and green; 189->201 (+12 = exactly the 3 new files). git diff --stat shows only app/(main)/products/page.tsx (+2, MigratePanel import/mount); migrate route/executor/result + tests are new uncommitted artifacts. register/yahoo route.ts unchanged.",
+    "AC-H05 publish-safety: migrate route.ts imports only editItem (line 12), never submitItem; MigratePanel.tsx:104 states display:0 非公開・submitItem 非実行; dry-run is default (route.ts:69) and returns status:'migrate' without writes (executor.ts:169-171).",
+    "AC-H06 meaningful tests: 12 new non-trivial assertions (runItems spy on delayMs, 400 path, forceDisplay across 4 branches, ordering+aggregate for skipped). No .only/.skip; no existing test weakened."
+  ],
+  "feedback": "Strong, in-scope hardening that satisfies AC-H01..H06 with all four hard gates green (lint/tsc/201 unit/build). To raise the score further: (1) AC-H01 residual — the within-item getItem fallback chain (route.ts:123-131: getItem -> searchManageNumberBySku -> getItem) can fire up to ~2-3 mall calls per item with no intra-item throttle; consider applying delay or a small concurrency/limiter inside resolveRakutenItem, and add a test asserting it. (2) AC-H04 robustness — a 200-item synchronous request at delayMs=300 adds ~60s of sleep alone plus per-item API time, which can still approach serverless timeout and risks partial commit; prefer chunked/batched processing with resumable progress or lower the recommended cap, and add idempotency so a mid-run failure on commit is safely retryable. (3) integration — surface delayMs and preserveExistingDisplay in MigratePanel (or document) so operators can tune throttle/preserve without editing the request body. (4) Optional consistency — reconcile the single register/yahoo POST default (forces display='0' on update) with the bulk preserve default, or document why they intentionally differ, to avoid future confusion.",
+  "passed": true,
+  "evaluator_skill": "eval-loop-evaluator",
+  "evaluated_artifacts": [
+    "webui/app/api/migrate/rakuten-to-yahoo/route.ts",
+    "webui/lib/migrate/executor.ts",
+    "webui/lib/migrate/result.ts",
+    "webui/lib/migrate/types.ts",
+    "webui/app/api/migrate/rakuten-to-yahoo/route-rate.test.ts",
+    "webui/lib/migrate/executor-display.test.ts",
+    "webui/lib/migrate/result-skip.test.ts",
+    "webui/app/(main)/products/page.tsx"
+  ],
+  "risks": [
+    "200-item synchronous request at delayMs=300 (~60s of sleeps + per-item mall/DB/image time) can still approach serverless timeout and partial commit; the count guard mitigates but does not chunk.",
+    "Intra-item getItem fallback (getItem -> SKU search -> getItem) is not rate-limited; bursts of 2-3 mall calls per item bypass the between-item delay.",
+    "ItemStatus 'skipped' is only emitted when callers set continueOnError=false; route default is continueOnError=true, so in the default production path 'skipped' remains unexercised (still honest, but reachable only on opt-in).",
+    "commit path has no idempotency/resume; a failure partway through a large run leaves Yahoo/DB partially updated with no automatic recovery."
+  ],
+  "recommended_next_changes": [
+    "Implement chunked/batched commit (or a job/queue) with resumable progress for inputs near the cap, instead of one synchronous request, to remove timeout/partial-commit risk.",
+    "Throttle or limit the within-item getItem fallback chain and add a test verifying mall-call count per item under rate control.",
+    "Add idempotency keys / per-item commit checkpointing so a mid-run failure can be safely retried without double-registering.",
+    "Expose delayMs and preserveExistingDisplay in MigratePanel (with safe defaults) so operators can tune throttle and display-preserve behavior from the UI.",
+    "Document or reconcile the display-default divergence between bulk migrate (preserve existing) and single register/yahoo POST (forces display='0' on update)."
+  ]
+}

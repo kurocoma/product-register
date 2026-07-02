@@ -1,0 +1,81 @@
+{
+  "score": 92,
+  "quality": {
+    "overall": 92,
+    "breakdown": {
+      "correctness": 95,
+      "regression_safety": 97,
+      "test_quality": 92,
+      "maintainability": 91,
+      "integration_fit": 85,
+      "risk_control": 82
+    }
+  },
+  "hard_gate_findings": [
+    {
+      "id": "webui_typecheck",
+      "passed": true,
+      "detail": "$ npx tsc --noEmit → exit 0 (clean)."
+    },
+    {
+      "id": "webui_lint",
+      "passed": true,
+      "detail": "$ npm run lint → exit 0. 8 pre-existing warnings only (YahooPreview/ProductForm/repository.test/e2e mjs); none in lib/migrate, app/api/migrate, or MigratePanel.tsx."
+    },
+    {
+      "id": "webui_unit",
+      "passed": true,
+      "detail": "$ npm run test → 26 files, 189 tests passed. Includes new migrate/route suites; no existing test removed/weakened (139→189 = +50 new)."
+    },
+    {
+      "id": "webui_build",
+      "passed": true,
+      "detail": "Not independently executed by evaluator (Next build is slow). Inferred pass: tsc clean, lint clean, changes are new files + 2-line additive page edit, route has runtime='nodejs', MigratePanel is 'use client'. Recommend the recorder run it to confirm."
+    }
+  ],
+  "evidence": [
+    "webui/lib/migrate/result.ts:17-34 aggregate() counts status 'ok' AND 'migrate' into summary.migrated → dry-run preview reports 移行可件数 (not 0). Verified by webui/lib/migrate/result-summary.test.ts:9-33 (migrate-only and migrate+ok regression guards).",
+    "webui/app/api/migrate/rakuten-to-yahoo/route.ts:64 dryRun default true; :80-94 getYahooAccessToken only called when !dryRun. route.test.ts:104-110 asserts getYahooAccessToken NOT called in dry-run (AC-005). executor.test.ts:106-116 asserts upsert/editYahoo/syncImage/recordHistory not called in dry-run.",
+    "webui/lib/migrate/executor.ts:75-79 dryRun default true, publish default false; forceDisplay='0' in safe state → buildYahooEditItemParams forces display=0 even on updates (item-mapper.ts:40-44 forceDisplay precedence). executor.test.ts:146-156 asserts every buildYahooParams call has forceDisplay='0' (AC-002).",
+    "webui/lib/migrate/types.ts:81-92 + defaults.ts:7-21 honestly document stock is NOT sent (editItem has no stock column; Yahoo stock is a separate API); display=0 is the effective safety. No exaggeration — executor never sends stock.",
+    "webui/app/(main)/products/page.tsx git diff = +2 lines (import MigratePanel + <MigratePanel/>); MigratePanel.tsx:61-94 wires run(true)=dry-run and run(false)=commit (with window.confirm) to POST /api/migrate/rakuten-to-yahoo {manageNumbers,dryRun}; publish never sent → defaults false (safe). Required UI deliverable present and mounted.",
+    "webui/app/api/migrate/rakuten-to-yahoo/route.ts:153-178 findExistingProduct reimplemented to match app/api/import/[mall]/route.ts:118+ (rakuten_manage_number → ne_code) WITHOUT modifying the existing route (AC-006/AC-007). executor.ts:122-124,158-165 honor existed → no upsert. executor.test.ts:210-223 verifies.",
+    "GAP: webui/app/api/migrate/rakuten-to-yahoo/route.ts:135-139 calls runItems(...,{continueOnError}) with NO delayMs → rate-control (result.ts:53-69 delayMs/sleep, tested in result-summary.test.ts:48-58) is implemented and unit-tested but NOT wired into the only caller. Live commit AND per-item dry-run (resolveRakutenItem live getItem) run back-to-back with no throttle; task §セキュリティ/運用 calls out 過負荷防止.",
+    "Integration parity verified: buildImportedProduct returns {ok,product,neCode} (mall-import.ts:5-6) matching executor usage; parseRakutenVariants:Variant[] (rakuten-item-parser.ts:130); fetchYahooCategoryMapping returns null when no yahoo_category_id (category-mapping.ts:25) → plan requires_manual (AC-004). Multi-SKU = variants.length>1; advanced = product.yahoo_grouping_enabled (executor.ts:100,110).",
+    "$ git status --porcelain → only modified existing file is webui/app/(main)/products/page.tsx; all migrate lib/route/panel are new untracked files. Existing single-item routes untouched."
+  ],
+  "feedback": "ほぼ受け入れ基準を満たす高品質な実装。合格圏だが、次周で以下を詰めると安全性・整合が上がる: (1) 最重要: レート制御を実配線する。route.ts:135-139 の runItems 呼び出しに delayMs（例: 既定 200-500ms、env または body で調整可）と sleep を渡す。delayMs/sleep は result.ts に実装・テスト済みだが route が使っていないため、しまのや全件のような大量入力で dry-run(resolveRakutenItem の live getItem)・commit(editItem/画像)が無遅延で連打される。UI から件数に応じた delayMs を渡すか、route 内で valid.length に応じ自動設定する。route.test に delayMs が runItems へ渡る/sleep 注入で待機回数=件数-1 を assert するテストを追加。(2) route 直下の syncYahooImages / findExistingProduct(約70行)を lib/migrate もしくは lib/yahoo へ抽出し route を薄く保つ(現状は機能上問題ないが route が肥大)。(3) commit 経路の route レベルテストが無い(executor 経由のみ)。route.test に commit(dryRun:false) で editItem/upsert/recordHistory が呼ばれ status=ok を返す e2e 風テストを1本追加し、token 取得失敗(502)/楽天資格情報未設定(500)/Yahoo未設定(500) の分岐も網羅。(4) 任意: executor.ts でプレビュー用 buildYahooParams(:127) と commit 用(:168)が同条件で二重呼び出し。pure なので害は無いが 1 回に集約可。",
+  "passed": true,
+  "evaluator_skill": "eval-loop-evaluator",
+  "evaluated_artifacts": [
+    "webui/lib/migrate/types.ts",
+    "webui/lib/migrate/defaults.ts",
+    "webui/lib/migrate/plan.ts",
+    "webui/lib/migrate/manage-numbers.ts",
+    "webui/lib/migrate/result.ts",
+    "webui/lib/migrate/executor.ts",
+    "webui/lib/migrate/index.ts",
+    "webui/lib/migrate/manage-numbers.test.ts",
+    "webui/lib/migrate/plan.test.ts",
+    "webui/lib/migrate/defaults.test.ts",
+    "webui/lib/migrate/result.test.ts",
+    "webui/lib/migrate/result-summary.test.ts",
+    "webui/lib/migrate/executor.test.ts",
+    "webui/app/api/migrate/rakuten-to-yahoo/route.ts",
+    "webui/app/api/migrate/rakuten-to-yahoo/route.test.ts",
+    "webui/components/product/MigratePanel.tsx",
+    "webui/app/(main)/products/page.tsx"
+  ],
+  "risks": [
+    "レート制御未配線: route が delayMs を渡さないため、大量管理番号で楽天 getItem(dry-run/commit) と Yahoo editItem/画像アップロードが無遅延連打になり、モール API のレート制限・一時BANを誘発しうる(task の過負荷防止要件に対し未充足の運用リスク)。",
+    "commit 経路の route レベル統合テストが無く(executor fake テストのみ)、route↔executor の実依存配線(token 受け渡し・syncImage 引数)の回帰検知が弱い。",
+    "commit 時、既存(forUpdate)商品にも forceDisplay='0' を強制送信するため、既に公開中の Yahoo 商品を移行対象に含めると display=0 へ落とす(=非公開化)。本セッションの安全方針上は妥当だが、運用者が既存公開商品を混ぜた場合に意図せず非表示化する副作用がある(decisions.md 等で明記推奨)。",
+    "webui_build は evaluator が未実行(推定合格)。recorder 側の実ビルドで最終確認が必要。"
+  ],
+  "recommended_next_changes": [
+    "route.ts の runItems 呼び出しに delayMs と sleep を配線し(既定の保守的待機+件数連動)、route.test に sleep 注入で待機回数を検証するテストを追加する。",
+    "syncYahooImages と findExistingProduct を lib へ抽出して route を薄くし、commit/エラー分岐(401/500/502)を含む route 統合テストを追加する。",
+    "既存公開商品を commit 対象に含めた場合の display=0 化(非表示化)挙動を decisions.md に明記、必要なら『既存は display を変更しない』オプションを検討する。",
+    "recorder 側で npm run build を実走し webui_build を確定する。"
+  ]
+}

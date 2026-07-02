@@ -1,0 +1,80 @@
+task:
+  type: bugfix
+  title: "楽天→Yahoo 移行のフィールド文字数整形（Yahoo editItem 制限適合・dry-run 事前検知）"
+  target_paths:
+    - "webui/lib/converters/yahoo.ts"
+    - "webui/lib/yahoo/item-mapper.ts"
+    - "webui/lib/migrate/"
+    - "webui/lib/product/"
+  non_target_paths:
+    - ".env"
+    - ".env.local"
+    - "webui/.env"
+    - "webui/.env.local"
+    - ".claude/"
+    - ".loop/"
+    - "scripts/"
+    - "webui/package.json"
+    - "webui/package-lock.json"
+    - "webui/pnpm-lock.yaml"
+    - "webui/tsconfig.json"
+    - "webui/eslint.config.mjs"
+    - "webui/vitest.config.ts"
+
+hard_gates:
+  required:
+    - id: webui_lint
+      command: "npm run lint"
+      cwd: "webui"
+      pass_if: "exit_code == 0"
+    - id: webui_typecheck
+      command: "npx tsc --noEmit"
+      cwd: "webui"
+      pass_if: "exit_code == 0"
+    - id: webui_unit
+      command: "npm run test"
+      cwd: "webui"
+      pass_if: "exit_code == 0"
+    - id: webui_build
+      command: "npm run build"
+      cwd: "webui"
+      pass_if: "exit_code == 0"
+  optional:
+    - id: python_tests
+      command: "python -m pytest -q"
+      cwd: "."
+      pass_if: "exit_code == 0"
+
+behavioral_acceptance:
+  - id: AC-F01
+    description: "全角ベースの文字数カウント（全角=1, 半角=0.5。例 全角75=半角150）と、上限指定での切詰関数を実装。境界で正しく切る（途中の全角文字を割らない・サロゲートペアを壊さない）。"
+    verification: "unit(全角/半角/混在/絵文字境界・上限ちょうど/超過1)"
+  - id: AC-F02
+    description: "Yahoo editItem の各フィールドを上限へ適合整形：name 全角75 / explanation 全角500(HTML不可=タグ除去) / headline 全角30(HTML不可) / abstract 全角500 / meta_desc 全角80 / caption 全角5000 / path はコロン区切りで各カテゴリ名 全角20・8階層以内。制限内の値は無変更。"
+    verification: "unit(各フィールドの上限適合・短い値は不変) + evaluator が docs/Yahoo/02 の表と整合を確認"
+  - id: AC-F03
+    description: "it-01002(path 全角20)/it-01017(name 全角75)/it-01033(explanation 全角500) を解消：整形後の buildYahooEditItemParams の値が各制限内（長い楽天商品名/説明/パスでも editItem 適合）。"
+    verification: "unit(長い入力→整形後 name<=75/explanation<=500/path 各セグメント<=20 全角換算) + evaluator"
+  - id: AC-F04
+    description: "整形しても適合不能なケース（例: 必須 path が空・カテゴリ未対応）は dry-run/preview で検知し requires_manual として surface（commit で初めて editItem 拒否されない）。validateEditItemParams 等で文字数違反も検知。"
+    verification: "unit(超過/欠落→検知) + migrate plan/executor 経由で dry-run 時に requires_manual"
+  - id: AC-F05
+    description: "後方互換：既存の単品 register/yahoo・一括移行・既存テスト(201)を壊さない。共有マッパー(YahooConverter/buildYahooEditItemParams)経由で単品登録にも整形が効く。短いフィールドは出力不変。"
+    verification: "webui_unit が緑(既存201+新規) + evaluator が既存 yahoo.test/register 挙動不変を確認"
+  - id: AC-F06
+    description: "新規/変更ロジックに意味のある vitest テストがあり npm run test で全緑（既存テストの削除/スキップ/緩和なし）。"
+    verification: "webui_unit に新テストが含まれ全緑"
+
+forbidden:
+  - "合格のためにテストを削除・スキップ・緩和しない(実装を直す)"
+  - "受け入れ条件/criteria/eval-schema を緩めない"
+  - "本番秘密情報(.env/secrets/認証トークン)を読む・書く・出力しない"
+  - "依存(package.json)・評価設定(tsconfig/eslint/vitest)・eval-loopハーネス(.claude/.loop/scripts)を変更しない"
+  - "情報を過度に欠落させる雑な切詰をしない（語境界/意味を可能な範囲で保つ）"
+  - "ライブ全移行の実行・Yahoo本番公開(このセッションはコード修正まで。実出品はしない)"
+
+two_consecutive_verification:
+  - "毎回 新しい run_id / 新しい検証レポートを validation/runs に保存する"
+  - "対象実装をそのまま検証し、手動修正・キャッシュ成功を数えない"
+  - "task_hash/acceptance_hash/criteria_hash/schema_hash/validator_hash/implementation_hash が2回とも同一"
+  - "hard gate 成功 かつ evaluator score >= threshold が2回連続"

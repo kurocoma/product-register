@@ -1,0 +1,73 @@
+{
+  "score": 92,
+  "quality": {
+    "overall": 92,
+    "breakdown": {
+      "correctness": 93,
+      "regression_safety": 90,
+      "test_quality": 90,
+      "maintainability": 92,
+      "integration_fit": 95,
+      "risk_control": 90
+    }
+  },
+  "hard_gate_findings": [
+    {
+      "id": "webui_lint",
+      "passed": true,
+      "detail": "$ cd webui && npm run lint -> exit 0. 8 warnings only in pre-existing files (templates/page.tsx, preview/*.tsx, ProductForm.tsx, repository.test.ts, e2e_*.mjs); none in text-fit.ts or item-mapper.ts. 0 errors."
+    },
+    {
+      "id": "webui_typecheck",
+      "passed": true,
+      "detail": "$ cd webui && npx tsc --noEmit -> exit 0, no type errors."
+    },
+    {
+      "id": "webui_unit",
+      "passed": true,
+      "detail": "$ cd webui && npm run test (vitest run) -> 33 files, 243 tests passed. Includes existing 226 + new text-fit/item-mapper tests. item-mapper-fit 'あ'×100->fullWidthLen 75 green."
+    },
+    {
+      "id": "webui_build",
+      "passed": true,
+      "detail": "$ cd webui && npm run build (next build) -> exit 0, all routes compiled."
+    }
+  ],
+  "evidence": [
+    "webui/lib/product/text-fit.ts:79-85 htmlToPlainText: `<br>`/`<br/>`/`<br />`(大小・内部空白許容) -> 半角空白、その他タグ除去、`\\s+`畳み+trim。AC-N01 を構造で満たす。",
+    "webui/lib/product/text-fit.ts:52-66 fitFullWidthAndChars: for...of(コードポイント単位)で count<=maxChars と total<=maxFullWidth を同時に満たす手前で break。各文字<=全角1幅なので 文字数<=75 -> Yahoo全角換算<=75 を構造保証（AC-N02 の二重上限を実装）。",
+    "webui/lib/yahoo/item-mapper.ts:28 YAHOO_FIELD_LIMITS.name = { max:75, html:'br-to-space', maxChars:75 }; :52-58 fitYahooField が name で htmlToPlainText -> fitFullWidthAndChars(base,75,75) を適用。",
+    "webui/lib/yahoo/item-mapper-name.test.ts:9-12 実データ風 REAL_NAME('琉球 もろみ酢…<br>しまのや クエン酸…'(全角/半角/記号/数字混在))で no '<'/'>'、[...name].length<=75 かつ fullWidthLen<=75、startsWith('琉球 もろみ酢')で先頭商品名保持、'約1ヵ月分） しまのや'で<br>->空白保持を検証（AC-N03 実データカバレッジ確認）。",
+    "webui/lib/yahoo/item-mapper-name.test.ts:38-48 短い name(HTML無)不変 と 'あ'×100->文字数75・全角75 を検証。AC-N04 の 'あ'×100->75 維持を確認。",
+    "webui/lib/yahoo/item-mapper-fit.test.ts:9-14 it-01017 'あ'×100 -> fullWidthLen(name)==75 が緑（既存テスト不変）。",
+    "$ git diff --stat -> 追跡ファイルの変更は webui/lib/yahoo/item-mapper.ts のみ(+133/-2)。webui/lib/converters/yahoo.ts は無改変(git status の modified に無し) -> YahooConverter 不変(AC-N04)。",
+    "webui/app/api/register/yahoo/[id]/route.ts:34-44 と webui/app/api/migrate/rakuten-to-yahoo/route.ts:146-152 が buildYahooEditItemParams/validateEditItemParams(=注入 validateYahoo)を dry-run preview で使用 -> 整形と違反 surface が単品/一括の両経路に効く（integration_fit）。",
+    "webui/lib/yahoo/item-mapper.ts:172-187 validateEditItemParams が validateYahooFieldLimits 違反を missing に合流（shape {ok}|{ok,missing} 維持）-> dryRun で requires_manual に倒せる（risk_control）。"
+  ],
+  "feedback": "実装は全AC(N01-N05)と4ハードゲート(lint/tsc/test/build)を実コードで満たし、score 92>=threshold 90。次周(任意の堅牢化)として: (1) validateYahooFieldLimits(item-mapper.ts:100-107) は name の base に stripHtml を使い fullWidthLen のみ検査し maxChars(コードポイント)を検査しない。通常フローは fit 後検証のため到達しないが、非整形 params 直接検証時に半角150文字(幅75/字数150)を見逃す。name 検査も fitYahooField と同じく maxChars<=75 を honest に検査し、base を htmlToPlainText で揃えると整合する。(2) htmlToPlainText は HTML無 name でも `\\s+`畳み+trim を行うため、二重空白等を含む短い name は『除去後そのまま』から微変化する。item-mapper-name.test に二重空白・前後空白入りの clean name の正規化挙動を1ケース追加し、意図を固定すること。(3) 絵文字(サロゲートペア)は codePoint 1=1幅と数えるため、Yahoo が絵文字を2カウントする場合 75個で超過し得る理論的端。実データでは非現実的だが、name のマージン根拠をコメントに明記すると将来の誤改修を防げる。いずれも減点は軽微で合格を妨げない。",
+  "passed": true,
+  "evaluator_skill": "eval-loop-evaluator",
+  "evaluated_artifacts": [
+    "webui/lib/product/text-fit.ts",
+    "webui/lib/product/text-fit.test.ts",
+    "webui/lib/product/text-fit-html.test.ts",
+    "webui/lib/yahoo/item-mapper.ts",
+    "webui/lib/yahoo/item-mapper-fit.test.ts",
+    "webui/lib/yahoo/item-mapper-name.test.ts",
+    "webui/lib/converters/yahoo.ts",
+    "webui/app/api/register/yahoo/[id]/route.ts",
+    "webui/app/api/migrate/rakuten-to-yahoo/route.ts"
+  ],
+  "risks": [
+    "validateYahooFieldLimits は name の maxChars(コードポイント数)を検査しない。整形を経ない params を直接検証する経路が将来増えると半角過多の字数超過を見逃す。",
+    "htmlToPlainText の `\\s+`畳み+trim により、HTML無でも余分な空白を含む name は『除去後そのまま』から微変化する(テスト未カバー)。",
+    "Yahoo 実カウントの最終確認はライブ e2e_migrate --commit(ループ外)に依存。本ループはコード修正のみで実機照合は未実施。",
+    "絵文字(サロゲートペア)を1幅で数えるため、Yahoo が2カウントする実装だと多絵文字 name で超過の理論的余地(実データでは非現実的)。"
+  ],
+  "recommended_next_changes": [
+    "validateYahooFieldLimits の name 検査を fitYahooField と整合させ、htmlToPlainText ベースかつ codePoint 数<=maxChars も検査する。",
+    "item-mapper-name.test に二重空白/前後空白入りの HTML無 clean name の正規化挙動を固定するケースを追加する。",
+    "name の安全マージン根拠(二重上限による Yahoo カウント差吸収)を text-fit.ts/item-mapper.ts のコメントに明記して将来の誤改修を防ぐ。",
+    "ループ外でライブ e2e_migrate --commit による it-01017 実機解消を確認し、結果を validation/runs に記録する。"
+  ]
+}

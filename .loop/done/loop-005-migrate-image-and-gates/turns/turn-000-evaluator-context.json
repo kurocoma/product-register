@@ -1,0 +1,14 @@
+{
+  "agent_id": "a967e85a74f7a9a42",
+  "agent_type": "eval-loop-evaluator (real custom agent, Agent tool fork)",
+  "role": "evaluator",
+  "loop": "loop-005-migrate-image-and-gates",
+  "iteration": 0,
+  "input_files": [".loop/current/{task,acceptance,criteria}.* / eval-schema.json", "executor.ts(+test/+image.test)", "route.ts", "image-url.ts(+seller.test)", "item-mapper.ts(+validate.test)"],
+  "forbidden_inputs": ["turn-*-report.md / plan / 過去 score・eval / feedback / 司令塔・generator 会話"],
+  "context_strategy": "fork (fresh context)",
+  "previous_thread_reused": false,
+  "within_turn_resumes": 1,
+  "verification_run": "read-only: npm run test(261)/tsc(0)/lint(0)/build(0)/git diff(A5 が effects 配列1箇所のみと確認)",
+  "result": "score=91, passed=true（schema VALID）。AC-A1..A5/B1..B4/C 充足。A5 は順序是正で報酬ハッキングでないと確認。A3 で upload先と参照先 lib/{sellerId} 一致＝it-14091 真の解消。"
+}

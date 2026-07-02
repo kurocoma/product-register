@@ -1,0 +1,83 @@
+{
+  "score": 91,
+  "quality": {
+    "overall": 91,
+    "breakdown": {
+      "correctness": 93,
+      "regression_safety": 95,
+      "test_quality": 92,
+      "maintainability": 88,
+      "integration_fit": 92,
+      "risk_control": 80
+    }
+  },
+  "hard_gate_findings": [
+    {
+      "id": "webui_lint",
+      "passed": true,
+      "detail": "cd webui && npm run lint -> exit 0 (0 errors, 8 pre-existing warnings unrelated to migrate files)"
+    },
+    {
+      "id": "webui_typecheck",
+      "passed": true,
+      "detail": "cd webui && npx tsc --noEmit -> exit 0"
+    },
+    {
+      "id": "webui_unit",
+      "passed": true,
+      "detail": "cd webui && npm run test -> 26 files / 189 tests passed (incl. new migrate suites: manage-numbers, plan, defaults, result, result-summary, executor, route)"
+    },
+    {
+      "id": "webui_build",
+      "passed": true,
+      "detail": "cd webui && npm run build -> exit 0; route /api/migrate/rakuten-to-yahoo listed as dynamic (server-rendered)"
+    }
+  ],
+  "evidence": [
+    "webui/lib/migrate/result.ts:17-33 aggregate() counts status 'migrate' (dry-run) AND 'ok' (commit) into summary.migrated; verified by result-summary.test.ts:9-33 and route.test.ts:128 (summary.migrated=2 for 2 dry-run valids). MigratePanel.tsx:145-147 renders 移行可 {s.migrated}.",
+    "webui/app/(main)/products/page.tsx git diff: only +2 lines (import + <MigratePanel/> mount under product list). MigratePanel.tsx:76-80 POSTs to /api/migrate/rakuten-to-yahoo with {manageNumbers,dryRun}; dry-run and commit buttons wired (lines 117-132), commit confirms display:0/non-public.",
+    "AC-002 display=0: executor.ts:79 forceDisplay = registerPublish ? undefined : String(0); commit path executor.ts:168 passes forceDisplay to buildYahooParams; item-mapper.ts:40-41 sets params.display=forceDisplay; executor.test.ts:146-156 asserts forceDisplay='0' on every commit call. Stock honestly NOT sent: types.ts:84-92 & defaults.ts:6-15 document editItem has no stock column (real safety = display=0 + submitItem never imported/called).",
+    "AC-005 dry-run no write: route.ts:80-94 getYahooAccessToken only when !dryRun (route.test.ts:104-110 asserts not called); executor.ts:152-155 returns status='migrate' before any write; executor.test.ts:106-116 asserts upsert/editYahoo/syncImage/recordHistory all not called in dry-run.",
+    "AC-006 backward compat: git status shows only page.tsx modified among existing files; all migrate code is new. findExistingProduct is re-implemented in route.ts:156-178 (mirrors app/api/import/[mall]/route.ts:118-132 extra->>rakuten_manage_number then ne_code) instead of editing the existing route. 189 tests green (pre-existing suites unchanged).",
+    "AC-007 dedup: executor.ts:123-124,159-165 uses findExisting; existed -> reuse existing id, skip upsert (executor.test.ts:210-223 asserts upsert not called, productId='P-existing', recordHistory('edit',...)).",
+    "AC-008 skips: executor.ts:100 hasMultipleSku=variants.length>1; :110 hasAdvancedYahooSettings=yahoo_grouping_enabled===true; plan.ts:29-40 -> requires_manual with reasons; executor.test.ts:181-207 covers multiSku & advanced -> requires_manual, no upsert.",
+    "Integration verified: getItem returns {exists,json} (lib/rakuten/item-client.ts:83-86), searchManageNumberBySku->string|null (:102-105), EditItemResult {ok|message} (lib/yahoo/item-client.ts:30-32), buildYahooEditItemParams/validateEditItemParams/forceDisplay convention identical to existing register/yahoo route.ts:66-81 (publish ? undefined : '0').",
+    "Tests are substantive (not trivial): negative assertions (not.toHaveBeenCalled), boundary cases (32-char manage number manage-numbers.test.ts:35-46), fail-continue with throw + non-Error reject (result.test.ts:39-61, executor.test.ts:267-285), DI fakes record call order (executor.test.ts:119-144)."
+  ],
+  "feedback": "Strong, well-layered implementation; all hard gates green and AC-001..009 satisfied. To raise the score, address risk_control and minor maintainability gaps: (1) Wire rate control into production: route.ts:135-139 calls runItems without delayMs, so bulk commit hits Rakuten/Yahoo APIs with zero inter-item delay despite the task's '過負荷をかけない' requirement. runItems already supports delayMs+sleep (result.ts:53-69, tested in result-summary.test.ts) — pass a sensible delayMs (and optionally make it body-configurable) for the commit path. (2) Remove dead/ambiguous status: ItemStatus 'skipped' (types.ts:15) is never produced by executor/route, so summary.skipped is always 0 — either populate it (e.g. for invalid/empty cases) or drop it to avoid misleading UI. (3) Step precision: a multi-SKU item with a resolved category reports step 'register' (executor.ts:145) which is misleading; consider a dedicated step/marker for SKU/advanced skips (the error text does explain the reason, so low priority). (4) Optional: extract the shared findExistingProduct into a reusable lib to avoid the duplication between import route and migrate route (kept duplicated here deliberately to preserve AC-006; acceptable but note it). (5) Optional robustness: large lists run in one synchronous HTTP request and could hit serverless/timeout limits — document a recommended batch size or chunk the input.",
+  "passed": true,
+  "evaluator_skill": "eval-loop-evaluator",
+  "evaluated_artifacts": [
+    "webui/lib/migrate/types.ts",
+    "webui/lib/migrate/executor.ts",
+    "webui/lib/migrate/result.ts",
+    "webui/lib/migrate/defaults.ts",
+    "webui/lib/migrate/plan.ts",
+    "webui/lib/migrate/manage-numbers.ts",
+    "webui/lib/migrate/index.ts",
+    "webui/lib/migrate/executor.test.ts",
+    "webui/lib/migrate/result.test.ts",
+    "webui/lib/migrate/result-summary.test.ts",
+    "webui/lib/migrate/plan.test.ts",
+    "webui/lib/migrate/manage-numbers.test.ts",
+    "webui/lib/migrate/defaults.test.ts",
+    "webui/app/api/migrate/rakuten-to-yahoo/route.ts",
+    "webui/app/api/migrate/rakuten-to-yahoo/route.test.ts",
+    "webui/components/product/MigratePanel.tsx",
+    "webui/app/(main)/products/page.tsx"
+  ],
+  "risks": [
+    "Production bulk commit applies no rate limiting (route omits delayMs); many items could overload Rakuten/Yahoo APIs even though runItems supports throttling.",
+    "Single synchronous HTTP request processes the whole list; large lists risk request/serverless timeouts with partial commit.",
+    "ItemStatus 'skipped' is declared but never emitted, so summary.skipped is permanently 0 (potential UI confusion / dead path).",
+    "hasAdvancedYahooSettings only checks yahoo_grouping_enabled; other advanced Yahoo settings (if any) would not be detected and could be auto-migrated.",
+    "findExistingProduct logic is duplicated between import route and migrate route; future schema/matching changes must be kept in sync in two places."
+  ],
+  "recommended_next_changes": [
+    "Pass delayMs (and optional body override) to runItems in route.ts commit path to enforce inter-item throttling required by the task.",
+    "Either emit 'skipped' for an actual condition or remove it from ItemStatus/summary to keep the contract honest.",
+    "Add a route-level commit (dryRun:false) test asserting write deps are invoked and publish flag is threaded, complementing the executor unit tests.",
+    "Introduce a distinct step/marker for SKU/advanced-setting skips so per-item step is not mislabeled as 'register'.",
+    "Consider extracting shared findExistingProduct into a reusable helper to remove duplication while preserving existing-route behavior, and document recommended batch size for large lists."
+  ]
+}

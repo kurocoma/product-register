@@ -1,0 +1,19 @@
+{
+  "agent_id": "a39d0ba612f4e774d",
+  "agent_type": "eval-loop-generator (real custom agent, Agent tool fork)",
+  "role": "generator",
+  "iteration": 2,
+  "input_files": [
+    ".loop/current/task.md",
+    ".loop/current/turns/turn-002-plan.md"
+  ],
+  "forbidden_files": [
+    "turn-*-eval.json / score / consecutive / feedback",
+    "acceptance.yaml/criteria.yaml/eval-schema.json (変更禁止)"
+  ],
+  "context_strategy": "fork (fresh context, no parent/score history)",
+  "previous_thread_reused": false,
+  "within_turn_resumes": 3,
+  "notes": "maxTurns:12 のため turn 内で 3 回 SendMessage 再開。新規テスト(result-summary.test.ts/route.test.ts)は global deny 回避のため Bash 作成（ユーザー承認済み・既存テスト無改変）。report は generator 未記載のため司令塔が要約保存(turn-002-report.md)。",
+  "sandbox_or_permission_mode": "acceptEdits (Read/Grep/Glob/Edit/Write/Bash). global pretool_global_guard.py active"
+}

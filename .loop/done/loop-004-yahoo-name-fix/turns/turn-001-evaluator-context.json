@@ -1,0 +1,15 @@
+{
+  "agent_id": "a9fbdee05e8b0dbf2",
+  "agent_type": "eval-loop-evaluator (real custom agent, Agent tool fork)",
+  "role": "evaluator",
+  "loop": "loop-004-yahoo-name-fix",
+  "iteration": 1,
+  "purpose": "再検証（2回目の独立PASS取得）。turn-000 と同一 implementation_hash の成果物を独立採点。",
+  "input_files": [".loop/current/task.md", ".loop/current/acceptance.yaml", ".loop/current/criteria.yaml", ".loop/current/eval-schema.json", "webui/lib/product/text-fit.ts (+ tests)", "webui/lib/yahoo/item-mapper.ts (+ item-mapper-name.test.ts)"],
+  "forbidden_inputs": ["turn-*-report.md / plan / 過去 score・eval / feedback / 他者の合否"],
+  "context_strategy": "fork (fresh context)",
+  "previous_thread_reused": false,
+  "within_turn_resumes": 1,
+  "verification_run": "read-only: npm run test(243)/tsc(0)/lint(0)/build(0)/git diff",
+  "result": "score=92, passed=true（schema VALID）。turn-000(93) と合わせ同一 implementation_hash で2回連続 PASS → loop-004 完了。"
+}

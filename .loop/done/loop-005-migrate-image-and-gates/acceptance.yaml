@@ -1,0 +1,96 @@
+task:
+  type: bugfix
+  title: "楽天→Yahoo 移行 Bundle A(it-14091 本解消: 画像順序/動的lib/warnings/リトライ/テスト是正) + Bundle B(値域ゲート)"
+  target_paths:
+    - "webui/lib/migrate/"
+    - "webui/app/api/migrate/"
+    - "webui/lib/yahoo/item-mapper.ts"
+    - "webui/lib/converters/image-url.ts"
+  non_target_paths:
+    - ".env"
+    - ".env.local"
+    - "webui/.env"
+    - "webui/.env.local"
+    - ".claude/"
+    - ".loop/"
+    - "scripts/"
+    - "webui/package.json"
+    - "webui/package-lock.json"
+    - "webui/pnpm-lock.yaml"
+    - "webui/tsconfig.json"
+    - "webui/eslint.config.mjs"
+    - "webui/vitest.config.ts"
+    - "webui/lib/converters/yahoo.ts"
+
+hard_gates:
+  required:
+    - id: webui_lint
+      command: "npm run lint"
+      cwd: "webui"
+      pass_if: "exit_code == 0"
+    - id: webui_typecheck
+      command: "npx tsc --noEmit"
+      cwd: "webui"
+      pass_if: "exit_code == 0"
+    - id: webui_unit
+      command: "npm run test"
+      cwd: "webui"
+      pass_if: "exit_code == 0"
+    - id: webui_build
+      command: "npm run build"
+      cwd: "webui"
+      pass_if: "exit_code == 0"
+  optional:
+    - id: python_tests
+      command: "python -m pytest -q"
+      cwd: "."
+      pass_if: "exit_code == 0"
+
+behavioral_acceptance:
+  - id: AC-A1
+    description: "executor の commit で syncImage(画像 lib アップロード)を editItem の前に実行する（it-14091 根因の順序是正）。dry-run の挙動(非書込)は不変。"
+    verification: "unit(commit 順序で syncImage が editYahoo より前に呼ばれる) + dry-run 非書込維持"
+  - id: AC-A2
+    description: "editItem の item_image_urls を『実アップロード成功した画像のみ』で組み立てる（image_count 盲目で欠番参照しない）。画像が全失敗なら editItem に進まず status=failed。editItem の warnings/it-14091 を MigrationItemResult に surface する。"
+    verification: "unit(一部画像失敗→成功分のみ参照/全失敗→failed/warnings が result に乗る)"
+  - id: AC-A3
+    description: "item_image_urls の lib 基底URLを実 sellerId(getYahooConfig().sellerId)から生成し、upload 先(lib/{sellerId})と参照先を一致させる。okimarumarket ハードコードを除去。"
+    verification: "unit(基底URLが sellerId を反映/ハードコード okimarumarket 不在) + evaluator"
+  - id: AC-A4
+    description: "upload→editItem 間にレート/伝播対策（Yahoo API スロットル ~1s か、it-14091/im-02005 検知時の短い待機＋限定リトライ）を入れる。sleep は注入可能でテストは実時間を消費しない。"
+    verification: "unit(リトライ/スロットルが sleep 注入で待機回数を assert / 既定で挙動)"
+  - id: AC-A5
+    description: "executor.test.ts の処理順期待値を正しい順(syncImage→editYahoo)へ是正する（誤順序を固定していた spec の是正＝報酬ハッキングでない）。これ以外の既存テストは無改変。"
+    verification: "webui_unit が緑 + executor.test の effects 期待が syncImage を editYahoo の前に置く"
+  - id: AC-B1
+    description: "validateEditItemParams が price を数値1〜99,999,999 で検証し、0/非数値/範囲外を不足(missing)扱いにする。it-01023 を dry-run で requires_manual に前倒し。"
+    verification: "unit(price 0/範囲外/非数値→ok:false、正常→ok)"
+  - id: AC-B2
+    description: "validateEditItemParams が item_code を /^[A-Za-z0-9-]+$/ かつ99文字以内で検証し、`_`等の不正を不足扱いにする。it-01004 前倒し。"
+    verification: "unit(item_code に `_`/不正文字/100字→ok:false、ハイフン英数→ok)"
+  - id: AC-B3
+    description: "validateEditItemParams が product_category を /^[0-9]{1,10}$/ で検証し、非数値/桁超過を不足扱いにする。it-01089系の一部を前倒し。"
+    verification: "unit(product_category 非数値/11桁→ok:false、数値→ok)"
+  - id: AC-B4
+    description: "B1-B3 の違反が migrate の dry-run/preview で requires_manual として surface する（executor が injected validateYahoo=validateEditItemParams を preview で使用）。"
+    verification: "unit(executor dry-run で price=0 等→requires_manual・登録系未呼出)"
+  - id: AC-C1
+    description: "後方互換：既存テスト(243)・単品 register/yahoo・一括移行を壊さない（例外は A5 の executor.test 順序是正のみ）。YahooConverter(yahoo.ts) 本体は不変。"
+    verification: "webui_unit が緑(既存243±A5 + 新規) + evaluator が単品/既存挙動不変を確認"
+  - id: AC-C2
+    description: "新規/変更ロジックに意味のある vitest テストがあり npm run test で全緑（A5 以外の既存テストの削除/スキップ/緩和なし）。"
+    verification: "webui_unit に新テストが含まれ全緑"
+
+forbidden:
+  - "A5 以外で既存テストを削除・スキップ・緩和・期待値改ざんしない（合格のためでなく実装是正のためのテスト修正のみ許容）"
+  - "受け入れ条件/criteria/eval-schema を緩めない"
+  - "本番秘密情報(.env/secrets/認証トークン)を読む・書く・出力しない"
+  - "依存(package.json)・評価設定(tsconfig/eslint/vitest)・eval-loopハーネス(.claude/.loop/scripts)・YahooConverter(lib/converters/yahoo.ts) を変更しない"
+  - "ライブ全移行の実行・Yahoo本番公開・submitItem の実行"
+  - "壊れた/未アップロードの画像URLを editItem に渡して it-14091 を再発させない"
+
+two_consecutive_verification:
+  - "毎回 新しい run_id / 新しい検証レポートを validation/runs に保存する"
+  - "対象実装をそのまま検証し、手動修正・キャッシュ成功を数えない"
+  - "task_hash/acceptance_hash/criteria_hash/schema_hash/validator_hash/implementation_hash が2回とも同一"
+  - "hard gate 成功 かつ evaluator score >= threshold が2回連続"

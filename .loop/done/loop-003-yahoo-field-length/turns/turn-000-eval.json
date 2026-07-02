@@ -1,0 +1,74 @@
+{
+  "score": 91,
+  "quality": {
+    "overall": 91,
+    "breakdown": {
+      "correctness": 92,
+      "regression_safety": 93,
+      "test_quality": 88,
+      "maintainability": 90,
+      "integration_fit": 92,
+      "risk_control": 88
+    }
+  },
+  "hard_gate_findings": [
+    {
+      "id": "webui_lint",
+      "passed": true,
+      "detail": "npm run lint -> exit 0 (8 warnings, 0 errors; all warnings pre-existing in ProductForm.tsx/repository.test.ts/e2e_*.mjs, none in changed files)"
+    },
+    {
+      "id": "webui_typecheck",
+      "passed": true,
+      "detail": "npx tsc --noEmit -> exit 0"
+    },
+    {
+      "id": "webui_unit",
+      "passed": true,
+      "detail": "npm run test (vitest run) -> 31 files / 226 tests passed (201 existing + 25 new). 0 failures, 0 skips"
+    },
+    {
+      "id": "webui_build",
+      "passed": true,
+      "detail": "npm run build -> exit 0 (Next.js production build succeeded)"
+    }
+  ],
+  "evidence": [
+    "git status: only webui/lib/yahoo/item-mapper.ts modified (+119/-2); webui/lib/converters/yahoo.ts NOT modified (YahooConverter untouched, AC-F05 satisfied). New files: webui/lib/product/text-fit.ts + text-fit.test.ts, webui/lib/yahoo/item-mapper-fit.test.ts",
+    "AC-F01: webui/lib/product/text-fit.ts:11-28 fullWidthLen/charWidth: ASCII(<=0x7F)=0.5, half-kana(0xFF61-0xFF9F)=0.5, else=1; for...of iterates code points so emoji(surrogate)=1. fitFullWidth:34-45 breaks when total+w>max -> never splits a full char or surrogate, never exceeds. text-fit.test.ts covers exact/over/half-0.5/no-split/surrogate/max0 boundaries and asserts fullWidthLen(result)<=limit",
+    "AC-F02/F03: webui/lib/yahoo/item-mapper.ts:150 buildYahooEditItemParams returns fitYahooFieldLimits(params) (actually applied at return, not name-only). YAHOO_FIELD_LIMITS:16-31 name75/headline30(html)/explanation500(html)/abstract500/caption5000/additional1-3 5000/meta_desc80/variation*_name28 match docs/Yahoo/02-商品登録更新-editItem.md:21-27,43,65-72,145. fitYahooPath:48-56 splits on [:>›＞], trims, drops empties, slice(0,8) depth, fits each segment to 20, joins ':'",
+    "AC-F03 it-01017/01033/01002 resolved: item-mapper-fit.test.ts asserts long display_name->name==75, HTML explanation->no '<' and ==500, HTML headline->no '<' and ==30, '>'-delimited path->':'-joined with each segment<=20 (==20/==20/==10) and 8-depth cap",
+    "AC-F04: validateEditItemParams:158-173 keeps {ok}|{ok:false;missing} shape and merges validateYahooFieldLimits violations (empty-required path/name/product_category + length + path-structure) into missing. Chain verified: executor.ts:143-166 previewParams=buildYahooParams -> validateYahoo -> missingRequiredYahooFields -> plan.ts:38-44 reasons.length>0 => action='requires_manual' -> executor.ts:157-166 returns status:'requires_manual' in dry-run BEFORE any write. migrate route rakuten-to-yahoo/route.ts:146-152 injects buildYahooEditItemParams/validateEditItemParams. register/yahoo/[id]/route.ts:34-35,81-83 also flows through (single-register gets trimming)",
+    "AC-F05: short values unchanged proven by item-mapper-fit.test.ts:56-62 (default makeProduct -> params.name===display_name, params.path===yahoo_path, params.headline===catch_copy_yahoo). fitFullWidth returns input verbatim when under limit. 201 existing tests unchanged and green",
+    "AC-F06: 25 meaningful new tests (15 text-fit + 10 item-mapper-fit) hit exact upper bounds (==75/500/30/20) plus over/under/empty; no existing test deleted/skipped/relaxed; full suite 226 green",
+    "$ npx tsc --noEmit -> exit 0 ; $ npm run test -> 226 passed ; $ npm run lint -> 0 errors ; $ npm run build -> exit 0"
+  ],
+  "feedback": "Implementation is correct, in-scope, and all four hard gates are green; AC-F01..F06 are substantively met. To push quality higher in a follow-up: (1) Add an end-to-end executor/migrate test that drives a real char-limit/empty-required product through makePerItemExecutor in dryRun and asserts status==='requires_manual' (currently AC-F04's surfacing is only tested on validateEditItemParams in isolation, not through plan/executor). (2) Because buildYahooEditItemParams always pre-trims before validateEditItemParams runs, the length-violation branch of validateYahooFieldLimits can never fire on the normal flow (fitFullWidth guarantees <=max) — it only ever surfaces empty-required; document this as a defensive double-check or add a test proving the empty-required path drives requires_manual. (3) caption (html:true=false, HTML-allowed, max 5000) is truncated by raw code-point fit, which can cut mid-HTML-tag producing malformed markup for >5000 full-width captions; consider tag-aware truncation or stripping trailing broken tags. (4) Half-width detection treats Latin-1/accented/full-width-form chars (0x80-0xFF, 0xFF00-0xFF60) as full=1 (safe/conservative, never exceeds Yahoo's count but may over-trim names containing accents/symbols) — acceptable, but note it in the table comment. (5) Truncation is a hard head-cut with no word/space-boundary or ellipsis handling (task's 'preserve meaning where possible' is only minimally honored); fine for Japanese but consider trimming at the last space for half-width-heavy fields. (6) validateEditItemParams.missing now mixes field-name tokens (e.g. 'path') with human messages (e.g. 'path カテゴリ名「…」が全角20を超過'); callers matching exact field names won't match message strings — consider a structured {field,reason} shape behind the back-compat array.",
+  "passed": true,
+  "evaluator_skill": "eval-loop-evaluator",
+  "evaluated_artifacts": [
+    "webui/lib/product/text-fit.ts",
+    "webui/lib/product/text-fit.test.ts",
+    "webui/lib/yahoo/item-mapper.ts",
+    "webui/lib/yahoo/item-mapper-fit.test.ts",
+    "webui/lib/migrate/executor.ts",
+    "webui/lib/migrate/plan.ts",
+    "webui/app/api/migrate/rakuten-to-yahoo/route.ts",
+    "webui/app/api/register/yahoo/[id]/route.ts",
+    "webui/lib/converters/yahoo.ts"
+  ],
+  "risks": [
+    "validateEditItemParams length-check is effectively unreachable for over-length on the normal flow because buildYahooEditItemParams always pre-trims; only empty-required cases actually surface as requires_manual in dry-run",
+    "caption (HTML-allowed, 5000) raw code-point truncation can split an HTML tag for very long captions, yielding malformed markup",
+    "Conservative half-width rule counts accented Latin / full-width-form / Latin-1 chars as full=1, which over-trims (never exceeds) such fields",
+    "AC-F04 surfacing is only unit-tested on validateEditItemParams in isolation; no test exercises the plan/executor dry-run path with a char-limit/empty-required product",
+    "Truncation is non-word-boundary head-cut; meaning preservation is minimal (acceptable for Japanese-dominant fields)"
+  ],
+  "recommended_next_changes": [
+    "Add executor/migrate dry-run test: feed an empty-path (or category-unresolved) product and assert status==='requires_manual' with no write deps invoked (end-to-end AC-F04)",
+    "Make caption/HTML-allowed truncation tag-aware (or strip a trailing partial tag) to avoid malformed markup at the 5000 boundary",
+    "Add a test asserting that after fitYahooFieldLimits the validateYahooFieldLimits length branch never reports over-length (documents the defensive double-check)",
+    "Document in YAHOO_FIELD_LIMITS comment that non-ASCII non-half-kana code points count as full=1 (conservative), and consider word/space-boundary trimming for half-width-heavy fields",
+    "Consider returning structured {field,reason} violations behind the back-compat missing[] so callers can match field identity rather than human message strings"
+  ]
+}

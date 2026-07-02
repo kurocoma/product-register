@@ -1,0 +1,71 @@
+{
+  "score": 91,
+  "quality": {
+    "overall": 91,
+    "breakdown": {
+      "correctness": 92,
+      "regression_safety": 93,
+      "test_quality": 88,
+      "maintainability": 90,
+      "integration_fit": 92,
+      "risk_control": 89
+    }
+  },
+  "hard_gate_findings": [
+    {
+      "id": "webui_lint",
+      "passed": true,
+      "detail": "cd webui && npm run lint -> 0 errors, 8 warnings (全て既存無関連ファイル: register-form/repository.test/e2e_*.mjs の no-unused-vars 等。新規 text-fit.ts/item-mapper.ts には警告なし). exit 0"
+    },
+    {
+      "id": "webui_typecheck",
+      "passed": true,
+      "detail": "cd webui && npx tsc --noEmit -> エラーなし. exit 0"
+    },
+    {
+      "id": "webui_unit",
+      "passed": true,
+      "detail": "cd webui && npm run test -> Test Files 31 passed (31), Tests 226 passed (226). 既存201 + 新規25(text-fit.test 15 / item-mapper-fit.test 10). exit 0"
+    },
+    {
+      "id": "webui_build",
+      "passed": true,
+      "detail": "cd webui && npm run build -> 本番ビルド成功(全ルート生成). exit 0"
+    }
+  ],
+  "evidence": [
+    "webui/lib/yahoo/item-mapper.ts:150 buildYahooEditItemParams は末尾で `return fitYahooFieldLimits(params);` を実適用。AC-F02/F03 の整形が単品register/yahoo・migrate 両経路で必ず効く(route.ts:34/81・migrate executor.ts:143 が deps 注入)。",
+    "webui/lib/yahoo/item-mapper.ts:16-31 YAHOO_FIELD_LIMITS が name75/headline30(html)/explanation500(html)/abstract500/caption5000/additional1-3 5000/meta_desc80/variation1-5_name28 を一元表化。docs/Yahoo/02 の表(25行 path全角20・8階層 / 26 name75 / 43 headline30 HTML不可 / 67 explanation500 HTML不可 / 65-71 abstract500 caption5000 additional5000 meta_desc80 / 145 variation28)と完全整合。",
+    "webui/lib/product/text-fit.ts:11-45 fitFullWidth は `if (total + w > maxFullWidth) break;` で境界判定し for...of でコードポイント走査。ASCII(<=0x7F)と半角カナ(0xFF61-0xFF9F)のみ0.5幅、他は全て1.0(安全側=過小カウントしない→Yahoo実カウント<=コードカウント<=上限で超過しない)。サロゲートペアを割らない。AC-F01 充足。",
+    "webui/lib/product/text-fit.test.ts:1-69 全角/半角/混在/半角カナ/絵文字境界/上限ちょうど/超過1/サロゲート非破壊/上限0/HTML除去 を網羅。item-mapper-fit.test.ts:9-45 長いdisplay_name→name===75・HTML込みfree1→explanation除タグ500・headline除タグ30・path' > '区切り→各seg<=20・8階層制限 で it-01017/01033/01002 解消を実アサート。",
+    "webui/lib/yahoo/item-mapper.ts:158-173 validateEditItemParams が validateYahooFieldLimits(76-110) を呼び、必須空(path/name/product_category)・各上限超過・path構造違反を missing に列挙(shape {ok}|{ok,missing} 維持)。executor.ts:144-165 で previewValid.missing→missingRequiredYahooFields→buildItemPlan(plan.ts:38)→requires_manual に倒れ dry-run で surface。AC-F04 充足。",
+    "git status: 変更は webui/lib/yahoo/item-mapper.ts のみ(+119/-2)。webui/lib/converters/yahoo.ts は無改変(YahooConverter 不変)。item-mapper-fit.test.ts:56-62 で短い既定値は params.name===display_name / path===yahoo_path / headline===catch_copy_yahoo を確認(短い値不変=AC-F05)。",
+    "headline は YahooConverter で除タグされない(yahoo.ts:84 `headline: p.catch_copy_yahoo`)ため、mapper の html:true 除タグ(item-mapper.ts:41-44)が実効。explanation は converter で既に除タグ済みだが mapper 側の再除タグは冪等で安全。"
+  ],
+  "feedback": "受け入れ条件 AC-F01〜F06 を実コードで充足し、4 hard gate(lint/tsc/test226/build)全緑。整形は buildYahooEditItemParams 末尾で実適用され単品/一括両経路に効く。改善余地(次周で任意): (1) abstract/caption/additional1-3/meta_desc/variation*_name の上限整形に直接の単体テストが無く汎用 fitYahooField 経由の暗黙カバーのみ→各フィールド別の最小テストを追加し回帰を固定する。(2) Latin-1拡張(é 等)や全角記号を一律 full(1.0) として安全側に丸めるため、欧字主体の値が過剰に切られうる→東アジア幅(EAW)に沿った判定を検討(現状は超過しない安全側なので必須ではない)。(3) 切詰は語境界を考慮しないハードカット(末尾の…付与なし)→explanation/name で意味が途切れる懸念。語/文境界優先の切詰を追加すると情報保全が向上。(4) validateYahooFieldLimits の path 検証は ':' 単独split で、docs の複数パス '%0D%0A' 区切り入力は1パス扱い→複数ストアカテゴリ対応時に要拡張(現スコープ外)。",
+  "passed": true,
+  "evaluator_skill": "eval-loop-evaluator",
+  "evaluated_artifacts": [
+    "webui/lib/product/text-fit.ts",
+    "webui/lib/product/text-fit.test.ts",
+    "webui/lib/yahoo/item-mapper.ts",
+    "webui/lib/yahoo/item-mapper-fit.test.ts",
+    "webui/lib/migrate/executor.ts",
+    "webui/lib/migrate/plan.ts",
+    "webui/app/api/register/yahoo/[id]/route.ts",
+    "webui/app/api/migrate/rakuten-to-yahoo/route.ts",
+    "webui/lib/converters/yahoo.ts"
+  ],
+  "risks": [
+    "整形が fit を前置するため validateEditItemParams の文字数違反 surface 経路は実運用上ほぼ未到達(空必須/未マッピングは別ゲートで先に requires_manual)。length 由来の requires_manual は理論的防御に留まる。",
+    "幅判定が安全側の過大カウント固定のため欧字主体フィールドは想定より短く切られる可能性(超過はしないが情報欠落側)。",
+    "切詰が語/文境界非考慮のハードカットで、長い name/explanation が途中で途切れる(SEO/可読性低下)。",
+    "path 複数指定(%0D%0A)入力は1パスに正規化され、将来の複数ストアカテゴリ運用で意図と不一致になりうる。"
+  ],
+  "recommended_next_changes": [
+    "abstract/caption/additional1-3/meta_desc/variation*_name の各上限整形と『短い値不変』を個別 vitest で固定する。",
+    "explanation/name に語境界(空白/句読点)優先の切詰オプションを追加し、必要なら末尾省略記号付与で情報欠落を緩和する。",
+    "幅カウントを East Asian Width ベースへ精緻化(全角記号/Latin拡張の扱い)を検討し、安全側を保ちつつ過剰切詰を低減する。",
+    "validateYahooFieldLimits を複数パス(%0D%0A)・spec/options 等の構造制約にも拡張できるよう、フィールド種別ごとの検証規則を表駆動化する。"
+  ]
+}

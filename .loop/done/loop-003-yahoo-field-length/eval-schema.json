@@ -1,0 +1,77 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "eval-loop evaluator output (fixed contract)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "score",
+    "quality",
+    "hard_gate_findings",
+    "evidence",
+    "feedback",
+    "passed",
+    "evaluator_skill",
+    "evaluated_artifacts",
+    "risks",
+    "recommended_next_changes"
+  ],
+  "properties": {
+    "score": { "type": "integer", "minimum": 0, "maximum": 100 },
+    "quality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["overall", "breakdown"],
+      "properties": {
+        "overall": { "type": "integer", "minimum": 0, "maximum": 100 },
+        "breakdown": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "correctness",
+            "regression_safety",
+            "test_quality",
+            "maintainability",
+            "integration_fit",
+            "risk_control"
+          ],
+          "properties": {
+            "correctness": { "type": "integer", "minimum": 0, "maximum": 100 },
+            "regression_safety": { "type": "integer", "minimum": 0, "maximum": 100 },
+            "test_quality": { "type": "integer", "minimum": 0, "maximum": 100 },
+            "maintainability": { "type": "integer", "minimum": 0, "maximum": 100 },
+            "integration_fit": { "type": "integer", "minimum": 0, "maximum": 100 },
+            "risk_control": { "type": "integer", "minimum": 0, "maximum": 100 }
+          }
+        }
+      }
+    },
+    "hard_gate_findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "passed"],
+        "properties": {
+          "id": { "type": "string" },
+          "passed": { "type": "boolean" },
+          "detail": { "type": "string" }
+        }
+      }
+    },
+    "evidence": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+    "feedback": { "type": "string", "minLength": 1 },
+    "passed": { "type": "boolean" },
+    "evaluator_skill": { "type": "string", "const": "eval-loop-evaluator" },
+    "evaluated_artifacts": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+    "risks": { "type": "array", "items": { "type": "string" } },
+    "recommended_next_changes": { "type": "array", "items": { "type": "string" } }
+  },
+  "rules": [
+    "score == quality.overall",
+    "quality.breakdown のキーは criteria.yaml の軸と完全一致(追加/削除/改名禁止)",
+    "schema 違反は score 0 / passed false(record_eval が再計算)",
+    "hard gate 失敗時は passed false",
+    "evaluator_skill は 'eval-loop-evaluator' 固定",
+    "evidence には実ファイル/コマンド/差分/再現例を含める",
+    "feedback は次周 plan に変換できる具体的修正指示にする"
+  ]
+}

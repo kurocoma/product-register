@@ -1,0 +1,26 @@
+{
+  "agent_id": "af33b94fad9be4834",
+  "agent_type": "eval-loop-evaluator (real custom agent, Agent tool fork)",
+  "role": "evaluator",
+  "loop": "loop-003-yahoo-field-length",
+  "iteration": 1,
+  "purpose": "再検証（2回目の独立PASS取得）。turn-000 と同一 implementation_hash の成果物を、まっさらな fork で独立採点。",
+  "input_files": [
+    ".loop/current/task.md",
+    ".loop/current/acceptance.yaml",
+    ".loop/current/criteria.yaml",
+    ".loop/current/eval-schema.json",
+    "webui/lib/product/text-fit.ts (+ test)",
+    "webui/lib/yahoo/item-mapper.ts (+ item-mapper-fit.test.ts)",
+    "webui/lib/migrate/executor.ts, plan.ts"
+  ],
+  "forbidden_inputs": [
+    "turn-*-report.md / turn-*-plan.md / 過去 score・eval / feedback / 司令塔・generator 会話・他者の合否"
+  ],
+  "context_strategy": "fork (fresh context, no parent/prior-eval history)",
+  "previous_thread_reused": false,
+  "within_turn_resumes": 1,
+  "verification_run": "read-only: npm run test(226)/tsc(0)/lint(0)/build(0)/git diff",
+  "result": "score=91, passed=true（schema VALID）。turn-000(91) と合わせ同一 implementation_hash で2回連続 PASS → loop-003 完了。",
+  "note": "1回目の応答で最終JSON未出力のまま停止 → SendMessage で再開し JSON 出力。"
+}

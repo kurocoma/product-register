@@ -1,0 +1,19 @@
+{
+  "agent_id": "ab8ce3b91e3220734",
+  "agent_type": "eval-loop-generator (general-purpose fork)",
+  "role": "generator",
+  "started_at": "2026-06-29T01:10:00",
+  "finished_at": "2026-06-29T01:16:00",
+  "input_files": [
+    ".loop/current/task.md",
+    ".loop/current/turns/turn-000-plan.md"
+  ],
+  "forbidden_files": [
+    ".loop/current/turns/turn-000-eval.json",
+    "score / consecutive_passes / 過去eval",
+    "acceptance.yaml/criteria.yaml/eval-schema.json (変更禁止)"
+  ],
+  "context_strategy": "fork (Agent tool fresh context, no parent history)",
+  "previous_thread_reused": false,
+  "sandbox_or_permission_mode": "edit-enabled (Read/Grep/Glob/Edit/Write/Bash)"
+}

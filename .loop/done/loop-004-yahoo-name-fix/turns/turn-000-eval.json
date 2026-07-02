@@ -1,0 +1,68 @@
+{
+  "score": 93,
+  "quality": {
+    "overall": 93,
+    "breakdown": {
+      "correctness": 95,
+      "regression_safety": 95,
+      "test_quality": 91,
+      "maintainability": 92,
+      "integration_fit": 93,
+      "risk_control": 90
+    }
+  },
+  "hard_gate_findings": [
+    {
+      "id": "webui_lint",
+      "passed": true,
+      "detail": "cd webui && npm run lint -> exit 0. 8 warnings(0 errors)、全て既存ファイル(YahooPreview.tsx/ProductForm.tsx/repository.test.ts/e2e_*.mjs)由来。本ループ変更(text-fit.ts/item-mapper.ts/新テスト)に lint エラーなし。"
+    },
+    {
+      "id": "webui_typecheck",
+      "passed": true,
+      "detail": "cd webui && npx tsc --noEmit -> EXIT_TSC=0。型エラーなし。FieldLimit の html: boolean|\"br-to-space\" 判別ユニオンも型整合。"
+    },
+    {
+      "id": "webui_unit",
+      "passed": true,
+      "detail": "cd webui && npm run test -> Test Files 33 passed / Tests 243 passed。失敗・skip・only なし。item-mapper-fit.test の 'あ'×100→fullWidthLen 75 緑、新規 item-mapper-name.test/text-fit-html.test も緑。"
+    },
+    {
+      "id": "webui_build",
+      "passed": true,
+      "detail": "cd webui && npm run build -> EXIT_BUILD=0。全ルート(/api/register/yahoo/[id], /api/migrate/rakuten-to-yahoo 含む)生成成功。"
+    }
+  ],
+  "evidence": [
+    "webui/lib/product/text-fit.ts:79-85 htmlToPlainText 実在: /<\\s*br\\s*\\/?\\s*>/gi -> 空白, /<[^>]+>/g 除去, /\\s+/ 畳み, trim。AC-N01 充足(他タグ除去・<br>→空白・区切り保持)。",
+    "webui/lib/product/text-fit.ts:52-66 fitFullWidthAndChars: count+1>maxChars と total+w>maxFullWidth の二重停止。各文字 width<=1(isHalfWidth で 0.5/1)なので 文字数<=75 → Yahoo 全角換算<=75 を構造保証。AC-N02 のカウント差吸収ロジックが正しい。",
+    "webui/lib/yahoo/item-mapper.ts:28 name:{max:75, html:\"br-to-space\", maxChars:75}。fitYahooField(item-mapper.ts:52-58) が br-to-space で htmlToPlainText を適用後 fitFullWidthAndChars(base,75,75)。name に HTML 適用・二重上限が掛かる。",
+    "$ node 検証(実データ REAL_NAME=琉球 もろみ酢…<br>しまのや…特価): base 106字/全角91 → 整形後 out 75字/全角63.5、hasAngle=false、startsWith('琉球 もろみ酢')=true、contains('約1ヵ月分） しまのや')=true。AC-N01/N02/N03 を実データ形で満たす(本来商品名が先頭保持・<br>→空白)。loop-003 の旧 fullWidthLen<=75 では文字数>75 が残り Yahoo 過大カウントを誘発したが、maxChars=75 で 75字に確実に縮約。",
+    "webui/lib/yahoo/item-mapper-name.test.ts:9-48 実データ風 REAL_NAME(全角/半角/記号/数字混在・キーワード多数)で HTML不含・[...name].length<=75・fullWidthLen<=75・先頭商品名保持・<br>→空白・短name不変・'あ'×100→75 を検証。合成データのみに依存しない。AC-N03/N05 充足。",
+    "webui/lib/yahoo/item-mapper-fit.test.ts:9-14 'あ'×100→fullWidthLen(name)===75 が緑のまま(全角のみは文字数=幅)。AC-N02/N04 の不変要件維持。",
+    "git diff webui/lib/converters/yahoo.ts: 差分なし(YahooConverter 不変)。git status: lib/converters/yahoo.ts 未変更、変更は item-mapper.ts のみ + 新規 text-fit*.ts/新テスト。非対象パス(.env/.claude/.loop/scripts/package.json/tsconfig/eslint/vitest)無改変。",
+    "webui/app/api/migrate/rakuten-to-yahoo/route.ts:147,152 と app/api/register/yahoo/[id]/route.ts:34,81 が共に buildYahooEditItemParams/validateEditItemParams を経由 → name 整形が単品登録・一括移行の両経路に効く。validateEditItemParams は {ok,missing} shape を維持(後方互換)。",
+    "$ grep .skip/.only/.todo (新規4テスト) -> 一致なし(GREP_EXIT=1)。テストの削除/スキップ/緩和なし。"
+  ],
+  "feedback": "全 hard gate 緑・AC-N01〜N05 を実コードで満たす良質な修正。次周(任意の強化)として: (1) buildYahooEditItemParams レベルで『loop-003 が見逃した正確な形＝fullWidthLen<=75 だが codePoint 数>75 の半角偏重 name(例 ASCII 150字)』を入力に、整形後が 75字へ縮約されることを直接表明する回帰テストを追加(現状 REAL_NAME は全角91 で両上限に掛かるため、maxChars 上限が決定打である事を単独で証明する事例が薄い)。(2) サロゲートペア/結合文字を含む name を buildYahooEditItemParams 経由でも 1 件入れ、安全側(過剰カット)挙動を固定。(3) Yahoo 実カウント前提(各文字<=全角1)はライブ e2e_migrate(ループ外)で最終確認する旨をコードコメント/検証手順に明記。",
+  "passed": true,
+  "evaluator_skill": "eval-loop-evaluator",
+  "evaluated_artifacts": [
+    "webui/lib/product/text-fit.ts",
+    "webui/lib/product/text-fit.test.ts",
+    "webui/lib/product/text-fit-html.test.ts",
+    "webui/lib/yahoo/item-mapper.ts",
+    "webui/lib/yahoo/item-mapper-fit.test.ts",
+    "webui/lib/yahoo/item-mapper-name.test.ts"
+  ],
+  "risks": [
+    "Yahoo 実カウント(各文字を全角1以下で数える)という前提が成り立つ限り 文字数<=75 → Yahoo<=75 は保証されるが、ループ内ではライブ確認できず最終担保は e2e_migrate(ループ外)に依存。",
+    "ZWJ/結合文字を含む name は codePoint 数で過剰カウント→安全側(余分に切る)になるため拒否は起きないが、稀に本来商品名が想定より短く切れる可能性(実データ酒類名では非現実的)。",
+    "整形後でも本来商品名自体が 75字超なら先頭が切れ得る(task 前提では本来名 19〜35全角で範囲内、リスク低)。"
+  ],
+  "recommended_next_changes": [
+    "half-width 偏重 name(fullWidthLen<=75 かつ codePoint>75)の専用回帰テストを buildYahooEditItemParams レベルで追加し maxChars=75 の効力を単独立証する。",
+    "サロゲートペア/結合文字を含む name を統合経路テストに 1 件追加する。",
+    "ライブ e2e_migrate --commit による it-01017 の Yahoo 実カウント最終確認手順を検証ノートに残す(コード修正は本ループで完了)。"
+  ]
+}

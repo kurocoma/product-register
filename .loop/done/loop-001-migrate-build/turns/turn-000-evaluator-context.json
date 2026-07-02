@@ -1,0 +1,23 @@
+{
+  "agent_id": "explore-evaluator-turn000",
+  "agent_type": "eval-loop-evaluator (Explore fork, read-only + Bash)",
+  "role": "evaluator",
+  "started_at": "2026-06-29T01:16:30",
+  "finished_at": "2026-06-29T01:22:00",
+  "input_files": [
+    ".loop/current/task.md",
+    ".loop/current/acceptance.yaml",
+    ".loop/current/criteria.yaml",
+    ".loop/current/eval-schema.json",
+    "webui/lib/migrate/ (artifacts)"
+  ],
+  "forbidden_files": [
+    ".loop/current/turns/turn-000-plan.md",
+    ".loop/current/turns/turn-000-report.md",
+    ".loop/current/turns/turn-000-generator-context.json",
+    "過去 score / 過去 eval / state.json"
+  ],
+  "context_strategy": "fork (Explore tool fresh context, read-only). 自分で tsc/lint/test/build を実行して証拠取得",
+  "previous_thread_reused": false,
+  "sandbox_or_permission_mode": "read-only (Read/Grep/Glob/Bash; Edit/Write/Agent/Skill 不可)"
+}

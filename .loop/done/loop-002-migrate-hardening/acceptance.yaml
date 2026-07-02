@@ -1,0 +1,80 @@
+task:
+  type: hardening
+  title: "楽天→Yahoo 一括移行：本番ハードニング（レート制御の実配線・既存公開商品の display 保持・契約 honest化・大量入力ガード）"
+  target_paths:
+    - "webui/lib/migrate/"
+    - "webui/app/api/migrate/"
+    - "webui/components/product/"
+    - "webui/lib/product/"
+  non_target_paths:
+    - ".env"
+    - ".env.local"
+    - "webui/.env"
+    - "webui/.env.local"
+    - ".claude/"
+    - ".loop/"
+    - "scripts/"
+    - "webui/package.json"
+    - "webui/package-lock.json"
+    - "webui/pnpm-lock.yaml"
+    - "webui/tsconfig.json"
+    - "webui/eslint.config.mjs"
+    - "webui/vitest.config.ts"
+
+hard_gates:
+  required:
+    - id: webui_lint
+      command: "npm run lint"
+      cwd: "webui"
+      pass_if: "exit_code == 0"
+    - id: webui_typecheck
+      command: "npx tsc --noEmit"
+      cwd: "webui"
+      pass_if: "exit_code == 0"
+    - id: webui_unit
+      command: "npm run test"
+      cwd: "webui"
+      pass_if: "exit_code == 0"
+    - id: webui_build
+      command: "npm run build"
+      cwd: "webui"
+      pass_if: "exit_code == 0"
+  optional:
+    - id: python_tests
+      command: "python -m pytest -q"
+      cwd: "."
+      pass_if: "exit_code == 0"
+
+behavioral_acceptance:
+  - id: AC-H01
+    description: "commit 経路でモールAPIにレート制御が実効する：route が runItems に delayMs を渡し item 間に待機を挟む。delayMs は設定可能(body override かつ安全な既定>0)。dry-run の楽天 getItem 連打にも配慮(同 delay 適用 or 明示)。"
+    verification: "route.test が sleep 注入で待機回数=有効件数-1 を検証 / executor or runItems 経由で delay が実配線されることを確認"
+  - id: AC-H02
+    description: "既存(forUpdate)の公開中 Yahoo 商品を一括移行で不用意に非表示化しない：既存商品は display を保持するオプションを提供し既定で保持。新規商品は安全既定 display=0 を維持。"
+    verification: "unit(existed=true→forceDisplay を '0' 強制しない/新規→'0') + evaluator が register/yahoo の forUpdate 規約との整合を確認"
+  - id: AC-H03
+    description: "型契約を honest化：ItemStatus 'skipped' を実条件で emit するか、型・集計から除去して dead path を無くす。"
+    verification: "unit(skipped を出すなら該当条件で status=skipped / 除去なら型・aggregate に存在しない) + evaluator 確認"
+  - id: AC-H04
+    description: "大量入力のタイムアウト/部分 commit リスクを軽減：入力のチャンク/バッチ処理 or 推奨上限の運用ガード(超過時の明示挙動)を実装。"
+    verification: "unit(チャンク境界/上限超過時の挙動) + evaluator が大量入力時の安全性を確認"
+  - id: AC-H05
+    description: "後方互換：既存の一括移行フロー(AC-001..009)・単品ルート・既存テスト(189)を壊さない。dry-run 非書込・安全既定・公開非実行(submitItem 非呼出)を維持。"
+    verification: "webui_unit が緑(既存189+新規) + evaluator が既存挙動不変を確認"
+  - id: AC-H06
+    description: "新規/変更ロジックに意味のある vitest テストがあり npm run test で全緑(既存テストの削除/スキップ/緩和なし)。"
+    verification: "webui_unit に新テストが含まれ全緑"
+
+forbidden:
+  - "合格のためにテストを削除・スキップ・緩和しない(実装を直す)"
+  - "受け入れ条件/criteria/eval-schema を緩めない"
+  - "本番秘密情報(.env/secrets/認証トークン)を読む・書く・出力しない"
+  - "依存(package.json)・評価設定(tsconfig/eslint/vitest)・eval-loopハーネス(.claude/.loop/scripts)を変更しない"
+  - "ライブ全移行の実行・Yahoo本番公開(このセッションはハードニングまで。実出品はしない)"
+  - "既存の一括移行/単品ルートの外部挙動を不用意に変えない(共有helper抽出する場合も挙動不変)"
+
+two_consecutive_verification:
+  - "毎回 新しい run_id / 新しい検証レポートを validation/runs に保存する"
+  - "対象実装をそのまま検証し、手動修正・キャッシュ成功を数えない"
+  - "task_hash/acceptance_hash/criteria_hash/schema_hash/validator_hash/implementation_hash が2回とも同一"
+  - "hard gate 成功 かつ evaluator score >= threshold が2回連続"

@@ -1,0 +1,61 @@
+{
+  "score": 82,
+  "quality": {
+    "overall": 82,
+    "breakdown": {
+      "correctness": 62,
+      "regression_safety": 98,
+      "test_quality": 92,
+      "maintainability": 92,
+      "integration_fit": 72,
+      "risk_control": 92
+    }
+  },
+  "hard_gate_findings": [
+    { "id": "webui_lint", "passed": true, "detail": "ESLint: 0 errors, 8 warnings (all pre-existing, not from migrate/)" },
+    { "id": "webui_typecheck", "passed": true, "detail": "TypeScript: tsc --noEmit completed with no errors" },
+    { "id": "webui_unit", "passed": true, "detail": "Vitest: 168 tests passed across 23 files, including new migrate/ tests" },
+    { "id": "webui_build", "passed": true, "detail": "Next.js build: SUCCESS, compiled 21 pages without errors" }
+  ],
+  "evidence": [
+    "webui/lib/migrate/types.ts - Type definitions for MigrationStep, ItemStatus, ItemPlanInput, MigrationItemPlan, MigrationItemResult, MigrationSummary, SafeStateDefaults",
+    "webui/lib/migrate/manage-numbers.ts - parseManageNumbers() normalizes newline/CSV/array inputs, deduplicates, validates RAKUTEN_CODE_RE + 32-char limit",
+    "webui/lib/migrate/plan.ts - buildItemPlan() detects requires_manual: null/false category, hasMultipleSku, hasAdvancedYahooSettings, missingRequiredYahooFields",
+    "webui/lib/migrate/defaults.ts - safeStateDefaults(publish) returns display:0/stock:0/registerPublish:false when publish=false, consistent with existing register routes",
+    "webui/lib/migrate/result.ts - aggregate() tallies by status; runItems() per-item processing with fail-continue (continueOnError=true default)",
+    "webui/lib/migrate/*.test.ts - 28+ tests: parse splitting/dedup/invalid chars/32-char, plan requires_manual conditions, safe defaults, aggregate + fail-continue",
+    "npm run test: 168 passed (23 files); npm run lint: 0 errors; npx tsc --noEmit: success; npm run build: 21 pages compiled",
+    "git status: webui/lib/migrate/ untracked; webui/app/api/migrate/ does not exist"
+  ],
+  "feedback": "Implementation status: pure logic complete, integration absent. Correctness gap stems from missing API route and dry-run/commit integration, not from the pure layer.\n\nThe lib/migrate/ module is design-sound and well-tested (types, parse, plan, defaults, aggregate) with edge cases (dedup, invalid chars, null category, multi-SKU detection, fail-continue, safe defaults). Type contracts clear, I/O isolated, safety guardrails (requires_manual) in place. All hard gates pass; existing 168 tests green; backward compatibility preserved.\n\nCritical missing pieces for AC-001/AC-005/AC-006/AC-007:\n1. API route webui/app/api/migrate/rakuten-to-yahoo/route.ts (POST, dry-run/commit branch, per-item orchestration).\n2. I/O integration: buildImportedProduct (import reuse + ne_code dedup), category-mapping resolve, register/yahoo safe-state commit, yahoo-sync image transfer, tie to runItems().\n3. UI panel webui/components/product/ (input, dry-run preview table, execute, results table).\n4. Integration tests: dry-run writes nothing; commit path shape; per-item result+summary matches AC-001.",
+  "passed": false,
+  "evaluator_skill": "eval-loop-evaluator",
+  "evaluated_artifacts": [
+    "webui/lib/migrate/types.ts",
+    "webui/lib/migrate/manage-numbers.ts",
+    "webui/lib/migrate/plan.ts",
+    "webui/lib/migrate/defaults.ts",
+    "webui/lib/migrate/result.ts",
+    "webui/lib/migrate/index.ts",
+    "webui/lib/migrate/manage-numbers.test.ts",
+    "webui/lib/migrate/plan.test.ts",
+    "webui/lib/migrate/defaults.test.ts",
+    "webui/lib/migrate/result.test.ts"
+  ],
+  "risks": [
+    "API route /api/migrate/rakuten-to-yahoo does not exist -> AC-001 unmet",
+    "No dry-run/commit branching at route layer -> AC-005 unmet",
+    "No UI panel for user input -> user-visible behavior missing",
+    "No integration with existing import/register functions yet -> per-item orchestration incomplete",
+    "No end-to-end tests for the full flow -> integration bug risk when connected",
+    "Pure layer isolated but not called anywhere -> feature non-functional in current state"
+  ],
+  "recommended_next_changes": [
+    "Create webui/app/api/migrate/rakuten-to-yahoo/route.ts: POST handler parseManageNumbers -> buildItemPlan(with I/O) -> runItems(per-item executor) -> aggregate; implement dry-run(no writes) and commit modes.",
+    "Per-item handler: fetch rakuten item -> parse -> buildImportedProduct -> check existed(ne_code) -> if dry-run return plan else upsertProduct + buildYahooEditItemParams + editItem(safe state) + yahoo-sync image + recordHistory.",
+    "Add UI panel webui/components/product/MigratePanel.tsx: textarea -> dry-run preview table(manageNumber,action,reasons,exists,categoryResolved) -> execute -> results table(manageNumber,productId,step,ok,error).",
+    "Integration tests: route dry-run writes nothing; commit shape; summary counts; per-item result array matches AC-001 contract.",
+    "Ensure publish defaults to false(display:0,stock:0) in route before editItem.",
+    "Detect multi-SKU/advanced Yahoo settings via existing detectAdvanced and route them to requires_manual."
+  ]
+}

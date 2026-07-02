@@ -1,0 +1,75 @@
+{
+  "score": 91,
+  "quality": {
+    "overall": 91,
+    "breakdown": {
+      "correctness": 93,
+      "regression_safety": 95,
+      "test_quality": 90,
+      "maintainability": 87,
+      "integration_fit": 90,
+      "risk_control": 90
+    }
+  },
+  "hard_gate_findings": [
+    {
+      "id": "webui_lint",
+      "passed": true,
+      "detail": "cd webui && npm run lint → 0 errors, 8 pre-existing warnings (no-img-element / react-hooks / no-unused-vars) none introduced by this change. exit 0."
+    },
+    {
+      "id": "webui_typecheck",
+      "passed": true,
+      "detail": "cd webui && npx tsc --noEmit → exit 0, no type errors."
+    },
+    {
+      "id": "webui_unit",
+      "passed": true,
+      "detail": "cd webui && npm run test → 36 files, 261 tests passed (existing 243 + new image-url-seller/executor-image/item-mapper-validate). exit 0."
+    },
+    {
+      "id": "webui_build",
+      "passed": true,
+      "detail": "cd webui && npm run build → compiled and route manifest generated. exit 0."
+    }
+  ],
+  "evidence": [
+    "AC-A1 OK: executor.ts:195-209 syncImage(9b) runs before editParams build(9c)+validate/editYahoo(9c-2:243-259). executor-image.test.ts:88 asserts order ['upsert','syncImage','editYahoo','recordHistory'] and :90 syncImage index < editYahoo index.",
+    "AC-A2 OK: executor.ts:220-240 rebuilds item_image_urls only from uploaded success indices via deps.buildImageUrls(product.ne_code, uploadedIndices); expectedImages>=1 && uploaded empty → return status='failed', step='image' (executor.ts:221-232, test executor-image.test.ts:131-145 editYahoo not called). Warnings surfaced: executor.ts:272-273 editWarnNote from edit.warnings → result.error (executor-image.test.ts:148-164 asserts r.error contains 'editItem警告'/'it-14091').",
+    "AC-A3 OK (functionally): route.ts:155 syncImage uploads to uploadLibImage(token, cfg.sellerId,...) and route.ts:157 buildImageUrls=buildYahooItemImageUrls(neCode, indices, cfg.sellerId) → reference base lib/{sellerId} matches upload target lib/{sellerId}. Filenames match: lib-path.ts:15-19 buildYahooLibFileName = {ne_code}.jpg/{ne_code}_{i}.jpg == image-url.ts:52-55 yahooImageUrlForIndex. image-url-seller.test.ts:10-22 asserts sellerId→lib/{sellerId}, default→okimarumarket fallback.",
+    "AC-A3 NOTE: image-url.ts:4 YAHOO_IMAGE_BASE='...lib/okimarumarket' NOT removed — kept as fallback default (yahooLibBase(sellerId) at :47-49). Migrate commit path overrides item_image_urls with sellerId-dynamic value so okimarumarket is never used there; but YahooConverter (yahoo.ts:75 buildYahooItemImageUrls(p.ne_code,p.image_count) without sellerId, and yahoo.ts:48 caption buildYahooImgListHtml) still emit hardcoded okimarumarket base. yahoo.ts is a non-target file (must stay unchanged), so caption imgList hardcode is out of scope; store is okimarumarket so no live breakage.",
+    "AC-A4 OK: executor.ts:255-259 retries once after deps.sleep(EDIT_RETRY_DELAY_MS=1500) when isImagePropagationError (it-14091/im-02005, checks message+errors, :302-306). executor-image.test.ts:167-202 asserts editYahoo called 2x + sleep 1x on it-14091, and no retry (1x, sleep 0) on unrelated it-01023.",
+    "AC-A5 OK (not reward-hacking): git diff webui/lib/migrate/executor.test.ts is a SINGLE hunk swapping two array lines so effects expectation becomes ['buildImported','findExisting','upsert','syncImage','editYahoo','recordHistory'] (was editYahoo before syncImage). No assertion deleted/skipped/loosened; correcting a spec that froze the wrong order which caused it-14091.",
+    "AC-B1/B2/B3 OK: item-mapper.ts:193-216 validateEditItemParams gates price(integer 1..99,999,999), item_code(/^[A-Za-z0-9-]+$/ & <=99), product_category(/^[0-9]{1,10}$/), pushing to missing[] (shape preserved {ok}|{ok:false;missing}). item-mapper-validate.test.ts:16-60 covers boundaries (1, 99999999, 0, 100000000, decimal, negative, NE_1, space, 99/100 chars, 10/11 digits, non-numeric).",
+    "AC-B4 OK (composed): executor.ts:154-167 calls deps.validateYahoo(previewParams) at preview and feeds missingRequiredYahooFields to buildItemPlan → requires_manual (executor.test.ts:237-247 confirms missing→requires_manual, no editYahoo). route.ts:153 wires validateYahoo=validateEditItemParams. No single integration test exercising real validateEditItemParams through executor dry-run, but both halves tested.",
+    "AC-C1/C2 OK: git status shows only executor.test.ts modified (the A5 swap); yahoo.ts and app/api/register/yahoo/[id]/route.ts unmodified. 261/261 green incl new suites; no existing test removed/skipped/weakened. Backward-compat preserved: syncImage/buildImageUrls/sleep optional (executor.ts:55-64), item_image_urls only overridden when buildImageUrls injected (executor.test.ts/executor-image.test.ts:116-128 'PLACEHOLDER' unchanged), buildYahooImageUrls number overload unchanged (image-url-seller.test.ts:39-47).",
+    "Design note: edit.warnings on a successful (ok:true) result are surfaced via the result.error field (executor.ts:289-296) — semantically uses 'error' for success notes. Edge: executor.ts:212 expectedImages = floor(product.image_count||0) differs from route syncYahooImages count derivation (route.ts:219 clamps min 1) — if image_count=0 but image_url_1 exists, the all-fail abort guard (executor.ts:221) is bypassed."
+  ],
+  "feedback": "Strong, ships above threshold. To harden next turn: (1) Finish AC-A3 literally — either remove/rename the okimarumarket constant or make YahooConverter caption imgList (yahoo.ts:48 buildYahooImgListHtml) and item_image_urls (yahoo.ts:75) sellerId-aware via a shared config, so non-okimarumarket stores don't emit broken caption image URLs (note yahoo.ts is currently non-target; if widening scope, lift the constraint deliberately). (2) Add one integration test wiring the REAL validateEditItemParams as validateYahoo into makePerItemExecutor dry-run and assert price='0'/item_code='NE_1'/product_category='abc' → status='requires_manual' with no register/edit calls (closes AC-B4 end-to-end). (3) Surface editItem warnings in a dedicated MigrationItemResult field (e.g. warnings:string[]) instead of overloading `error` on ok:true results. (4) Align image-count source of truth: have executor derive expectedImages from the same source the route's syncYahooImages enumerates (or pass an expected-count back from syncImage) so an image_count=0 product with a real image_url_1 still triggers the all-fail abort.",
+  "passed": true,
+  "evaluator_skill": "eval-loop-evaluator",
+  "evaluated_artifacts": [
+    "webui/lib/migrate/executor.ts",
+    "webui/lib/migrate/executor.test.ts",
+    "webui/lib/migrate/executor-image.test.ts",
+    "webui/app/api/migrate/rakuten-to-yahoo/route.ts",
+    "webui/lib/converters/image-url.ts",
+    "webui/lib/converters/image-url-seller.test.ts",
+    "webui/lib/yahoo/item-mapper.ts",
+    "webui/lib/yahoo/item-mapper-validate.test.ts",
+    "webui/lib/yahoo/lib-path.ts",
+    "webui/lib/converters/yahoo.ts"
+  ],
+  "risks": [
+    "YahooConverter caption imgList (yahoo.ts:48) and CSV item_image_urls (yahoo.ts:75) still emit hardcoded lib/okimarumarket base; correct only because the live store IS okimarumarket. A different sellerId would yield broken caption image URLs even though migrate item_image_urls is overridden dynamically.",
+    "All-image-failure abort uses product.image_count as the expectation; a product with image_count=0 but a populated image_url_1 would skip the guard and could proceed without item_image_urls.",
+    "editItem warnings are reported through the result.error field on successful items, which downstream UI may misread as a failure.",
+    "AC-B4 is verified only by composition (unit on validateEditItemParams + executor with fake validateYahoo), not by a single dry-run integration test using the real validator."
+  ],
+  "recommended_next_changes": [
+    "Make caption/imgList and CSV item_image_urls sellerId-aware (shared base resolver) or remove the okimarumarket constant to fully satisfy AC-A3 literal de-hardcoding.",
+    "Add executor dry-run integration test injecting real validateEditItemParams to prove price/item_code/product_category range violations become requires_manual.",
+    "Introduce a typed warnings field on MigrationItemResult instead of stuffing success notes into error.",
+    "Unify image-count source between executor.expectedImages and route.syncYahooImages enumeration to close the image_count=0 edge."
+  ]
+}

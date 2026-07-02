@@ -1,0 +1,20 @@
+{
+  "$comment": "このブロックを .claude/settings.json（または settings.local.json）の トップレベル \"hooks\" にマージしてから /hooks で信頼してください。settings.json は報酬ハッキング防止ガードで保護されているため自動編集できません。ループ非アクティブ時は全 hook が no-op です。",
+  "hooks": {
+    "Stop": [
+      { "hooks": [ { "type": "command", "command": "python .claude/hooks/eval_loop_stop.py" } ] }
+    ],
+    "SessionStart": [
+      { "hooks": [ { "type": "command", "command": "python .claude/hooks/eval_loop_session_start.py" } ] }
+    ],
+    "PreCompact": [
+      { "hooks": [ { "type": "command", "command": "python .claude/hooks/eval_loop_pre_compact.py" } ] }
+    ],
+    "SubagentStart": [
+      { "hooks": [ { "type": "command", "command": "python .claude/hooks/eval_loop_subagent_log.py" } ] }
+    ],
+    "SubagentStop": [
+      { "hooks": [ { "type": "command", "command": "python .claude/hooks/eval_loop_subagent_log.py" } ] }
+    ]
+  }
+}

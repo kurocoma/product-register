@@ -1,0 +1,92 @@
+task:
+  type: feature
+  title: "楽天商品の Yahoo!ショッピング一括移行（管理番号リスト駆動・安全既定）"
+  target_paths:
+    - "webui/lib/migrate/"
+    - "webui/app/api/migrate/"
+    - "webui/components/product/"
+    - "webui/lib/converters/"
+    - "webui/lib/rakuten/"
+    - "webui/lib/yahoo/"
+    - "webui/lib/product/"
+  non_target_paths:
+    - ".env"
+    - ".env.local"
+    - "webui/.env"
+    - "webui/.env.local"
+    - ".claude/"
+    - ".loop/"
+    - "scripts/"
+    - "webui/package.json"
+    - "webui/package-lock.json"
+    - "webui/pnpm-lock.yaml"
+    - "webui/tsconfig.json"
+    - "webui/eslint.config.mjs"
+    - "webui/vitest.config.ts"
+
+hard_gates:
+  required:
+    - id: webui_lint
+      command: "npm run lint"
+      cwd: "webui"
+      pass_if: "exit_code == 0"
+    - id: webui_typecheck
+      command: "npx tsc --noEmit"
+      cwd: "webui"
+      pass_if: "exit_code == 0"
+    - id: webui_unit
+      command: "npm run test"
+      cwd: "webui"
+      pass_if: "exit_code == 0"
+    - id: webui_build
+      command: "npm run build"
+      cwd: "webui"
+      pass_if: "exit_code == 0"
+  optional:
+    - id: python_tests
+      command: "python -m pytest -q"
+      cwd: "."
+      pass_if: "exit_code == 0"
+
+behavioral_acceptance:
+  - id: AC-001
+    description: "POST /api/migrate/rakuten-to-yahoo が楽天管理番号の配列/改行テキスト/CSV1列を受理し、per-item 結果(管理番号,productId,step,ok,error)と summary を返す"
+    verification: "new unit tests + evaluator がルート/型/レスポンス整形を確認"
+  - id: AC-002
+    description: "既定は安全状態で登録(publish=false→Yahoo display:0/在庫0)。公開は明示 publish=true 時のみ"
+    verification: "unit tests(安全既定) + 既存 register/yahoo の安全状態ロジック整合"
+  - id: AC-003
+    description: "1件の失敗が他を中断しない(fail-continue)。失敗は結果配列に理由付きで記録"
+    verification: "unit tests(1件throwでも残りが処理され summary.failed に計上)"
+  - id: AC-004
+    description: "楽天→Yahooカテゴリ対応が無い(null)場合、誤カテゴリで登録せず requires_manual として記録しスキップ"
+    verification: "unit tests(category=null → skip+理由) + evaluator 確認"
+  - id: AC-005
+    description: "dry-run(既定)は DB/モールへ書き込まない(取込upsert・登録commit を行わない)"
+    verification: "ルート設計の dry-run 分岐 + unit/evaluator 確認"
+  - id: AC-006
+    description: "既存の単品ルート(import/register/fetch/update/upload)と既存テスト(vitest)を壊さない(後方互換)"
+    verification: "webui_unit が緑のまま + evaluator が既存ルート不変を確認"
+  - id: AC-007
+    description: "取込は ne_code で重複排除し既存アプリ商品を二重作成しない(existed を尊重)"
+    verification: "unit/evaluator が import 再利用と existed 経路を確認"
+  - id: AC-008
+    description: "多SKU(variants)/Yahoo高度設定(Variation/options)を検出した商品は安全スキップし requires_manual 記録"
+    verification: "unit tests(detect→skip) + evaluator 確認"
+  - id: AC-009
+    description: "純粋ロジック(リスト/CSVパース,per-item plan,集計,安全既定,カテゴリ/SKU判定)に vitest 単体テストがあり npm run test で緑"
+    verification: "webui_unit に新テストが含まれ全緑"
+
+forbidden:
+  - "合格のためにテストを削除・スキップ・緩和しない(実装を直す)"
+  - "受け入れ条件/criteria/eval-schema を緩めない"
+  - "本番秘密情報(.env/secrets/認証トークン)を読む・書く・出力しない"
+  - "依存(package.json)・評価設定(tsconfig/eslint/vitest)・eval-loopハーネス(.claude/.loop/scripts)を変更しない"
+  - "カテゴリ未対応のまま誤カテゴリで登録しない / 多SKU・高度設定を黙って誤登録しない"
+  - "ライブ全移行の実行・Yahoo本番公開(このセッションのスコープ外)"
+
+two_consecutive_verification:
+  - "毎回 新しい run_id / 新しい検証レポートを validation/runs に保存する"
+  - "対象実装をそのまま検証し、手動修正・キャッシュ成功を数えない"
+  - "task_hash/acceptance_hash/criteria_hash/schema_hash/validator_hash/implementation_hash が2回とも同一"
+  - "hard gate 成功 かつ evaluator score >= threshold が2回連続"

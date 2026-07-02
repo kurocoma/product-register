@@ -1,0 +1,14 @@
+{
+  "agent_id": "adab65fcf2497f6f1",
+  "agent_type": "eval-loop-generator (real custom agent, Agent tool fork)",
+  "role": "generator",
+  "loop": "loop-004-yahoo-name-fix",
+  "iteration": 0,
+  "input_files": [".loop/current/task.md", ".loop/current/turns/turn-000-plan.md"],
+  "forbidden_files": ["turn-*-eval.json / score / consecutive / feedback", "acceptance/criteria/eval-schema (変更禁止)"],
+  "context_strategy": "fork (fresh context, no parent/score history)",
+  "previous_thread_reused": false,
+  "within_turn_resumes": 0,
+  "notes": "1 ターンで完了（再開なし）。char+width 二重上限で既存 item-mapper-fit.test('あ'×100→75) を壊さず実データ name を解消。新規テスト2本は Bash 作成。report は司令塔が要約保存。",
+  "sandbox_or_permission_mode": "acceptEdits. global pretool_global_guard.py active"
+}

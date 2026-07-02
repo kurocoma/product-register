@@ -1,0 +1,77 @@
+task:
+  type: bugfix
+  title: "Yahoo 商品名(name) の HTML除去＋安全マージン切詰（実データの<br>＋キーワード対応）"
+  target_paths:
+    - "webui/lib/yahoo/item-mapper.ts"
+    - "webui/lib/product/text-fit.ts"
+    - "webui/lib/migrate/"
+  non_target_paths:
+    - ".env"
+    - ".env.local"
+    - "webui/.env"
+    - "webui/.env.local"
+    - ".claude/"
+    - ".loop/"
+    - "scripts/"
+    - "webui/package.json"
+    - "webui/package-lock.json"
+    - "webui/pnpm-lock.yaml"
+    - "webui/tsconfig.json"
+    - "webui/eslint.config.mjs"
+    - "webui/vitest.config.ts"
+    - "webui/lib/converters/yahoo.ts"
+
+hard_gates:
+  required:
+    - id: webui_lint
+      command: "npm run lint"
+      cwd: "webui"
+      pass_if: "exit_code == 0"
+    - id: webui_typecheck
+      command: "npx tsc --noEmit"
+      cwd: "webui"
+      pass_if: "exit_code == 0"
+    - id: webui_unit
+      command: "npm run test"
+      cwd: "webui"
+      pass_if: "exit_code == 0"
+    - id: webui_build
+      command: "npm run build"
+      cwd: "webui"
+      pass_if: "exit_code == 0"
+  optional:
+    - id: python_tests
+      command: "python -m pytest -q"
+      cwd: "."
+      pass_if: "exit_code == 0"
+
+behavioral_acceptance:
+  - id: AC-N01
+    description: "Yahoo name から HTML を除去する：`<br>`/`<br/>`/`<br />` は空白に変換（キーワード区切り保持）、その他タグ(<b> 等)は除去。整形後 name に '<' '>' を含まない。キーワード本文は保持。"
+    verification: "unit(<br>→空白 / 他タグ除去 / 整形後 name に HTML 文字を含まない)"
+  - id: AC-N02
+    description: "name を Yahoo 実カウントで確実に全角75以内へ整形する。安全な実装: 文字数(コードポイント)<=75 かつ fullWidthLen<=75 の両方を満たすよう切詰（各文字は最大1全角なので 文字数<=75 → Yahoo 全角換算<=75 を保証＝カウント差を構造的に吸収）。本来の商品名(先頭の <br> 前)が欠落しない。既存テスト(item-mapper-fit.test の 'あ'×100→fullWidthLen 75)は不変に保つ（全角のみは文字数=幅なので 75 のまま）。"
+    verification: "unit(実データ風 name → 整形後 [...name].length<=75 かつ fullWidthLen<=75 / 先頭の商品名が残る) + 既存 name テストが緑のまま"
+  - id: AC-N03
+    description: "実データ形（『本来の商品名 <br> キーワード×多数・全角半角記号数字混在』）で it-01017 を解消：整形後 name が実効上限以内で HTML 無し。合成 'あ'×N だけに依存しない実データ風テストを持つ。"
+    verification: "unit(楽天風キーワード詰め込み name の整形) + evaluator が実データ形カバレッジを確認"
+  - id: AC-N04
+    description: "後方互換：既存テスト(226)・単品 register/yahoo・一括移行・loop-003 の path/explanation/その他フィールド整形を壊さない。YahooConverter 不変。短い name(HTML無) は除去後そのまま。"
+    verification: "webui_unit が緑(既存226+新規) + evaluator が既存挙動不変を確認"
+  - id: AC-N05
+    description: "新規/変更ロジックに意味のある vitest テストがあり npm run test で全緑（既存テストの削除/スキップ/緩和なし）。"
+    verification: "webui_unit に新テストが含まれ全緑"
+
+forbidden:
+  - "合格のためにテストを削除・スキップ・緩和しない(実装を直す)"
+  - "受け入れ条件/criteria/eval-schema を緩めない"
+  - "本番秘密情報(.env/secrets/認証トークン)を読む・書く・出力しない"
+  - "依存(package.json)・評価設定(tsconfig/eslint/vitest)・eval-loopハーネス(.claude/.loop/scripts)・YahooConverter(lib/converters/yahoo.ts) を変更しない"
+  - "本来の商品名を欠落させる雑な切詰をしない（商品名先頭は保持）"
+  - "ライブ全移行の実行・Yahoo本番公開(このセッションはコード修正まで)"
+
+two_consecutive_verification:
+  - "毎回 新しい run_id / 新しい検証レポートを validation/runs に保存する"
+  - "対象実装をそのまま検証し、手動修正・キャッシュ成功を数えない"
+  - "task_hash/acceptance_hash/criteria_hash/schema_hash/validator_hash/implementation_hash が2回とも同一"
+  - "hard gate 成功 かつ evaluator score >= threshold が2回連続"

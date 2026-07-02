@@ -1,0 +1,74 @@
+{
+  "score": 91,
+  "quality": {
+    "overall": 91,
+    "breakdown": {
+      "correctness": 92,
+      "regression_safety": 93,
+      "test_quality": 92,
+      "maintainability": 90,
+      "integration_fit": 88,
+      "risk_control": 90
+    }
+  },
+  "hard_gate_findings": [
+    {
+      "id": "webui_lint",
+      "passed": true,
+      "detail": "$ npm run lint -> exit 0 (8 pre-existing warnings, 0 errors; no error in changed files)"
+    },
+    {
+      "id": "webui_typecheck",
+      "passed": true,
+      "detail": "$ npx tsc --noEmit -> exit 0"
+    },
+    {
+      "id": "webui_unit",
+      "passed": true,
+      "detail": "$ npm run test -> 36 files, 261 tests passed (0 fail)"
+    },
+    {
+      "id": "webui_build",
+      "passed": true,
+      "detail": "$ npm run build -> exit 0 (migrate/register routes compiled)"
+    }
+  ],
+  "evidence": [
+    "AC-A1: executor.ts:195-209 runs deps.syncImage before editYahoo at :254; executor-image.test.ts:88 asserts order ['upsert','syncImage','editYahoo','recordHistory'] and :90 syncImage index < editYahoo index. dry-run path executor.ts:181-183 still returns before any write.",
+    "AC-A2: executor.ts:220-240 rebuilds item_image_urls from uploadedIndices only; :221-232 returns status=failed/step=image when expectedImages>=1 and uploaded empty (it-14091 re-occur guard); :271-273 surfaces editItem warnings as 'editItem警告:'. Verified by executor-image.test.ts:112-113 (buildImageUrls called with [1,3] -> 'B/NE-9/1,3'), :142-144 (all-fail -> failed, editYahoo not called), :162-163 (warnings surfaced).",
+    "AC-A3: route.ts:155-157 syncImage uploads via uploadLibImage(token,cfg.sellerId,...) and buildImageUrls uses buildYahooItemImageUrls(neCode,indices,cfg.sellerId); image-url.ts:47-48 yahooLibBase(sellerId)=lib/{sellerId}. Upload target and item_image_urls reference now share cfg.sellerId -> seller-mismatch root of it-14091 resolved. image-url-seller.test.ts:13-14 confirms dynamic base.",
+    "AC-A4: executor.ts:254-259 retries once after deps.sleep on isImagePropagationError (:302-306 matches it-14091/im-02005); EDIT_RETRY_DELAY_MS=1500, default real setTimeout, sleep injectable. executor-image.test.ts:180-182 asserts editYahoo called 2x + sleep 1x; :199-201 unrelated error (it-01023) not retried.",
+    "AC-A5 (anti-reward-hacking): $ git diff webui/lib/migrate/executor.test.ts shows ONLY a single swap of lines 'editYahoo' and 'syncImage' inside the effects array (lines 135-136) -> correct order syncImage->editYahoo. No assertion deleted/skipped/loosened. Legit order correction, not a weakening.",
+    "AC-B1/B2/B3: item-mapper.ts:193-216 validateEditItemParams gates price (Number.isInteger 1..99,999,999), item_code (/^[A-Za-z0-9-]+$/ & <=99), product_category (/^[0-9]{1,10}$/). item-mapper-validate.test.ts proves boundaries: price 0/100000000/abc/1.5/-5 -> ok:false, 1 & 99999999 -> ok; item_code NE_1/'a b'/コード/100chars -> false, ABC-123 & 99chars -> ok; product_category abc/11-digit/12.3/1a -> false, 1 & 10-digit -> ok. shape {ok}|{ok:false,missing[]} preserved.",
+    "AC-B4: executor.ts:155-157 calls deps.validateYahoo in preview (step 6), feeds missing into buildItemPlan -> requires_manual before any write; chain proven by executor.test.ts:237-247 (validateYahoo missing -> requires_manual/failed, editYahoo not called).",
+    "AC-C: yahoo.ts unchanged ($ git status lib/converters/yahoo.ts -> empty). 261 existing+new tests green. Backward compat preserved: syncImage without 'uploaded' -> uploadedIndices undefined -> override skipped (executor.ts:220), buildImageUrls/sleep optional, image-url default base okimarumarket retained as fallback (image-url.ts:48). register/yahoo route reuses buildYahooEditItemParams+validateEditItemParams unchanged.",
+    "criteria correctness axis (char-limit fitting) also satisfied: item-mapper.ts:27-124 YAHOO_FIELD_LIMITS table + fitYahooFieldLimits/validateYahooFieldLimits, exercised by new untracked text-fit/item-mapper-fit/item-mapper-name tests included in the 261-green run."
+  ],
+  "feedback": "Implementation meets AC-A1..A5, AC-B1..B4 and AC-C with all four hard gates green and an honest A5 reorder. To raise integration/maintainability next iteration: (1) Thread cfg.sellerId into the single-register/preview path (register/yahoo route + yahoo.ts:75 buildYahooItemImageUrls and yahoo.ts:48 caption buildYahooImgListHtml currently fall back to the okimarumarket hardcode); today this is only safe because the production seller equals okimarumarket, so a non-default seller would emit broken caption <img> and item_image_urls in single register. Centralize the lib base so seller change touches one place (also lib-path.ts:18 publicUrl uses the static YAHOO_IMAGE_BASE). (2) Add one executor-level dry-run test that injects price=0 (or item_code with '_') end-to-end and asserts status=requires_manual with no upsert/editYahoo call, to cover AC-B4 directly rather than only via the generic 'validateYahoo missing' test. (3) Document that adding the B1-B3 value gates to the shared validateEditItemParams now also rejects such values in the existing single register/yahoo POST (400) — intended fail-fast hardening, but call it out so it is not mistaken for a regression.",
+  "passed": true,
+  "evaluator_skill": "eval-loop-evaluator",
+  "evaluated_artifacts": [
+    "webui/lib/migrate/executor.ts",
+    "webui/lib/migrate/executor.test.ts",
+    "webui/lib/migrate/executor-image.test.ts",
+    "webui/app/api/migrate/rakuten-to-yahoo/route.ts",
+    "webui/lib/converters/image-url.ts",
+    "webui/lib/converters/image-url-seller.test.ts",
+    "webui/lib/yahoo/item-mapper.ts",
+    "webui/lib/yahoo/item-mapper-validate.test.ts",
+    "webui/lib/converters/yahoo.ts",
+    "webui/app/api/register/yahoo/[id]/route.ts"
+  ],
+  "risks": [
+    "Caption imgList HTML (image-url.ts:36-43 buildYahooImgListHtml) and single-register item_image_urls (yahoo.ts:75) still use the okimarumarket hardcode; correct only because production seller == okimarumarket. A different sellerId would yield broken description <img> and non-dynamic item_image_urls outside the migrate path.",
+    "B1-B3 value gates now also apply to the existing single register/yahoo POST via the shared validateEditItemParams, so previously-attempted items with price=0 / item_code containing '_' / non-numeric category now 400 there too (intended hardening, but a behavioral change beyond the migrate flow).",
+    "AC-B4 (value-range -> requires_manual in dry-run) is covered indirectly through the generic 'validateYahoo returns missing' executor test rather than a direct price=0 end-to-end case.",
+    "Live it-14091 final confirmation is out-of-loop (e2e_migrate --commit); offline gates cannot prove Yahoo-side propagation timing, only the ordering/uploaded-driven logic and retry."
+  ],
+  "recommended_next_changes": [
+    "Pass cfg.sellerId through register/yahoo route and yahoo.ts (buildYahooItemImageUrls / buildYahooImgListHtml) so the lib base is dynamic everywhere, then remove reliance on the okimarumarket fallback; consolidate the base into one helper (also update lib-path.ts publicUrl).",
+    "Add an executor dry-run unit test injecting price=0 (and item_code '_') asserting status=requires_manual and no upsert/editYahoo call to cover AC-B4 directly.",
+    "Note in code/docs that validateEditItemParams value gates affect single register/yahoo, and consider whether single register should warn vs hard-400 to avoid blocking edge items.",
+    "Optionally surface img upload partial-failure indices (which image numbers succeeded) in MigrationItemResult for operator triage of remaining it-14091 cases."
+  ]
+}

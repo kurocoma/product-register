@@ -1,0 +1,6 @@
+[2026-06-29T01:19:19] refs/eval-loop/migrate-rakuten-yahoo/iter-000 -> a90029fa099f ok
+[2026-06-29T01:20:34] iter-000: add/write-tree failed: fatal: C:\Users\hppym\AppData\Local\Temp\evalloop_idx_i_t9kkb5: index file smaller than expected fatal: C:\Users\hppym\AppData\Local\Temp\evalloop_idx_i_t9kkb5: index file smaller than expected
+[2026-06-29T01:20:59] refs/eval-loop/migrate-rakuten-yahoo/iter-000 -> 653d24d3a400 (full-tree) ok
+[2026-06-29T07:15:03] refs/eval-loop/default/iter-001 -> 22861c1edc35 (full-tree) ok
+[2026-06-29T08:08:50] refs/eval-loop/default/iter-002 -> 2c0876502c5a (full-tree) ok
+[2026-06-29T08:15:45] refs/eval-loop/default/iter-003 -> 42052cceb989 (full-tree) ok

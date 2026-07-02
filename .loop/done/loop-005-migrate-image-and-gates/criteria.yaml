@@ -1,0 +1,29 @@
+quality_axes:
+  correctness:
+    weight: 30
+    description: "Yahoo editItem のフィールド文字数制限への適合整形が正しいか（name 全角75/path カテゴリ名全角20・コロン区切り8階層/explanation 全角500 HTML不可/headline 全角30 等）。全角=1・半角=0.5 のカウントが正確で、整形後の値が制限内に収まるか"
+  regression_safety:
+    weight: 20
+    description: "既存の単品 register/yahoo・一括移行・既存テスト(201)・後方互換を壊していないか。制限内の短いフィールドは無変更（不要な切詰をしない）か"
+  test_quality:
+    weight: 15
+    description: "意味のある単体テストが追加/維持されているか（全角カウント境界・各フィールドの切詰・HTML除去・path セグメント整形・短い値は不変）。テストの緩和が無いか"
+  maintainability:
+    weight: 15
+    description: "文字数制限の表（フィールド→上限）が一元化され読みやすいか。整形ロジックが局所的で将来のフィールド追加に強いか"
+  integration_fit:
+    weight: 10
+    description: "既存設計（YahooConverter / buildYahooEditItemParams / validateEditItemParams / migrate executor）に整合し、共有マッパー経由で単品登録にも効くか"
+  risk_control:
+    weight: 10
+    description: "整形後も適合しない場合を dry-run/preview で事前検知（requires_manual で surface）し、commit で初めて editItem 拒否される事態を防ぐか。情報の不用意な欠落（過度な切詰）を避けるか"
+
+threshold: 90
+
+scoring_rules:
+  - "score と quality.overall は一致させる"
+  - "hard gate 失敗時は passed=false(記録器が再計算する)。evidence と矛盾させない"
+  - "前回比でなく絶対評価する"
+  - "plan への忠実さでなく task と criteria への適合を評価する"
+  - "作る係の report でなく、実物とコマンド結果を証拠にする"
+  - "テストが通っていても設計・互換・保守・セキュリティ問題があれば減点する"
