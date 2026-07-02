@@ -83,6 +83,8 @@ export type MigrationItemResult = {
   error?: string;
   /** 文字数上限で切り詰められる項目（dry-run で検出。空/未設定=切詰なし）。 */
   truncations?: FieldTruncation[];
+  /** 手動リライト（リクエスト override または保存済み yahoo_rewrite）が適用された。 */
+  rewriteApplied?: boolean;
 };
 
 /** 移行全体の集計サマリ。total = 各カテゴリの合計。 */

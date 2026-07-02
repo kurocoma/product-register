@@ -46,7 +46,13 @@ export type ExecutorDeps = {
    *  注入時は dry-run/commit の結果に truncations を載せ、UI が警告モーダルで surface する。 */
   detectTruncations?: (product: ProductInput) => FieldTruncation[];
   /** 既存アプリ商品の照合（管理番号→ne_code）。あれば二重作成しない（AC-007）。 */
-  findExisting: (manageNumber: string, neCode: string) => Promise<{ id: string } | null>;
+  findExisting: (
+    manageNumber: string,
+    neCode: string,
+  ) => Promise<{ id: string; rewrites?: MigrateRewrites } | null>;
+  /** リライトの恒久化（既存商品用）。commit で新たなリクエスト override が来たとき、
+   *  マージ後のリライトを保存する（既存商品は upsert を通らないため専用の保存口が要る）。 */
+  saveRewrites?: (productId: string, rewrites: MigrateRewrites) => Promise<void>;
   /** 新規作成（upsertProduct 相当）。dry-run では呼ばない。 */
   upsert: (product: ProductInput) => Promise<{ id: string }>;
   /** Yahoo editItem パラメータ生成（buildYahooEditItemParams 相当・純粋）。 */
@@ -98,8 +104,11 @@ export type ExecutorOptions = {
   stockQuantity?: number;
   /** 手動リライトの上書き。manageNumber → { name?/headline?/explanation? }。
    *  文字数オーバー項目をユーザーがモーダルで書き換えた値を、登録前に商品へ反映する。 */
-  overrides?: Record<string, { name?: string; headline?: string; explanation?: string }>;
+  overrides?: Record<string, MigrateRewrites>;
 };
+
+/** Yahoo 向け手動リライト（商品名/キャッチコピー/商品情報）。 */
+export type MigrateRewrites = { name?: string; headline?: string; explanation?: string };
 
 /** per-item 実行関数を生成するファクトリ。
  *  返した関数を runItems に渡すと、失敗継続・順序保持で一括実行できる。 */
@@ -146,15 +155,6 @@ export function makePerItemExecutor(
     const product = built.product;
     const neCode = built.neCode;
 
-    // 3b) 手動リライトの上書き（文字数オーバー項目をユーザーが書き換えた値で差し替え）。
-    //     name→display_name、headline→catch_copy_yahoo、explanation→free1（YahooConverter の各出力元）。
-    const ov = overrides[manageNumber];
-    if (ov) {
-      if (typeof ov.name === "string" && ov.name.trim() !== "") product.display_name = ov.name;
-      if (typeof ov.headline === "string") product.catch_copy_yahoo = ov.headline;
-      if (typeof ov.explanation === "string") product.free1 = ov.explanation;
-    }
-
     // Yahoo グルーピング(バリエーション)等の高度設定は自動移行で誤反映しうる → 手動(AC-008)
     const hasAdvancedYahooSettings = product.yahoo_grouping_enabled === true;
 
@@ -184,6 +184,28 @@ export function makePerItemExecutor(
     // 5) 既存照合（読み取り。dry-run でも安全）。既存があれば作成せず尊重(AC-007)。
     const existing = await deps.findExisting(resolvedCode, neCode);
     const existed = existing != null;
+
+    // 5c) 手動リライトの適用。保存済み(yahoo_rewrite) → リクエスト override の順でマージし
+    //     （リクエスト最優先）、name→display_name / headline→catch_copy_yahoo / explanation→free1
+    //     （YahooConverter の各出力元）へ差し替える。毎回楽天から再取込しても、保存済み
+    //     リライトがあれば元名へ戻らない（リロードで override state が消えても安全）。
+    //     マージ結果は product.yahoo_rewrite に持たせ、新規 upsert で恒久化する。
+    const ov = overrides[manageNumber];
+    const rewrites: MigrateRewrites = { ...(existing?.rewrites ?? {}), ...(ov ?? {}) };
+    let rewriteApplied = false;
+    if (typeof rewrites.name === "string" && rewrites.name.trim() !== "") {
+      product.display_name = rewrites.name;
+      rewriteApplied = true;
+    }
+    if (typeof rewrites.headline === "string") {
+      product.catch_copy_yahoo = rewrites.headline;
+      rewriteApplied = true;
+    }
+    if (typeof rewrites.explanation === "string") {
+      product.free1 = rewrites.explanation;
+      rewriteApplied = true;
+    }
+    product.yahoo_rewrite = rewrites;
 
     // 5b) 表示状態の決定（per-item。existed 確定後に算出）。
     // - 既存(forUpdate) かつ preserveExistingDisplay(既定): forceDisplay 不送 → Yahoo 側の
@@ -244,6 +266,7 @@ export function makePerItemExecutor(
         ok: true,
         status: "migrate",
         ...truncationField,
+        ...(rewriteApplied ? { rewriteApplied: true } : {}),
       };
     }
 
@@ -255,6 +278,12 @@ export function makePerItemExecutor(
     } else {
       const saved = await deps.upsert(product);
       productId = saved.id;
+    }
+
+    // 9a-2) リライトの恒久化: 既存商品は upsert を通らないため、リクエストで新たな
+    //       リライトが来たときだけマージ結果を保存する（保存済みのみの適用時は書き込み不要）。
+    if (existed && ov && deps.saveRewrites) {
+      await deps.saveRewrites(productId, rewrites);
     }
 
     // 9b) 画像同期を editItem の前に実行（A1 順序是正＝it-14091 本解消）。
@@ -385,6 +414,7 @@ export function makePerItemExecutor(
       status: "ok",
       error: notes.length ? "登録成功（" + notes.join(" / ") + "）" : undefined,
       ...truncationField,
+      ...(rewriteApplied ? { rewriteApplied: true } : {}),
     };
   };
 }

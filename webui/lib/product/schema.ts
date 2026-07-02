@@ -90,6 +90,16 @@ export const ProductInputBaseSchema = z.object({
   unit: z.string().default(""),
   yahoo_grouping_enabled: z.boolean().default(false),
   yahoo_variation_title: z.string().default(""),
+  // Yahoo 向け手動リライトの恒久化（migrate の文字数オーバー書き換え）。
+  // extra JSONB に往復し、migrate 再実行時に自動適用する（リクエストの override が最優先）。
+  // name→display_name / headline→catch_copy_yahoo / explanation→free1 に適用する。
+  yahoo_rewrite: z
+    .object({
+      name: z.string().optional(),
+      headline: z.string().optional(),
+      explanation: z.string().optional(),
+    })
+    .default({}),
 
   // バリエーション
   option_item_name: z.string().default(""),

@@ -22,7 +22,7 @@ import { uploadLibImage } from "@/lib/yahoo/lib-image-client";
 import type { ProductInput } from "@/lib/product/schema";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { parseManageNumbers, runItems, aggregate } from "@/lib/migrate";
-import { makePerItemExecutor, type ExecutorDeps } from "@/lib/migrate/executor";
+import { makePerItemExecutor, type ExecutorDeps, type MigrateRewrites } from "@/lib/migrate/executor";
 
 // 楽天 items.get / 画像 fetch(sharp 整形) のため Node ランタイム必須
 export const runtime = "nodejs";
@@ -169,6 +169,7 @@ export async function POST(req: Request) {
     },
     findExisting: (manageNumber, neCode) =>
       findExistingProduct(supabase, user.id, manageNumber, neCode),
+    saveRewrites: (productId, rewrites) => saveProductRewrites(supabase, productId, rewrites),
     upsert: async (product) => {
       const r = await upsertProduct(supabase, product);
       return { id: r.id };
@@ -235,23 +236,47 @@ async function findExistingProduct(
   userId: string,
   manageNumber: string,
   neCode: string,
-): Promise<{ id: string } | null> {
+): Promise<{ id: string; rewrites?: MigrateRewrites } | null> {
   if (manageNumber) {
     const { data } = await supabase
       .from("products")
-      .select("id")
+      .select("id, extra")
       .eq("user_id", userId)
       .eq("extra->>rakuten_manage_number", manageNumber)
       .limit(1);
-    if (data && data.length) return data[0] as { id: string };
+    if (data && data.length) return toExisting(data[0]);
   }
   const { data } = await supabase
     .from("products")
-    .select("id")
+    .select("id, extra")
     .eq("user_id", userId)
     .eq("ne_code", neCode)
     .limit(1);
-  return data && data.length ? (data[0] as { id: string }) : null;
+  return data && data.length ? toExisting(data[0]) : null;
+}
+
+/** DB 行 → findExisting の戻り値。extra.yahoo_rewrite（保存済み手動リライト）を同乗させる。 */
+function toExisting(row: { id: string; extra?: Record<string, unknown> | null }): {
+  id: string;
+  rewrites?: MigrateRewrites;
+} {
+  const rw = row.extra?.yahoo_rewrite;
+  return {
+    id: row.id,
+    rewrites: rw && typeof rw === "object" ? (rw as MigrateRewrites) : undefined,
+  };
+}
+
+/** 既存商品の extra.yahoo_rewrite を更新する（executor の saveRewrites 用）。
+ *  既存商品は upsert を通らないため、リライトの恒久化はこの専用口で行う。 */
+async function saveProductRewrites(
+  supabase: SupabaseClient,
+  productId: string,
+  rewrites: MigrateRewrites,
+): Promise<void> {
+  const { data } = await supabase.from("products").select("extra").eq("id", productId).single();
+  const extra = { ...((data?.extra as Record<string, unknown>) ?? {}), yahoo_rewrite: rewrites };
+  await supabase.from("products").update({ extra }).eq("id", productId);
 }
 
 const MAX_IMAGE_BYTES = 30 * 1024 * 1024;
