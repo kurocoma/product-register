@@ -8,6 +8,7 @@ const items = [
   { href: "/", label: "ダッシュボード", icon: "🏠" },
   { href: "/products", label: "商品一覧", icon: "📦" },
   { href: "/products/new", label: "商品編集", icon: "✏️" },
+  { href: "/bulk-register", label: "一括登録", icon: "🗂" },
   { href: "/csv", label: "CSV ダウンロード", icon: "📥" },
   { href: "/templates", label: "テンプレート管理", icon: "📋" },
   { href: "/masters", label: "マスタ取込", icon: "🗄" },
