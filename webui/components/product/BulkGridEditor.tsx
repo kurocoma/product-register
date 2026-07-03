@@ -5,10 +5,13 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { upsertProduct } from "@/lib/product/repository";
 import {
-  GRID_COLUMNS,
+  ALL_GRID_COLUMNS,
+  TEMPLATE_FILENAME,
   type GridColumnKey,
   type GridRow,
   applyFieldChange,
+  buildTemplateCsv,
+  columnGroups,
   emptyGridRow,
   expandSetRows,
   gridRowToProductInput,
@@ -33,12 +36,24 @@ const newRow = (data?: GridRow): RowState => ({ uid: uidSeq++, data: data ?? emp
 
 const cellId = (rowIndex: number, key: string) => `bulkgrid-${rowIndex}-${key}`;
 
+/** 列グループ見出しの背景色（グループの切れ目が分かる程度の淡い色分け） */
+const GROUP_COLORS: Record<string, string> = {
+  基本情報: "bg-slate-200 text-slate-700",
+  価格: "bg-amber-100 text-amber-800",
+  配送: "bg-sky-100 text-sky-800",
+  カテゴリ: "bg-emerald-100 text-emerald-800",
+  商品説明: "bg-violet-100 text-violet-800",
+  Yahoo: "bg-rose-100 text-rose-800",
+};
+
 export function BulkGridEditor() {
   const [rows, setRows] = useState<RowState[]>(() => [newRow(), newRow(), newRow()]);
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState("");
   const [saving, setSaving] = useState(false);
   const [summary, setSummary] = useState("");
+  /** 長文セル（説明文HTML等）の拡大エディタで開いているセル。行は uid で追跡（行削除でズレない）。 */
+  const [expandedCell, setExpandedCell] = useState<{ uid: number; key: GridColumnKey } | null>(null);
   const pendingFocusRef = useRef<{ rowIndex: number; key: string } | null>(null);
 
   // 行追加直後の Enter 移動先へフォーカス（新しい行の描画完了後に実行）
@@ -51,6 +66,29 @@ export function BulkGridEditor() {
 
   const validation = useMemo(() => validateGridRows(rows.map((r) => r.data)), [rows]);
   const filledCount = useMemo(() => rows.filter((r) => !isRowBlank(r.data)).length, [rows]);
+  const groups = useMemo(() => columnGroups(), []);
+
+  /** 拡大エディタの対象行（削除済みなら null → パネルは自動で閉じる） */
+  const expandedTarget = useMemo(() => {
+    if (!expandedCell) return null;
+    const rowIndex = rows.findIndex((r) => r.uid === expandedCell.uid);
+    if (rowIndex < 0) return null;
+    const col = ALL_GRID_COLUMNS.find((c) => c.key === expandedCell.key);
+    if (!col) return null;
+    return { rowIndex, col, value: rows[rowIndex].data[expandedCell.key] };
+  }, [expandedCell, rows]);
+
+  /** テンプレートCSVのダウンロード（UTF-8 BOM付き = Excel でそのまま開ける）。
+   * 見出しはグリッド列と同一（列定義 ALL_GRID_COLUMNS が単一源泉）。2行目は入力例。 */
+  const downloadTemplate = () => {
+    const blob = new Blob([buildTemplateCsv()], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = TEMPLATE_FILENAME;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
 
   const editCell = (rowIndex: number, key: GridColumnKey, value: string) => {
     setRows((prev) =>
@@ -87,7 +125,7 @@ export function BulkGridEditor() {
   const importTsv = (text: string) => {
     const imported = parseTsv(text);
     if (imported.length === 0) {
-      setSummary("貼り付け内容から行を読み取れませんでした。Excel の行（B列〜S列）をコピーして貼り付けてください。");
+      setSummary("貼り付け内容から行を読み取れませんでした。Excel（テンプレート or データ入力シート）の行をコピーして貼り付けてください。");
       return;
     }
     setRows((prev) => {
@@ -157,7 +195,8 @@ export function BulkGridEditor() {
       <div>
         <h1 className="text-2xl font-bold">一括登録（まとめて入力）</h1>
         <p className="mt-1 text-sm text-slate-600">
-          Excel のデータ入力シートと同じ列構成で、複数商品をまとめて登録できます。
+          Excel のデータ入力シートと同じ列構成（基本18列）に、商品説明文・Yahooカテゴリ等の拡張列を加えた
+          {ALL_GRID_COLUMNS.length}列で、複数商品をまとめて登録できます。
           保存した商品は<Link href="/products" className="text-blue-600 hover:underline">商品一覧</Link>に表示され、
           モール（楽天 / Yahoo）への一括登録・一括反映は商品一覧で対象商品を選択して実行します。
         </p>
@@ -165,11 +204,16 @@ export function BulkGridEditor() {
           <li>NEコードはメーカーコード・JAN・数量から自動生成されます（手修正も可能）。掲載商品名は商品名から自動補完されます。</li>
           <li>単品行の「セット行」ボタンで、数量違いのセット商品行を自動展開できます（販売価格だけ入力すれば OK）。</li>
           <li>Enter キーで下の行へ移動します（Excel と同じ操作感。最終行では行が自動追加されます）。</li>
+          <li>「テンプレートDL」で列見出し＋入力例入りの CSV を取得し、Excel で記入 → コピーして「貼り付け取込」できます。</li>
+          <li>商品説明文などの長文列は、セルの「✎」を押すと下の拡大エディタで編集できます。</li>
         </ul>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
         <Button variant="outline" onClick={addRow}>+ 行を追加</Button>
+        <Button variant="outline" onClick={downloadTemplate} title="グリッドと同じ列見出し＋入力例1行の CSV（Excel でそのまま開けます）">
+          📄 テンプレートDL（CSV）
+        </Button>
         <Button variant="outline" onClick={() => setPasteOpen((v) => !v)}>
           📋 Excel から貼り付け取込
         </Button>
@@ -182,7 +226,8 @@ export function BulkGridEditor() {
       {pasteOpen && (
         <div className="rounded border border-slate-200 bg-white p-3 space-y-2">
           <p className="text-sm text-slate-600">
-            Excel のデータ入力シートで行（NEコード〜キャッチコピー(Yahoo) の列）を選択してコピーし、下の枠に貼り付けてください。
+            Excel（ダウンロードしたテンプレート、または従来のデータ入力シート）で行を選択してコピーし、下の枠に貼り付けてください。
+            列の並びはこのグリッドと同じです（従来どおり基本18列だけの貼り付けも可）。
             見出し行や左端の空列が含まれていても自動で読み飛ばします。NEコード・掲載商品名が空欄なら自動補完します。
           </p>
           <textarea
@@ -207,22 +252,39 @@ export function BulkGridEditor() {
         </div>
       )}
 
-      <div className="bg-white rounded border border-slate-200 overflow-x-auto">
+      <div className="bg-white rounded border border-slate-200 overflow-auto max-h-[70vh]">
         <table className="text-xs border-collapse">
-          <thead className="bg-slate-100">
+          <thead>
+            {/* 1段目: 列グループ見出し（基本情報/価格/配送/カテゴリ/商品説明/Yahoo）。縦スクロールしても固定。 */}
             <tr>
-              <th className="px-2 py-2 text-left text-slate-500 sticky left-0 bg-slate-100 z-10">#</th>
-              {GRID_COLUMNS.map((col) => (
-                <th key={col.key} className="px-1 py-2 text-left whitespace-nowrap" title={col.autoHint ?? ""}>
+              <th rowSpan={2} className="px-2 py-2 text-left text-slate-500 sticky left-0 top-0 bg-slate-100 z-30">#</th>
+              {groups.map((g) => (
+                <th
+                  key={g.name}
+                  colSpan={g.span}
+                  className={
+                    "h-6 px-2 text-left text-[11px] font-semibold whitespace-nowrap sticky top-0 z-20 border-x border-white " +
+                    (GROUP_COLORS[g.name] ?? "bg-slate-200 text-slate-700")
+                  }
+                >
+                  {g.name}
+                </th>
+              ))}
+              <th rowSpan={2} className="px-2 py-2 text-left whitespace-nowrap sticky top-0 z-20 bg-slate-100">操作</th>
+              <th rowSpan={2} className="px-2 py-2 text-left whitespace-nowrap min-w-40 sticky top-0 z-20 bg-slate-100">状態</th>
+            </tr>
+            {/* 2段目: 列見出し（* = 必須、⚡ = 自動補完、✎ = 長文は拡大エディタで編集） */}
+            <tr>
+              {ALL_GRID_COLUMNS.map((col) => (
+                <th key={col.key} className="px-1 py-2 text-left whitespace-nowrap sticky top-6 z-20 bg-slate-100" title={col.autoHint ?? ""}>
                   <span className={col.width + " inline-block px-1"}>
                     {col.label}
                     {col.required && <span className="text-red-500 ml-0.5">*</span>}
                     {col.autoHint && <span className="text-blue-500 ml-0.5" title={col.autoHint}>⚡</span>}
+                    {col.long && <span className="text-violet-500 ml-0.5" title="長文列: セルをクリックすると下の拡大エディタで編集できます">✎</span>}
                   </span>
                 </th>
               ))}
-              <th className="px-2 py-2 text-left whitespace-nowrap">操作</th>
-              <th className="px-2 py-2 text-left whitespace-nowrap min-w-40">状態</th>
             </tr>
           </thead>
           <tbody>
@@ -232,16 +294,32 @@ export function BulkGridEditor() {
               return (
                 <tr key={r.uid} className="border-t border-slate-100 align-top">
                   <td className="px-2 py-1 text-slate-400 sticky left-0 bg-white z-10">{rowIndex + 1}</td>
-                  {GRID_COLUMNS.map((col) => {
+                  {ALL_GRID_COLUMNS.map((col) => {
                     const value = r.data[col.key];
                     const cellClass =
                       "w-full rounded border px-1 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 " +
                       (!blank && errors.length > 0 ? "border-red-200 " : "border-slate-200 ") +
                       (col.key === "ne_code" || col.key === "jan_code" ? "font-mono " : "");
+                    const isExpanded = expandedCell?.uid === r.uid && expandedCell?.key === col.key;
                     return (
                       <td key={col.key} className="px-1 py-1">
                         <div className={col.width}>
-                          {col.input === "select" ? (
+                          {col.long ? (
+                            <button
+                              type="button"
+                              id={cellId(rowIndex, col.key)}
+                              onClick={() => setExpandedCell(isExpanded ? null : { uid: r.uid, key: col.key })}
+                              title="クリックすると下の拡大エディタで編集できます（HTML可）"
+                              className={
+                                cellClass +
+                                "block truncate text-left bg-white hover:bg-violet-50 " +
+                                (isExpanded ? "ring-2 ring-violet-400 " : "") +
+                                (value.trim() === "" ? "text-slate-400" : "")
+                              }
+                            >
+                              {value.trim() === "" ? "✎ 入力…" : `✎ (${value.length}) ${value}`}
+                            </button>
+                          ) : col.input === "select" ? (
                             <select
                               id={cellId(rowIndex, col.key)}
                               value={value}
@@ -313,6 +391,29 @@ export function BulkGridEditor() {
           </tbody>
         </table>
       </div>
+
+      {/* 長文列（説明文HTML等）の拡大エディタ。セル内編集の苦痛を避け、行の ✎ セルをクリックで開く。 */}
+      {expandedTarget && expandedCell && (
+        <div className="rounded border border-violet-300 bg-white p-3 space-y-2">
+          <div className="flex items-center justify-between gap-2">
+            <div className="text-sm font-semibold text-slate-700">
+              ✎ {expandedTarget.rowIndex + 1} 行目「{expandedTarget.col.label}」
+              <span className="ml-2 font-normal text-xs text-slate-500">
+                HTML可 / 現在 {expandedTarget.value.length} 文字（入力はそのまま行に反映されます）
+              </span>
+            </div>
+            <Button variant="ghost" onClick={() => setExpandedCell(null)}>閉じる</Button>
+          </div>
+          <textarea
+            autoFocus
+            value={expandedTarget.value}
+            onChange={(e) => editCell(expandedTarget.rowIndex, expandedCell.key, e.target.value)}
+            rows={8}
+            placeholder="長文（商品説明文の HTML 等）をここで編集します"
+            className="w-full rounded border border-slate-300 px-3 py-2 text-sm font-mono"
+          />
+        </div>
+      )}
     </div>
   );
 }

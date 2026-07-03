@@ -1,12 +1,20 @@
 import Papa from "papaparse";
 import { ProductInputSchema, type ProductInput } from "./schema";
 
-/** 一括登録グリッド（Excel「データ入力シート」B〜S列相当の18列）の純関数層。
+/** 一括登録グリッド（Excel「データ入力シート」B〜S列相当の基本18列 + 拡張9列）の純関数層。
  *
- * 実テンプレート(バヤリース 商品登録用テンプレート「データ入力シート」3行目見出し)の列順:
+ * 基本18列(データ入力シート 3行目見出しの列順):
  * NEコード / JANコード / メーカーコード / 単品orセット商品 / 数量 / 商品名 / 掲載商品名 /
  * 消費税率 / 原価 / 販売価格 / 送料区分 / 作成した画像数 / 配送方法セット / 納期管理番号 /
  * モール基本カテゴリID / 店舗内カテゴリ1 / キャッチコピーPC / キャッチコピー(Yahoo)
+ *
+ * 拡張9列(商品編集画面 ProductForm/schema の棚卸しから採用。基本18列の後ろに追加):
+ * PC用販売説明文 / 商品説明PC / 商品説明スマホ / 検索キーワード / メーカー名 / ブランド名 /
+ * YahooカテゴリID / Yahooストアカテゴリパス / 単位
+ *
+ * 列定義は ALL_GRID_COLUMNS が単一源泉:
+ * グリッド見出し・貼り付け取込(parseTsv)の列解釈・テンプレートCSV(buildTemplateCsv)の
+ * 3者が同じ配列を参照するため、列を足すときはここに1行足すだけで全てが揃う。
  *
  * 省力化の設計（Excel 実データ a009-4916-1/6/24/48 のパターン分析より）:
  * - NEコード = `メーカーコード-JAN下4桁-数量` の規約 → 自動生成（手修正で上書き可）
@@ -36,6 +44,16 @@ export type GridRow = {
   store_category: string;
   catch_copy_pc: string;
   catch_copy_yahoo: string;
+  // --- 拡張列（商品編集画面の主要項目をグリッドでも入力可能に） ---
+  sale_description_pc: string; // PC用販売説明文（楽天・HTML可）
+  description_pc: string; // 商品説明PC（HTML可）
+  description_sp: string; // 商品説明スマホ（HTML可）
+  keyword: string;
+  maker_name: string;
+  brand_name: string;
+  yahoo_category_id: string;
+  yahoo_path: string;
+  unit: string; // 本/袋/個/枚 等
   /** 自動補完の管理フラグ。ユーザーが手入力したら false になり追従を止める。 */
   auto: { ne_code: boolean; display_name: boolean };
 };
@@ -45,64 +63,95 @@ export type GridColumnKey = Exclude<keyof GridRow, "auto">;
 export type GridColumn = {
   key: GridColumnKey;
   label: string;
+  /** 列グループ見出し（基本情報/価格/配送/カテゴリ/商品説明/Yahoo）。連続する同名列を束ねて表示する。 */
+  group: string;
   /** 必須入力（保存に必要）なら true。見出しに * を付ける。 */
   required?: boolean;
   /** セル入力の種類。select は options から選択。 */
   input: "text" | "number" | "select";
   options?: string[];
+  /** 長文列（説明文HTML等）。セル内では抜粋表示し、クリックで下部の拡大エディタで編集する。 */
+  long?: boolean;
   /** Tailwind 幅クラス（グリッドの列幅） */
   width: string;
   /** 自動補完される列の説明（ツールチップ表示用） */
   autoHint?: string;
+  /** 新規行の既定値（未指定は空文字）。emptyGridRow の単一源泉。 */
+  defaultValue?: string;
+  /** テンプレートCSVの入力例（2行目に載せる。全列そろえて「そのまま貼り付けて保存できる」1行にする） */
+  example?: string;
 };
 
-/** データ入力シートの列順そのまま（18列）。 */
+/** データ入力シートの列順そのまま（基本18列）。 */
 export const GRID_COLUMNS: GridColumn[] = [
-  { key: "ne_code", label: "NEコード", required: true, input: "text", width: "w-32", autoHint: "メーカーコード-JAN下4桁-数量 から自動生成（手修正可）" },
-  { key: "jan_code", label: "JANコード", required: true, input: "text", width: "w-36" },
-  { key: "maker_code", label: "メーカーコード", required: true, input: "text", width: "w-24" },
-  { key: "product_type", label: "単品orセット商品", required: true, input: "select", options: ["単品", "セット商品"], width: "w-28" },
-  { key: "quantity", label: "数量", required: true, input: "number", width: "w-16" },
-  { key: "product_name", label: "商品名", required: true, input: "text", width: "w-64" },
-  { key: "display_name", label: "掲載商品名", input: "text", width: "w-64", autoHint: "商品名から自動補完（手修正可）" },
-  { key: "tax_rate", label: "消費税率", required: true, input: "select", options: ["8", "10"], width: "w-16" },
-  { key: "cost_price", label: "原価", input: "number", width: "w-20" },
-  { key: "selling_price", label: "販売価格", required: true, input: "number", width: "w-24" },
-  { key: "shipping_type", label: "送料区分", input: "select", options: ["送料別", "送料無料"], width: "w-24" },
-  { key: "image_count", label: "作成した画像数", input: "number", width: "w-16" },
-  { key: "delivery_method", label: "配送方法セット", input: "number", width: "w-16" },
-  { key: "lead_time", label: "納期管理番号", input: "number", width: "w-16" },
-  { key: "mall_category_id", label: "モール基本カテゴリID", input: "text", width: "w-28" },
-  { key: "store_category", label: "店舗内カテゴリ1", input: "text", width: "w-40" },
-  { key: "catch_copy_pc", label: "キャッチコピーPC", input: "text", width: "w-56" },
-  { key: "catch_copy_yahoo", label: "キャッチコピー(Yahoo)", input: "text", width: "w-56" },
+  { key: "ne_code", label: "NEコード", group: "基本情報", required: true, input: "text", width: "w-32", autoHint: "メーカーコード-JAN下4桁-数量 から自動生成（手修正可）", example: "a009-4916-1" },
+  { key: "jan_code", label: "JANコード", group: "基本情報", required: true, input: "text", width: "w-36", example: "4514603474916" },
+  { key: "maker_code", label: "メーカーコード", group: "基本情報", required: true, input: "text", width: "w-24", example: "a009" },
+  { key: "product_type", label: "単品orセット商品", group: "基本情報", required: true, input: "select", options: ["単品", "セット商品"], width: "w-28", defaultValue: "単品", example: "単品" },
+  { key: "quantity", label: "数量", group: "基本情報", required: true, input: "number", width: "w-16", defaultValue: "1", example: "1" },
+  { key: "product_name", label: "商品名", group: "基本情報", required: true, input: "text", width: "w-64", example: "沖縄バヤリース 島レモネード PET 500ml" },
+  { key: "display_name", label: "掲載商品名", group: "基本情報", input: "text", width: "w-64", autoHint: "商品名から自動補完（手修正可）", example: "沖縄バヤリース 島レモネード PET 500ml" },
+  { key: "tax_rate", label: "消費税率", group: "価格", required: true, input: "select", options: ["8", "10"], width: "w-16", defaultValue: "10", example: "8" },
+  { key: "cost_price", label: "原価", group: "価格", input: "number", width: "w-20", example: "123" },
+  { key: "selling_price", label: "販売価格", group: "価格", required: true, input: "number", width: "w-24", example: "200" },
+  { key: "shipping_type", label: "送料区分", group: "配送", input: "select", options: ["送料別", "送料無料"], width: "w-24", defaultValue: "送料別", example: "送料別" },
+  { key: "image_count", label: "作成した画像数", group: "配送", input: "number", width: "w-16", defaultValue: "1", example: "6" },
+  { key: "delivery_method", label: "配送方法セット", group: "配送", input: "number", width: "w-16", defaultValue: "4", example: "4" },
+  { key: "lead_time", label: "納期管理番号", group: "配送", input: "number", width: "w-16", defaultValue: "1", example: "1" },
+  { key: "mall_category_id", label: "モール基本カテゴリID", group: "カテゴリ", input: "text", width: "w-28", example: "110692" },
+  { key: "store_category", label: "店舗内カテゴリ1", group: "カテゴリ", input: "text", width: "w-40", example: "フルーツ・ソフトドリンク・酢" },
+  { key: "catch_copy_pc", label: "キャッチコピーPC", group: "商品説明", input: "text", width: "w-56", example: "沖縄の夏を彩る島レモネード！" },
+  { key: "catch_copy_yahoo", label: "キャッチコピー(Yahoo)", group: "商品説明", input: "text", width: "w-56", example: "沖縄の夏を彩る島レモネード！" },
 ];
 
-const COLUMN_KEYS: GridColumnKey[] = GRID_COLUMNS.map((c) => c.key);
+/** 拡張9列（商品編集画面 ProductForm/schema の棚卸しから採用）。
+ * 既存シートからの18列コピペを壊さないよう、必ず基本18列の「後ろ」に追加する。 */
+export const GRID_COLUMNS_EXTRA: GridColumn[] = [
+  { key: "sale_description_pc", label: "PC用販売説明文", group: "商品説明", input: "text", long: true, width: "w-44", autoHint: "空欄なら画像枚数から imgList を自動生成（楽天・HTML可）", example: "<p>沖縄限定の島レモネード。まとめ買いがお得です。</p>" },
+  { key: "description_pc", label: "商品説明PC", group: "商品説明", input: "text", long: true, width: "w-44", example: "<p>シークヮーサー果汁入り。沖縄限定の島レモネードです。</p>" },
+  { key: "description_sp", label: "商品説明スマホ", group: "商品説明", input: "text", long: true, width: "w-44", example: "シークヮーサー果汁入り。沖縄限定の島レモネードです。" },
+  { key: "keyword", label: "検索キーワード", group: "商品説明", input: "text", width: "w-44", example: "レモネード 沖縄 バヤリース" },
+  { key: "maker_name", label: "メーカー名", group: "商品説明", input: "text", width: "w-32", example: "沖縄バヤリース" },
+  { key: "brand_name", label: "ブランド名", group: "商品説明", input: "text", width: "w-32", example: "バヤリース" },
+  { key: "yahoo_category_id", label: "YahooカテゴリID", group: "Yahoo", input: "text", width: "w-28", example: "13457" },
+  { key: "yahoo_path", label: "Yahooストアカテゴリパス", group: "Yahoo", input: "text", width: "w-48", example: "食品、飲料、製菓＞ソフトドリンク、ジュース" },
+  { key: "unit", label: "単位", group: "Yahoo", input: "text", width: "w-16", example: "本" },
+];
 
-/** 新規行。よく使う値（税率10/送料別/配送方法4/納期1/数量1/画像数1）を既定値でプリセット。 */
+/** 全列（基本18列 + 拡張9列）。グリッド見出し・parseTsv・テンプレートCSV の単一源泉。 */
+export const ALL_GRID_COLUMNS: GridColumn[] = [...GRID_COLUMNS, ...GRID_COLUMNS_EXTRA];
+
+const COLUMN_KEYS: GridColumnKey[] = ALL_GRID_COLUMNS.map((c) => c.key);
+
+/** 連続する同じ group の列を束ねる（グリッドの列グループ見出し行用）。 */
+export function columnGroups(columns: GridColumn[] = ALL_GRID_COLUMNS): { name: string; span: number }[] {
+  const out: { name: string; span: number }[] = [];
+  for (const c of columns) {
+    const last = out[out.length - 1];
+    if (last && last.name === c.group) last.span++;
+    else out.push({ name: c.group, span: 1 });
+  }
+  return out;
+}
+
+export const TEMPLATE_FILENAME = "商品一括登録テンプレート.csv";
+
+/** 貼り付け取込用テンプレートCSVを生成する（UTF-8 BOM 付き = Excel でそのまま開ける）。
+ * 1行目 = グリッド列と同一の見出し（ALL_GRID_COLUMNS が単一源泉）、
+ * 2行目 = 入力例1行（必須列・既定値・書式が分かる、そのまま貼り付けて保存が通る値）。 */
+export function buildTemplateCsv(): string {
+  const header = ALL_GRID_COLUMNS.map((c) => c.label);
+  const example = ALL_GRID_COLUMNS.map((c) => c.example ?? c.defaultValue ?? "");
+  return "\uFEFF" + Papa.unparse([header, example], { newline: "\r\n" });
+}
+
+/** 新規行。よく使う値（税率10/送料別/配送方法4/納期1/数量1/画像数1）を既定値でプリセット。
+ * 既定値は列定義（defaultValue）が単一源泉。 */
 export function emptyGridRow(): GridRow {
-  return {
-    ne_code: "",
-    jan_code: "",
-    maker_code: "",
-    product_type: "単品",
-    quantity: "1",
-    product_name: "",
-    display_name: "",
-    tax_rate: "10",
-    cost_price: "",
-    selling_price: "",
-    shipping_type: "送料別",
-    image_count: "1",
-    delivery_method: "4",
-    lead_time: "1",
-    mall_category_id: "",
-    store_category: "",
-    catch_copy_pc: "",
-    catch_copy_yahoo: "",
-    auto: { ne_code: true, display_name: true },
-  };
+  const values = Object.fromEntries(
+    ALL_GRID_COLUMNS.map((c) => [c.key, c.defaultValue ?? ""]),
+  ) as Record<GridColumnKey, string>;
+  return { ...values, auto: { ne_code: true, display_name: true } };
 }
 
 /** 既定値のまま何も入力されていない行か（保存・検証の対象外にする）。 */
@@ -237,6 +286,16 @@ export function gridRowToProductInput(row: GridRow): ProductInput {
     store_category: row.store_category.trim(),
     catch_copy_pc: row.catch_copy_pc.trim(),
     catch_copy_yahoo: row.catch_copy_yahoo.trim(),
+    // 拡張列（商品編集画面と同じフィールドへそのまま保存される）
+    sale_description_pc: row.sale_description_pc.trim(),
+    description_pc: row.description_pc.trim(),
+    description_sp: row.description_sp.trim(),
+    keyword: row.keyword.trim(),
+    maker_name: row.maker_name.trim(),
+    brand_name: row.brand_name.trim(),
+    yahoo_category_id: row.yahoo_category_id.trim(),
+    yahoo_path: row.yahoo_path.trim(),
+    unit: row.unit.trim(),
   });
 }
 
@@ -282,7 +341,8 @@ export function expandSetRows(source: GridRow, quantities: number[]): GridRow[] 
  * - 引用符付き・セル内改行（Excel のコピー形式）は papaparse で解釈
  * - 見出し行（「NEコード」「JANコード」を含む行）は自動スキップ
  * - シート A 列（空欄）ごとコピーした場合は先頭の空列を自動で除去
- * - 列は「データ入力シート」の18列順として解釈し、余分な列は無視
+ * - 列は ALL_GRID_COLUMNS の列順（基本18列+拡張9列）として解釈し、余分な列は無視。
+ *   旧シートどおり基本18列だけの貼り付けも先頭からの部分列としてそのまま取り込める
  * - 空欄の NEコード・掲載商品名は取込直後に自動補完 */
 export function parseTsv(text: string): GridRow[] {
   if (text.trim() === "") return [];
@@ -297,11 +357,17 @@ export function parseTsv(text: string): GridRow[] {
   if (headerIndex >= 0) {
     offset = Math.max(0, rows[headerIndex].indexOf("NEコード"));
     rows = rows.filter((r) => !isHeader(r));
-  } else {
-    // 見出し無しで「全行の先頭セルが空」かつ「列数が18列より多い」→ A列ごとコピーされたとみなす。
-    // （NEコードだけ空欄の18列行を誤ってずらさないよう、列数も条件に入れる）
-    const maxCols = Math.max(...rows.map((r) => r.length));
-    if (maxCols > GRID_COLUMNS.length && rows.every((r) => (r[0] ?? "") === "")) offset = 1;
+  } else if (rows.every((r) => (r[0] ?? "") === "")) {
+    // 見出し無しで先頭セルが全行空: 「シートA列(空列)ごとコピー」か「NEコード空欄(自動生成待ち)」かを判定する。
+    // 1) 必須の JANコード(13桁) の位置で判定: 定位置(2列目)にあれば NEコード空欄、1つ右(3列目)なら A列混入。
+    const janAt = (i: number) => rows.some((r) => /^\d{13}$/.test(r[i] ?? ""));
+    if (janAt(2) && !janAt(1)) {
+      offset = 1;
+    } else if (!janAt(1)) {
+      // 2) JAN でも判別できない場合は列数で判定: 全列(27列)より多い → A列混入とみなす。
+      const maxCols = Math.max(...rows.map((r) => r.length));
+      if (maxCols > ALL_GRID_COLUMNS.length) offset = 1;
+    }
   }
 
   const out: GridRow[] = [];
