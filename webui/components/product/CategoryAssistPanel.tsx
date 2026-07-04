@@ -30,8 +30,9 @@ type Props = {
   rows: GridRow[];
   /** 対象行（グリッドのセル操作・行番号クリックで親が追跡する） */
   selectedIndex: number;
-  /** 対象行1行の更新 */
-  onRowChange: (rowIndex: number, next: GridRow) => void;
+  /** 対象行1行の更新。fetch 完了後の書き戻しなど非同期の反映は必ず関数型（現在の行 → 次の行）で
+   * 渡すこと（親が最新の行にマージするため、fetch 中のグリッド編集が巻き戻らない）。 */
+  onRowChange: (rowIndex: number, next: GridRow | ((current: GridRow) => GridRow)) => void;
   /** 複数行の一括更新（同じカテゴリの行すべてに適用） */
   onRowsChange: (next: GridRow[]) => void;
 };
@@ -78,8 +79,13 @@ export function CategoryAssistPanel({ rows, selectedIndex, onRowChange, onRowsCh
       if (info.attrs.length === 0 && !info.yahoo) {
         setMessage(`カテゴリID ${categoryId} の商品属性・Yahooカテゴリはマスタに見つかりませんでした`);
       } else {
-        // 項目・単位を対象行へ展開（既に入力済みの値は item 単位で保持される）
-        if (info.attrs.length > 0) onRowChange(selectedIndex, loadAttributesIntoRow(row, info.attrs));
+        // 項目・単位を対象行へ展開（既に入力済みの値は item 単位で保持される）。
+        // fetch 開始時に捕捉した row をそのまま書き戻すと、読み込み中にグリッド側で行った
+        // 編集が巻き戻るため、関数型更新で「最新の行」へマージする（競合窓の解消）。
+        if (info.attrs.length > 0) {
+          const attrs = info.attrs;
+          onRowChange(selectedIndex, (current) => loadAttributesIntoRow(current, attrs));
+        }
         setMessage(
           `カテゴリID ${categoryId}: 商品属性 ${info.attrs.length} 件 / Yahoo候補 ${info.yahoo ? "あり" : "なし"}`,
         );

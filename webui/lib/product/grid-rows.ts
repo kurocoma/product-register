@@ -285,7 +285,12 @@ export function autoFillRow(row: GridRow): GridRow {
   return next;
 }
 
-/** 1行分の検証。エラーメッセージ（日本語）の配列を返す。空配列なら保存可能。 */
+/** 1行分の検証。エラーメッセージ（日本語）の配列を返す。空配列なら保存可能。
+ * select 列（選択肢固定の列）は選択肢外の値を行エラーにする。列貼り付け（parseClipboardColumn）は
+ * <select> を素通りして任意文字列を入れられるため、ここで止めないと保存まで素通りする。
+ * 対象は select 列の棚卸し結果の3列すべて: 単品orセット商品(product_type)・消費税率(tax_rate)・
+ * 送料区分(shipping_type)。判定は gridRowToRaw の保存時変換と同じ trim 後の値で行う
+ * （送料区分の空欄は保存時に「送料別」へ既定化されるためエラーにしない）。 */
 export function validateGridRow(row: GridRow): string[] {
   const errors: string[] = [];
   if (row.ne_code.trim() === "") errors.push("NEコードが未入力です（メーカーコード・JAN・数量が揃うと自動生成されます）");
@@ -296,6 +301,9 @@ export function validateGridRow(row: GridRow): string[] {
   if (row.product_name.trim() === "") errors.push("商品名が未入力です");
   const tax = toNumber(row.tax_rate);
   if (tax !== 8 && tax !== 10) errors.push("消費税率は 8 または 10 を選択してください");
+  const shipping = row.shipping_type.trim();
+  if (shipping !== "" && shipping !== "送料別" && shipping !== "送料無料")
+    errors.push("送料区分は「送料別」または「送料無料」を選択してください（空欄は「送料別」で保存されます）");
   if (!isNonNegInt(row.selling_price)) errors.push("販売価格は0以上の整数で入力してください");
   if (row.cost_price.trim() !== "" && !isNonNegInt(row.cost_price)) errors.push("原価は0以上の整数で入力してください");
   if (row.image_count.trim() !== "" && !isNonNegInt(row.image_count)) errors.push("作成した画像数は0以上の整数で入力してください");

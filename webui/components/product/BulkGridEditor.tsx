@@ -94,6 +94,8 @@ export function BulkGridEditor() {
   const [rows, setRows] = useState<RowState[]>(() => [newRow(), newRow(), newRow()]);
   const [pasteOpen, setPasteOpen] = useState(false);
   const [pasteText, setPasteText] = useState("");
+  /** 貼り付け取込枠の案内（1列コピーを誤って貼ったときの誘導など）。取込成功・閉じるでクリア。 */
+  const [pasteNotice, setPasteNotice] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [summary, setSummary] = useState("");
   /** 長文セル（説明文HTML等）の拡大エディタで開いているセル。行は uid で追跡（行削除でズレない）。 */
@@ -149,9 +151,15 @@ export function BulkGridEditor() {
     );
   };
 
-  /** 1行の行データを差し替える（カテゴリ読み込みパネルの属性値入力・Yahoo適用から使う）。 */
-  const updateRowData = (rowIndex: number, next: GridRow) => {
-    setRows((prev) => prev.map((r, i) => (i === rowIndex ? { ...r, data: next, result: undefined } : r)));
+  /** 1行の行データを差し替える（カテゴリ読み込みパネルの属性値入力・Yahoo適用から使う）。
+   * 関数型（現在の行 → 次の行）も受け付け、setRows の関数型更新の中で「最新の行」に適用する。
+   * パネルの読み込み fetch 完了時の書き戻しはこちらを使う（fetch 中のセル編集が巻き戻らない）。 */
+  const updateRowData = (rowIndex: number, next: GridRow | ((current: GridRow) => GridRow)) => {
+    setRows((prev) =>
+      prev.map((r, i) =>
+        i === rowIndex ? { ...r, data: typeof next === "function" ? next(r.data) : next, result: undefined } : r,
+      ),
+    );
   };
 
   /** 複数行の行データをまとめて差し替える（フィルダウン・同カテゴリ一括適用から使う）。
@@ -267,7 +275,24 @@ export function BulkGridEditor() {
     });
     setPasteText("");
     setPasteOpen(false);
+    setPasteNotice(null);
     setSummary(`${imported.length} 行を取り込みました。内容を確認して「一括保存」してください。`);
+  };
+
+  /** 「Excel から貼り付け取込」枠からの取込。1列だけのコピー（column）は表取込へ流さない:
+   * parseTsv は先頭列＝NEコード列として解釈するため、1列コピーを誤って貼ると値が全部
+   * NEコード列に入ってしまう。classifyClipboard で事前判定し、セルへ直接貼る案内を出す。 */
+  const importFromPasteBox = (text: string) => {
+    if (classifyClipboard(text) === "column") {
+      setPasteNotice(
+        "1列だけのコピー（縦方向）は、ここではなくグリッドの貼り付けたい列のセルに直接 Ctrl+V してください" +
+          "（そのセルから下方向へ展開されます。行が足りなければ自動追加）。" +
+          "この枠に貼ると先頭列（NEコード）の値として誤って取り込まれるため、取込を中止しました。",
+      );
+      return;
+    }
+    setPasteNotice(null);
+    importTsv(text);
   };
 
   /** Enter で1つ下の行の同じ列へ（最終行なら行を追加してから）。Excel と同じ操作感。 */
@@ -384,7 +409,7 @@ export function BulkGridEditor() {
             商品属性の項目・単位と Yahoo カテゴリ候補を先に表示できます（値を入力するだけで対象行に反映。対象行はセルまたは行番号のクリックで切替）。
           </li>
           <li>
-            <span className="font-semibold">Excel の1列コピー（縦方向）</span>は、貼り付けたいセルに Ctrl+V するとそのセルから下方向へ展開されます
+            <span className="font-semibold">Excel の1列コピー（縦方向）</span>は、「貼り付け取込」の枠ではなく貼り付けたいセルに直接 Ctrl+V するとそのセルから下方向へ展開されます
             （行が足りなければ自動追加。セル内改行を含む値も1セル=1値で取り込みます）。表全体のコピー（複数列）は従来どおり行として取り込みます。
           </li>
           <li>各セル右の「↓」で、そのセルの値を<span className="font-semibold">下方向コピー</span>できます（コピーする行数を指定可能。そのまま OK で最終行まで）。</li>
@@ -415,25 +440,29 @@ export function BulkGridEditor() {
             Excel（ダウンロードしたテンプレート、または従来のデータ入力シート）で行を選択してコピーし、下の枠に貼り付けてください。
             列の並びはこのグリッドと同じです（従来どおり基本18列・バリエーションキー無しの27列だけの貼り付けも可）。
             見出し行・左端の空列・「※」で始まる説明行が含まれていても自動で読み飛ばします。NEコード・掲載商品名が空欄なら自動補完します。
+            <span className="font-semibold">1列だけのコピー（縦方向）はこの枠ではなく、グリッドの貼り付けたいセルに直接 Ctrl+V</span>
+            してください（そのセルから下方向へ展開されます）。
           </p>
           <textarea
             value={pasteText}
             onChange={(e) => setPasteText(e.target.value)}
             onPaste={(e) => {
               const text = e.clipboardData.getData("text");
-              if (text.includes("\t") || text.includes("\n")) {
-                e.preventDefault();
-                importTsv(text);
-              }
+              // single（改行もタブもない単一値）は通常の貼り付け＝手入力の続きとして扱う。
+              // それ以外は classifyClipboard で 表全体（table）/1列コピー（column）を振り分ける。
+              if (classifyClipboard(text) === "single") return;
+              e.preventDefault();
+              importFromPasteBox(text);
             }}
             placeholder="ここに Ctrl+V で貼り付け（貼り付けと同時に取り込みます）"
             className="w-full h-28 rounded border border-slate-300 px-3 py-2 text-sm font-mono"
           />
+          {pasteNotice && <p className="text-sm text-amber-700">{pasteNotice}</p>}
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => importTsv(pasteText)} disabled={pasteText.trim() === ""}>
+            <Button variant="outline" onClick={() => importFromPasteBox(pasteText)} disabled={pasteText.trim() === ""}>
               取り込んで行に追加
             </Button>
-            <Button variant="ghost" onClick={() => { setPasteText(""); setPasteOpen(false); }}>閉じる</Button>
+            <Button variant="ghost" onClick={() => { setPasteText(""); setPasteOpen(false); setPasteNotice(null); }}>閉じる</Button>
           </div>
         </div>
       )}
