@@ -152,12 +152,14 @@ export function BulkGridEditor() {
   };
 
   /** 1行の行データを差し替える（カテゴリ読み込みパネルの属性値入力・Yahoo適用から使う）。
+   * 行は index ではなく uid で特定する（fetch 中の行削除・取込で index がずれても
+   * 正しい行へ届き、対象行自体が削除済みなら何もしない = 別の行への誤書き込み防止）。
    * 関数型（現在の行 → 次の行）も受け付け、setRows の関数型更新の中で「最新の行」に適用する。
    * パネルの読み込み fetch 完了時の書き戻しはこちらを使う（fetch 中のセル編集が巻き戻らない）。 */
-  const updateRowData = (rowIndex: number, next: GridRow | ((current: GridRow) => GridRow)) => {
+  const updateRowData = (uid: number, next: GridRow | ((current: GridRow) => GridRow)) => {
     setRows((prev) =>
-      prev.map((r, i) =>
-        i === rowIndex ? { ...r, data: typeof next === "function" ? next(r.data) : next, result: undefined } : r,
+      prev.map((r) =>
+        r.uid === uid ? { ...r, data: typeof next === "function" ? next(r.data) : next, result: undefined } : r,
       ),
     );
   };
@@ -639,6 +641,7 @@ export function BulkGridEditor() {
       <CategoryAssistPanel
         rows={rows.map((row) => row.data)}
         selectedIndex={activeRowIndex}
+        selectedUid={rows[activeRowIndex]?.uid ?? -1}
         onRowChange={updateRowData}
         onRowsChange={updateRowsData}
       />

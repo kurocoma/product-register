@@ -28,11 +28,15 @@ type LoadedCategory = { attrs: GenreAttribute[]; yahoo: YahooCategoryMapping | n
 type Props = {
   /** グリッドの全行（表示・同カテゴリ判定に使う。編集は onRowChange / onRowsChange 経由） */
   rows: GridRow[];
-  /** 対象行（グリッドのセル操作・行番号クリックで親が追跡する） */
+  /** 対象行の index（グリッドのセル操作・行番号クリックで親が追跡する。表示・同カテゴリ判定用） */
   selectedIndex: number;
-  /** 対象行1行の更新。fetch 完了後の書き戻しなど非同期の反映は必ず関数型（現在の行 → 次の行）で
+  /** 対象行の uid（行の追加・削除で index がずれても変わらない恒久ID。onRowChange の行指定用） */
+  selectedUid: number;
+  /** 対象行1行の更新。行は uid で指定する（fetch 中に行が削除・繰り上がりしても index ずれで
+   * 別の行に書き込まない。対象行自体が削除済みなら親側で無害に何もしない）。
+   * fetch 完了後の書き戻しなど非同期の反映は必ず関数型（現在の行 → 次の行）で
    * 渡すこと（親が最新の行にマージするため、fetch 中のグリッド編集が巻き戻らない）。 */
-  onRowChange: (rowIndex: number, next: GridRow | ((current: GridRow) => GridRow)) => void;
+  onRowChange: (uid: number, next: GridRow | ((current: GridRow) => GridRow)) => void;
   /** 複数行の一括更新（同じカテゴリの行すべてに適用） */
   onRowsChange: (next: GridRow[]) => void;
 };
@@ -43,7 +47,7 @@ type Props = {
  * - Yahooカテゴリ: 変換候補（ID/名称/パス）を表示し「適用」で行へ（空欄のときだけ = 手入力優先）
  * - 同じカテゴリIDの行が複数あるときは、属性値・Yahoo候補を全行へまとめて適用できる
  * データ取得は products/new（ProductForm）・保存時自動補完と同一ソースを使う。 */
-export function CategoryAssistPanel({ rows, selectedIndex, onRowChange, onRowsChange }: Props) {
+export function CategoryAssistPanel({ rows, selectedIndex, selectedUid, onRowChange, onRowsChange }: Props) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   /** 直近に読み込んだカテゴリID とその結果（Yahoo候補・単位候補の表示に使う） */
@@ -82,9 +86,11 @@ export function CategoryAssistPanel({ rows, selectedIndex, onRowChange, onRowsCh
         // 項目・単位を対象行へ展開（既に入力済みの値は item 単位で保持される）。
         // fetch 開始時に捕捉した row をそのまま書き戻すと、読み込み中にグリッド側で行った
         // 編集が巻き戻るため、関数型更新で「最新の行」へマージする（競合窓の解消）。
+        // 行の指定は uid（クリック時に捕捉）: fetch 中に上の行が削除されて index が
+        // 繰り上がっても正しい行へ反映され、対象行自体が削除済みなら何も起きない。
         if (info.attrs.length > 0) {
           const attrs = info.attrs;
-          onRowChange(selectedIndex, (current) => loadAttributesIntoRow(current, attrs));
+          onRowChange(selectedUid, (current) => loadAttributesIntoRow(current, attrs));
         }
         setMessage(
           `カテゴリID ${categoryId}: 商品属性 ${info.attrs.length} 件 / Yahoo候補 ${info.yahoo ? "あり" : "なし"}`,
@@ -104,7 +110,7 @@ export function CategoryAssistPanel({ rows, selectedIndex, onRowChange, onRowsCh
       setMessage("YahooカテゴリID・パスは入力済みのため上書きしませんでした（空欄のときだけ適用します）");
       return;
     }
-    onRowChange(selectedIndex, result.row);
+    onRowChange(selectedUid, result.row);
     setMessage(
       `${selectedIndex + 1} 行目に ${[result.appliedId ? "YahooカテゴリID" : "", result.appliedPath ? "Yahooパス" : ""].filter(Boolean).join("・")} を適用しました`,
     );
@@ -214,7 +220,7 @@ export function CategoryAssistPanel({ rows, selectedIndex, onRowChange, onRowsCh
                       type="text"
                       value={a.value}
                       placeholder="値"
-                      onChange={(e) => row && onRowChange(selectedIndex, setRowAttribute(row, i, { value: e.target.value }))}
+                      onChange={(e) => row && onRowChange(selectedUid, setRowAttribute(row, i, { value: e.target.value }))}
                       className="flex-1 min-w-0 rounded border border-slate-300 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
                     />
                     <input
@@ -223,7 +229,7 @@ export function CategoryAssistPanel({ rows, selectedIndex, onRowChange, onRowsCh
                       placeholder="単位"
                       list={unitListId}
                       title={unitChoices.length > 0 ? `単位の候補: ${unitChoices.join(" / ")}` : ""}
-                      onChange={(e) => row && onRowChange(selectedIndex, setRowAttribute(row, i, { unit: e.target.value }))}
+                      onChange={(e) => row && onRowChange(selectedUid, setRowAttribute(row, i, { unit: e.target.value }))}
                       className="w-16 rounded border border-slate-300 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
                     />
                     {/* 単位の入力ミス防止: マスタの unit_choices を datalist で候補表示（自由入力も可） */}
