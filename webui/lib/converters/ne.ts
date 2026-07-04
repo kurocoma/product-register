@@ -1,4 +1,5 @@
-import type { ProductInput } from "@/lib/product/schema";
+import type { ProductInput, Variant } from "@/lib/product/schema";
+import { productVariants } from "@/lib/product/schema";
 import type { Converter } from "./base";
 import { ENCODING } from "./base";
 import { RAKUTEN_IMAGE_BASE } from "./image-url";
@@ -58,6 +59,25 @@ function soryoKbn(shippingType: string): string {
   return shippingType === "送料無料" ? "2" : "1";
 }
 
+/** variants[] の1SKUを、SKU固有項目（NEコード・JAN・価格・税率・数量・送料区分）だけ
+ * 差し替えた ProductInput として取り出す。商品ページ共通項目（名前・説明・画像数など）は
+ * 親商品のまま。単品/セットの区分は数量から導出する（数量1 = 単品）。 */
+function variantAsProduct(p: ProductInput, v: Variant): ProductInput {
+  const isSingle = v.quantity <= 1;
+  return {
+    ...p,
+    ne_code: v.ne_code,
+    jan_code: v.jan_code,
+    product_type: isSingle ? "単品" : "セット商品",
+    quantity: v.quantity,
+    selling_price: v.selling_price,
+    tax_rate: v.tax_rate,
+    shipping_type: v.shipping_type,
+    is_single: isSingle,
+    is_set: !isSingle,
+  };
+}
+
 export class NEConverter implements Converter {
   mallName = "ne" as const;
   encoding = ENCODING.ne;
@@ -66,8 +86,13 @@ export class NEConverter implements Converter {
     const singles: Record<string, string>[] = [];
     const sets: Record<string, string>[] = [];
     for (const p of products) {
-      if (p.is_single) singles.push(this.mapSingle(p));
-      else sets.push(this.mapSet(p));
+      // 多SKU（バリエーション統合済み）商品は「NE側は分ける」ため SKU ごとに行を出力する。
+      // フラット商品（variants 未設定）は従来と同一のコードパス（p をそのまま変換）= 出力不変。
+      const rows = p.variants.length === 0 ? [p] : productVariants(p).map((v) => variantAsProduct(p, v));
+      for (const q of rows) {
+        if (q.is_single) singles.push(this.mapSingle(q));
+        else sets.push(this.mapSet(q));
+      }
     }
     return { singles, sets };
   }

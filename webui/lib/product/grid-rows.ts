@@ -1,6 +1,11 @@
 import Papa from "papaparse";
 import { ProductInputSchema, type ProductInput } from "./schema";
 
+/** 一括登録グリッドの追加列「バリエーションキー」:
+ * 同じ値を入れた行は保存時に1商品へ統合され、楽天では同じ商品管理番号
+ * （メーカーコード-JAN下4桁）配下のSKU（バリエーション）として登録される。
+ * NE側はSKUごとに分ける必要があるため、NE用CSVは従来どおり行ごとに出力される。 */
+
 /** 一括登録グリッド（Excel「データ入力シート」B〜S列相当の基本18列 + 拡張9列）の純関数層。
  *
  * 基本18列(データ入力シート 3行目見出しの列順):
@@ -54,6 +59,9 @@ export type GridRow = {
   yahoo_category_id: string;
   yahoo_path: string;
   unit: string; // 本/袋/個/枚 等
+  /** バリエーションキー（同じ値の行は保存時に1商品へ統合）。
+   * 既存27列の後方互換を保つため optional（未入力の行はプロパティ自体を持たない）。 */
+  variation_key?: string;
   /** 自動補完の管理フラグ。ユーザーが手入力したら false になり追従を止める。 */
   auto: { ne_code: boolean; display_name: boolean };
 };
@@ -80,25 +88,28 @@ export type GridColumn = {
   defaultValue?: string;
   /** テンプレートCSVの入力例（2行目に載せる。全列そろえて「そのまま貼り付けて保存できる」1行にする） */
   example?: string;
+  /** バリエーション統合デモ用の2行目入力例（未指定列は example を引き継ぐ）。
+   * バリエーションキー入りテンプレートだけが使う（従来テンプレの出力は不変）。 */
+  example2?: string;
 };
 
 /** データ入力シートの列順そのまま（基本18列）。 */
 export const GRID_COLUMNS: GridColumn[] = [
-  { key: "ne_code", label: "NEコード", group: "基本情報", required: true, input: "text", width: "w-32", autoHint: "メーカーコード-JAN下4桁-数量 から自動生成（手修正可）", example: "a009-4916-1" },
+  { key: "ne_code", label: "NEコード", group: "基本情報", required: true, input: "text", width: "w-32", autoHint: "メーカーコード-JAN下4桁-数量 から自動生成（手修正可）", example: "a009-4916-1", example2: "a009-4916-6" },
   { key: "jan_code", label: "JANコード", group: "基本情報", required: true, input: "text", width: "w-36", example: "4514603474916" },
   { key: "maker_code", label: "メーカーコード", group: "基本情報", required: true, input: "text", width: "w-24", example: "a009" },
-  { key: "product_type", label: "単品orセット商品", group: "基本情報", required: true, input: "select", options: ["単品", "セット商品"], width: "w-28", defaultValue: "単品", example: "単品" },
-  { key: "quantity", label: "数量", group: "基本情報", required: true, input: "number", width: "w-16", defaultValue: "1", example: "1" },
+  { key: "product_type", label: "単品orセット商品", group: "基本情報", required: true, input: "select", options: ["単品", "セット商品"], width: "w-28", defaultValue: "単品", example: "単品", example2: "セット商品" },
+  { key: "quantity", label: "数量", group: "基本情報", required: true, input: "number", width: "w-16", defaultValue: "1", example: "1", example2: "6" },
   { key: "product_name", label: "商品名", group: "基本情報", required: true, input: "text", width: "w-64", example: "沖縄バヤリース 島レモネード PET 500ml" },
   { key: "display_name", label: "掲載商品名", group: "基本情報", input: "text", width: "w-64", autoHint: "商品名から自動補完（手修正可）", example: "沖縄バヤリース 島レモネード PET 500ml" },
   { key: "tax_rate", label: "消費税率", group: "価格", required: true, input: "select", options: ["8", "10"], width: "w-16", defaultValue: "10", example: "8" },
   { key: "cost_price", label: "原価", group: "価格", input: "number", width: "w-20", example: "123" },
-  { key: "selling_price", label: "販売価格", group: "価格", required: true, input: "number", width: "w-24", example: "200" },
+  { key: "selling_price", label: "販売価格", group: "価格", required: true, input: "number", width: "w-24", example: "200", example2: "1080" },
   { key: "shipping_type", label: "送料区分", group: "配送", input: "select", options: ["送料別", "送料無料"], width: "w-24", defaultValue: "送料別", example: "送料別" },
   { key: "image_count", label: "作成した画像数", group: "配送", input: "number", width: "w-16", defaultValue: "1", example: "6" },
   { key: "delivery_method", label: "配送方法セット", group: "配送", input: "number", width: "w-16", defaultValue: "4", example: "4" },
   { key: "lead_time", label: "納期管理番号", group: "配送", input: "number", width: "w-16", defaultValue: "1", example: "1" },
-  { key: "mall_category_id", label: "モール基本カテゴリID", group: "カテゴリ", input: "text", width: "w-28", example: "110692" },
+  { key: "mall_category_id", label: "モール基本カテゴリID", group: "カテゴリ", input: "text", width: "w-28", autoHint: "これを入力すれば保存時に商品属性（項目・単位）と YahooカテゴリID/パスを自動補完（手入力があれば手入力を優先）", example: "110692" },
   { key: "store_category", label: "店舗内カテゴリ1", group: "カテゴリ", input: "text", width: "w-40", example: "フルーツ・ソフトドリンク・酢" },
   { key: "catch_copy_pc", label: "キャッチコピーPC", group: "商品説明", input: "text", width: "w-56", example: "沖縄の夏を彩る島レモネード！" },
   { key: "catch_copy_yahoo", label: "キャッチコピー(Yahoo)", group: "商品説明", input: "text", width: "w-56", example: "沖縄の夏を彩る島レモネード！" },
@@ -113,15 +124,31 @@ export const GRID_COLUMNS_EXTRA: GridColumn[] = [
   { key: "keyword", label: "検索キーワード", group: "商品説明", input: "text", width: "w-44", example: "レモネード 沖縄 バヤリース" },
   { key: "maker_name", label: "メーカー名", group: "商品説明", input: "text", width: "w-32", example: "沖縄バヤリース" },
   { key: "brand_name", label: "ブランド名", group: "商品説明", input: "text", width: "w-32", example: "バヤリース" },
-  { key: "yahoo_category_id", label: "YahooカテゴリID", group: "Yahoo", input: "text", width: "w-28", example: "13457" },
-  { key: "yahoo_path", label: "Yahooストアカテゴリパス", group: "Yahoo", input: "text", width: "w-48", example: "食品、飲料、製菓＞ソフトドリンク、ジュース" },
+  { key: "yahoo_category_id", label: "YahooカテゴリID", group: "Yahoo", input: "text", width: "w-28", autoHint: "空欄ならモール基本カテゴリIDから保存時に自動補完（手入力優先）", example: "13457" },
+  { key: "yahoo_path", label: "Yahooストアカテゴリパス", group: "Yahoo", input: "text", width: "w-48", autoHint: "空欄ならモール基本カテゴリIDから保存時に自動補完（手入力優先）", example: "食品、飲料、製菓＞ソフトドリンク、ジュース" },
   { key: "unit", label: "単位", group: "Yahoo", input: "text", width: "w-16", example: "本" },
 ];
 
 /** 全列（基本18列 + 拡張9列）。グリッド見出し・parseTsv・テンプレートCSV の単一源泉。 */
 export const ALL_GRID_COLUMNS: GridColumn[] = [...GRID_COLUMNS, ...GRID_COLUMNS_EXTRA];
 
+/** バリエーションキー列。既存27列の「後ろ」に置く（旧テンプレ・基本18列コピペを壊さない）。 */
+export const VARIATION_KEY_COLUMN: GridColumn = {
+  key: "variation_key",
+  label: "バリエーションキー",
+  group: "バリエーション",
+  input: "text",
+  width: "w-36",
+  autoHint: "同じ値の行は保存時に1商品へ統合され、楽天では同じ商品管理番号（メーカーコード-JAN下4桁）のSKUになります。NE用CSVは従来どおり行ごとに出力されます",
+  example: "レモネード500",
+};
+
+/** 一括登録グリッドの全列（27列 + バリエーションキー）。
+ * グリッドUI・貼り付け取込・テンプレートCSV（UI からのDL）はこちらを単一源泉に使う。 */
+export const BULK_GRID_COLUMNS: GridColumn[] = [...ALL_GRID_COLUMNS, VARIATION_KEY_COLUMN];
+
 const COLUMN_KEYS: GridColumnKey[] = ALL_GRID_COLUMNS.map((c) => c.key);
+const BULK_COLUMN_KEYS: GridColumnKey[] = BULK_GRID_COLUMNS.map((c) => c.key);
 
 /** 連続する同じ group の列を束ねる（グリッドの列グループ見出し行用）。 */
 export function columnGroups(columns: GridColumn[] = ALL_GRID_COLUMNS): { name: string; span: number }[] {
@@ -136,13 +163,24 @@ export function columnGroups(columns: GridColumn[] = ALL_GRID_COLUMNS): { name: 
 
 export const TEMPLATE_FILENAME = "商品一括登録テンプレート.csv";
 
+/** テンプレート末尾の説明行。先頭が「※」の行は貼り付け取込（parseTsv）が自動で読み飛ばす。 */
+export const TEMPLATE_NOTE =
+  "※入力のコツ: カテゴリは「モール基本カテゴリID」だけ入力すればOKです（商品属性の項目・単位と YahooカテゴリID/パスは空欄のままで、保存時に自動補完されます。手入力があれば手入力を優先）。" +
+  "バリエーションキーが同じ行（上の2行が例）は保存時に1商品へ統合され、楽天では同じ商品管理番号（メーカーコード-JAN下4桁）のSKUとして登録されます。NE用CSVは従来どおり行ごとに出力されます。この※で始まる行は貼り付け時に無視されます。";
+
 /** 貼り付け取込用テンプレートCSVを生成する（UTF-8 BOM 付き = Excel でそのまま開ける）。
- * 1行目 = グリッド列と同一の見出し（ALL_GRID_COLUMNS が単一源泉）、
- * 2行目 = 入力例1行（必須列・既定値・書式が分かる、そのまま貼り付けて保存が通る値）。 */
-export function buildTemplateCsv(): string {
-  const header = ALL_GRID_COLUMNS.map((c) => c.label);
-  const example = ALL_GRID_COLUMNS.map((c) => c.example ?? c.defaultValue ?? "");
-  return "\uFEFF" + Papa.unparse([header, example], { newline: "\r\n" });
+ * 1行目 = グリッド列と同一の見出し（列定義が単一源泉）、2行目 = 入力例1行。
+ * バリエーションキー列を含む列定義（BULK_GRID_COLUMNS）で呼ぶと、同じキーで統合される
+ * セット行の入力例（3行目）と説明行（※・4行目）を追加する。既定の27列テンプレは従来と同一出力。 */
+export function buildTemplateCsv(columns: GridColumn[] = ALL_GRID_COLUMNS): string {
+  const header = columns.map((c) => c.label);
+  const example = columns.map((c) => c.example ?? c.defaultValue ?? "");
+  const rows: string[][] = [header, example];
+  if (columns.some((c) => c.key === "variation_key")) {
+    rows.push(columns.map((c) => c.example2 ?? c.example ?? c.defaultValue ?? ""));
+    rows.push([TEMPLATE_NOTE]);
+  }
+  return "\uFEFF" + Papa.unparse(rows, { newline: "\r\n" });
 }
 
 /** 新規行。よく使う値（税率10/送料別/配送方法4/納期1/数量1/画像数1）を既定値でプリセット。
@@ -157,7 +195,7 @@ export function emptyGridRow(): GridRow {
 /** 既定値のまま何も入力されていない行か（保存・検証の対象外にする）。 */
 export function isRowBlank(row: GridRow): boolean {
   const base = emptyGridRow();
-  return COLUMN_KEYS.every((k) => row[k].trim() === "" || row[k] === base[k]);
+  return COLUMN_KEYS.every((k) => (row[k] ?? "").trim() === "" || row[k] === base[k]);
 }
 
 /** カンマ・空白を除いて数値化。数値でなければ NaN。 */
@@ -264,10 +302,10 @@ export function validateGridRows(rows: GridRow[]): Map<number, string[]> {
   return result;
 }
 
-/** グリッド行 → ProductInput（既存スキーマで最終検証）。
- * 掲載商品名が空なら商品名を、任意数値が空なら既定値を採用する。 */
-export function gridRowToProductInput(row: GridRow): ProductInput {
-  return ProductInputSchema.parse({
+/** グリッド行 → ProductInputSchema.parse に渡す生オブジェクト。
+ * gridRowToProductInput（1行=1商品）と buildProductsFromRows（バリエーション統合）が共有する。 */
+function gridRowToRaw(row: GridRow): Record<string, unknown> {
+  return {
     ne_code: row.ne_code.trim(),
     jan_code: row.jan_code.trim(),
     maker_code: row.maker_code.trim(),
@@ -296,7 +334,14 @@ export function gridRowToProductInput(row: GridRow): ProductInput {
     yahoo_category_id: row.yahoo_category_id.trim(),
     yahoo_path: row.yahoo_path.trim(),
     unit: row.unit.trim(),
-  });
+    variation_key: (row.variation_key ?? "").trim(),
+  };
+}
+
+/** グリッド行 → ProductInput（既存スキーマで最終検証）。
+ * 掲載商品名が空なら商品名を、任意数値が空なら既定値を採用する。 */
+export function gridRowToProductInput(row: GridRow): ProductInput {
+  return ProductInputSchema.parse(gridRowToRaw(row));
 }
 
 /** 「6,24,48」「6 24 48」のような数量指定をパース。正の整数のみ・重複除去。 */
@@ -339,15 +384,17 @@ export function expandSetRows(source: GridRow, quantities: number[]): GridRow[] 
 
 /** Excel からのコピー（TSV / クリップボード）を行に変換する。
  * - 引用符付き・セル内改行（Excel のコピー形式）は papaparse で解釈
- * - 見出し行（「NEコード」「JANコード」を含む行）は自動スキップ
+ * - 見出し行（「NEコード」「JANコード」を含む行）と説明行（先頭セルが「※」で始まる行）は自動スキップ
  * - シート A 列（空欄）ごとコピーした場合は先頭の空列を自動で除去
- * - 列は ALL_GRID_COLUMNS の列順（基本18列+拡張9列）として解釈し、余分な列は無視。
- *   旧シートどおり基本18列だけの貼り付けも先頭からの部分列としてそのまま取り込める
+ * - 列は BULK_GRID_COLUMNS の列順（基本18列+拡張9列+バリエーションキー）として解釈し、余分な列は無視。
+ *   旧シートどおり基本18列・従来27列だけの貼り付けも先頭からの部分列としてそのまま取り込める
  * - 空欄の NEコード・掲載商品名は取込直後に自動補完 */
 export function parseTsv(text: string): GridRow[] {
   if (text.trim() === "") return [];
   const parsed = Papa.parse<string[]>(text, { delimiter: "\t", skipEmptyLines: true });
   let rows = (parsed.data ?? []).map((r) => r.map((c) => (c ?? "").trim()));
+  // 説明行（テンプレの ※ 行など）は列解釈の前に除外する
+  rows = rows.filter((r) => !(r[0] ?? "").startsWith("※"));
   if (rows.length === 0) return [];
 
   // 見出し行の検出（どこかのセルに列名そのものが入っている行）
@@ -364,22 +411,127 @@ export function parseTsv(text: string): GridRow[] {
     if (janAt(2) && !janAt(1)) {
       offset = 1;
     } else if (!janAt(1)) {
-      // 2) JAN でも判別できない場合は列数で判定: 全列(27列)より多い → A列混入とみなす。
+      // 2) JAN でも判別できない場合は列数で判定: 全列(28列)より多い → A列混入とみなす。
       const maxCols = Math.max(...rows.map((r) => r.length));
-      if (maxCols > ALL_GRID_COLUMNS.length) offset = 1;
+      if (maxCols > BULK_GRID_COLUMNS.length) offset = 1;
     }
   }
 
   const out: GridRow[] = [];
   for (const cells of rows) {
     const row = emptyGridRow();
-    COLUMN_KEYS.forEach((key, i) => {
+    BULK_COLUMN_KEYS.forEach((key, i) => {
       const v = cells[offset + i];
       if (v !== undefined && v !== "") row[key] = v;
     });
     if (isRowBlank(row)) continue;
     row.auto = { ne_code: row.ne_code.trim() === "", display_name: row.display_name.trim() === "" };
     out.push(autoFillRow(row));
+  }
+  return out;
+}
+
+/** buildProductsFromRows の1件分。保存する ProductInput と、元になった行の対応を持つ。 */
+export type BuiltProduct = {
+  /** 保存する商品。行に入力エラーがある場合は null（理由は errors）。 */
+  input: ProductInput | null;
+  /** 元 rows 配列でのインデックス（統合グループは数量昇順に並ぶ）。 */
+  rowIndexes: number[];
+  /** バリエーションキー（統合なしの単独行は ""）。 */
+  variationKey: string;
+  /** 行インデックス → エラー一覧。自身にエラーが無い行には統合グループの連帯スキップ理由が入る。 */
+  errors: Map<number, string[]>;
+};
+
+/** バリエーションのSKU選択肢ラベル（例 "1本" / "6本"）。単位列があればそれを使う。 */
+function variationLabelOf(row: GridRow): string {
+  const unit = row.unit.trim() || "本";
+  return `${toNumber(row.quantity)}${unit}`;
+}
+
+/** グリッド行の集合 → 保存する ProductInput の一覧（バリエーションキー統合の中核）。
+ * - バリエーションキーが空の行: 従来どおり 1行 = 1商品。
+ * - 同じバリエーションキーの行: 1商品に統合し variants[]（SKU別 NEコード=システム連携用SKU番号・
+ *   JAN・価格・数量・送料区分）を生成する。代表行 = 数量最小行（商品名・説明などの商品ページ共通
+ *   項目は代表行から採用）。楽天の商品管理番号（rakuten_manage_number）は下9桁 base 形式
+ *   （メーカーコード-JAN下4桁、例 a009-4916）に固定する。NE側は分けたままにする必要があるため、
+ *   NE用CSVは統合後も converters/ne.ts が variants をSKUごとの行に展開する。
+ * - 入力エラー行を含む統合グループは商品を作らず、全行に理由を返す（部分統合を防ぐ）。
+ * 空行はスキップ。行の検証は validateGridRows と同一基準。 */
+export function buildProductsFromRows(rows: GridRow[]): BuiltProduct[] {
+  const rowErrors = validateGridRows(rows);
+  type Entry = { row: GridRow; index: number };
+  const groups = new Map<string, Entry[]>();
+  const sequence: (Entry | { key: string })[] = []; // 出現順を保つ
+  rows.forEach((row, index) => {
+    if (isRowBlank(row)) return;
+    const key = (row.variation_key ?? "").trim();
+    if (key === "") {
+      sequence.push({ row, index });
+      return;
+    }
+    if (!groups.has(key)) {
+      groups.set(key, []);
+      sequence.push({ key });
+    }
+    groups.get(key)!.push({ row, index });
+  });
+
+  const out: BuiltProduct[] = [];
+  for (const item of sequence) {
+    if ("key" in item) {
+      const members = [...groups.get(item.key)!].sort(
+        (a, b) => toNumber(a.row.quantity) - toNumber(b.row.quantity),
+      );
+      const indexes = members.map((m) => m.index);
+      const errors = new Map<number, string[]>();
+      if (members.some((m) => rowErrors.has(m.index))) {
+        for (const m of members) {
+          errors.set(
+            m.index,
+            rowErrors.get(m.index) ?? [
+              `同じバリエーションキー「${item.key}」の行に入力エラーがあるため、統合保存をスキップしました`,
+            ],
+          );
+        }
+        out.push({ input: null, rowIndexes: indexes, variationKey: item.key, errors });
+        continue;
+      }
+      const rep = members[0]; // 数量最小行を代表に（商品ページ共通項目の採用元）
+      const variants = members.map(({ row }) => ({
+        sku_manage_number: row.ne_code.trim(),
+        ne_code: row.ne_code.trim(), // システム連携用SKU番号（merchantDefinedSkuId）
+        jan_code: row.jan_code.trim(),
+        selling_price: toNumber(row.selling_price),
+        tax_rate: toNumber(row.tax_rate),
+        quantity: toNumber(row.quantity),
+        variation_value: variationLabelOf(row),
+        shipping_type: row.shipping_type.trim() || "送料別",
+      }));
+      const input = ProductInputSchema.parse({
+        ...gridRowToRaw(rep.row),
+        variation_key: item.key,
+        // 楽天の商品管理番号 = 下9桁 base 形式（メーカーコード-JAN下4桁）
+        rakuten_manage_number: `${rep.row.maker_code.trim()}-${rep.row.jan_code.trim().slice(-4)}`,
+        variants,
+      });
+      out.push({ input, rowIndexes: indexes, variationKey: item.key, errors });
+      continue;
+    }
+    // 統合なし: 従来どおり 1行 = 1商品
+    const errors = new Map<number, string[]>();
+    const own = rowErrors.get(item.index);
+    if (own) {
+      errors.set(item.index, own);
+      out.push({ input: null, rowIndexes: [item.index], variationKey: "", errors });
+      continue;
+    }
+    out.push({
+      input: ProductInputSchema.parse(gridRowToRaw(item.row)),
+      rowIndexes: [item.index],
+      variationKey: "",
+      errors,
+    });
   }
   return out;
 }

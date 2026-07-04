@@ -5,21 +5,30 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { upsertProduct } from "@/lib/product/repository";
 import {
-  ALL_GRID_COLUMNS,
+  BULK_GRID_COLUMNS,
   TEMPLATE_FILENAME,
   type GridColumnKey,
   type GridRow,
   applyFieldChange,
+  buildProductsFromRows,
   buildTemplateCsv,
   columnGroups,
   emptyGridRow,
   expandSetRows,
-  gridRowToProductInput,
   isRowBlank,
   parseQuantities,
   parseTsv,
   validateGridRows,
 } from "@/lib/product/grid-rows";
+import {
+  fetchGenreAttributes,
+  type GenreAttribute,
+} from "@/lib/product/genre-attributes";
+import {
+  fetchYahooCategoryMapping,
+  type YahooCategoryMapping,
+} from "@/lib/product/category-mapping";
+import { applyCategoryAutofill } from "@/lib/product/category-autofill";
 import { Button } from "@/components/ui/button";
 
 type RowState = {
@@ -44,7 +53,37 @@ const GROUP_COLORS: Record<string, string> = {
   カテゴリ: "bg-emerald-100 text-emerald-800",
   商品説明: "bg-violet-100 text-violet-800",
   Yahoo: "bg-rose-100 text-rose-800",
+  バリエーション: "bg-orange-100 text-orange-800",
 };
+
+/** モール基本カテゴリID → 推奨属性 / Yahooカテゴリ の取得結果（保存中は同一IDを1回だけ取得） */
+type CategoryInfo = { attrs: GenreAttribute[]; yahoo: YahooCategoryMapping | null };
+
+/** products/new（ProductForm）と同一ソース（fetchGenreAttributes / fetchYahooCategoryMapping）で
+ * カテゴリ情報を取得する。マスタ未登録・取得失敗は「補完なし」として保存自体は続行する。 */
+async function fetchCategoryInfo(
+  supabase: ReturnType<typeof createClient>,
+  categoryId: string,
+  cache: Map<string, CategoryInfo>,
+): Promise<CategoryInfo> {
+  const id = categoryId.trim();
+  if (!id) return { attrs: [], yahoo: null };
+  const cached = cache.get(id);
+  if (cached) return cached;
+  const info: CategoryInfo = { attrs: [], yahoo: null };
+  try {
+    info.attrs = await fetchGenreAttributes(supabase, id);
+  } catch {
+    /* 属性マスタの取得失敗は補完スキップ（保存は続行） */
+  }
+  try {
+    info.yahoo = await fetchYahooCategoryMapping(supabase, id);
+  } catch {
+    /* マッピング取得失敗も同様 */
+  }
+  cache.set(id, info);
+  return info;
+}
 
 export function BulkGridEditor() {
   const [rows, setRows] = useState<RowState[]>(() => [newRow(), newRow(), newRow()]);
@@ -66,22 +105,23 @@ export function BulkGridEditor() {
 
   const validation = useMemo(() => validateGridRows(rows.map((r) => r.data)), [rows]);
   const filledCount = useMemo(() => rows.filter((r) => !isRowBlank(r.data)).length, [rows]);
-  const groups = useMemo(() => columnGroups(), []);
+  const groups = useMemo(() => columnGroups(BULK_GRID_COLUMNS), []);
 
   /** 拡大エディタの対象行（削除済みなら null → パネルは自動で閉じる） */
   const expandedTarget = useMemo(() => {
     if (!expandedCell) return null;
     const rowIndex = rows.findIndex((r) => r.uid === expandedCell.uid);
     if (rowIndex < 0) return null;
-    const col = ALL_GRID_COLUMNS.find((c) => c.key === expandedCell.key);
+    const col = BULK_GRID_COLUMNS.find((c) => c.key === expandedCell.key);
     if (!col) return null;
-    return { rowIndex, col, value: rows[rowIndex].data[expandedCell.key] };
+    return { rowIndex, col, value: rows[rowIndex].data[expandedCell.key] ?? "" };
   }, [expandedCell, rows]);
 
   /** テンプレートCSVのダウンロード（UTF-8 BOM付き = Excel でそのまま開ける）。
-   * 見出しはグリッド列と同一（列定義 ALL_GRID_COLUMNS が単一源泉）。2行目は入力例。 */
+   * 見出しはグリッド列と同一（列定義 BULK_GRID_COLUMNS が単一源泉）。
+   * 2〜3行目はバリエーションキー統合の入力例（単品+セット）、末尾は※説明行。 */
   const downloadTemplate = () => {
-    const blob = new Blob([buildTemplateCsv()], { type: "text/csv;charset=utf-8" });
+    const blob = new Blob([buildTemplateCsv(BULK_GRID_COLUMNS)], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -149,6 +189,9 @@ export function BulkGridEditor() {
     }
   };
 
+  /** 一括保存。バリエーションキーが同じ行は buildProductsFromRows で1商品（variants[]）に統合し、
+   * モール基本カテゴリIDから商品属性・Yahooカテゴリを自動補完（products/new と同一ソース・手入力優先）
+   * してから upsert する。 */
   const save = async () => {
     if (saving) return;
     setSaving(true);
@@ -158,23 +201,42 @@ export function BulkGridEditor() {
     let ng = 0;
     const current = rows;
     const results = new Map<number, { ok: boolean; message: string; savedId?: string }>();
+    const categoryCache = new Map<string, CategoryInfo>();
+    const built = buildProductsFromRows(current.map((r) => r.data));
 
-    for (let i = 0; i < current.length; i++) {
-      const r = current[i];
-      if (isRowBlank(r.data)) continue;
-      const errors = validation.get(i);
-      if (errors && errors.length > 0) {
-        results.set(r.uid, { ok: false, message: `入力エラー: ${errors.join(" / ")}` });
+    for (const b of built) {
+      const members = b.rowIndexes.map((i) => current[i]).filter(Boolean);
+      if (!b.input) {
+        for (const i of b.rowIndexes) {
+          const m = current[i];
+          if (!m) continue;
+          const errors = b.errors.get(i) ?? [];
+          results.set(m.uid, { ok: false, message: `入力エラー: ${errors.join(" / ")}` });
+        }
         ng++;
         continue;
       }
       try {
-        const input = gridRowToProductInput(r.data);
-        const saved = await upsertProduct(supabase, input, r.savedId);
-        results.set(r.uid, { ok: true, message: r.savedId ? "更新しました" : "登録しました", savedId: saved.id });
+        // カテゴリ由来の自動補完（属性・Yahooカテゴリ。手入力があれば上書きしない）
+        const info = await fetchCategoryInfo(supabase, b.input.mall_category_id, categoryCache);
+        const { product, filled } = applyCategoryAutofill(b.input, info.attrs, info.yahoo);
+        // 統合グループは既に保存済みの行があればその商品を更新する（重複登録しない）
+        const savedId = members.map((m) => m.savedId).find((id) => !!id);
+        const saved = await upsertProduct(supabase, product, savedId);
+        const fills = [
+          filled.attributes ? "商品属性" : "",
+          filled.yahoo ? "Yahooカテゴリ" : "",
+        ].filter(Boolean);
+        const fillNote = fills.length > 0 ? `（${fills.join("・")}を自動補完）` : "";
+        const message =
+          b.variationKey !== ""
+            ? `${savedId ? "統合更新" : "統合登録"}しました（${product.variants.length} SKU / 楽天管理番号 ${product.rakuten_manage_number}）${fillNote}`
+            : `${savedId ? "更新" : "登録"}しました${fillNote}`;
+        for (const m of members) results.set(m.uid, { ok: true, message, savedId: saved.id });
         ok++;
       } catch (e) {
-        results.set(r.uid, { ok: false, message: e instanceof Error ? e.message : String(e) });
+        const message = e instanceof Error ? e.message : String(e);
+        for (const m of members) results.set(m.uid, { ok: false, message });
         ng++;
       }
     }
@@ -186,7 +248,7 @@ export function BulkGridEditor() {
         return { ...r, savedId: res.savedId ?? r.savedId, result: { ok: res.ok, message: res.message } };
       }),
     );
-    setSummary(`保存結果: 成功 ${ok} 件 / 失敗 ${ng} 件${ng > 0 ? "（失敗行の理由は右端の「状態」列を確認）" : ""}`);
+    setSummary(`保存結果: 成功 ${ok} 商品 / 失敗 ${ng} 商品${ng > 0 ? "（失敗行の理由は右端の「状態」列を確認）" : ""}`);
     setSaving(false);
   };
 
@@ -195,16 +257,25 @@ export function BulkGridEditor() {
       <div>
         <h1 className="text-2xl font-bold">一括登録（まとめて入力）</h1>
         <p className="mt-1 text-sm text-slate-600">
-          Excel のデータ入力シートと同じ列構成（基本18列）に、商品説明文・Yahooカテゴリ等の拡張列を加えた
-          {ALL_GRID_COLUMNS.length}列で、複数商品をまとめて登録できます。
+          Excel のデータ入力シートと同じ列構成（基本18列）に、商品説明文・Yahooカテゴリ等の拡張列とバリエーションキーを加えた
+          {BULK_GRID_COLUMNS.length}列で、複数商品をまとめて登録できます。
           保存した商品は<Link href="/products" className="text-blue-600 hover:underline">商品一覧</Link>に表示され、
           モール（楽天 / Yahoo）への一括登録・一括反映は商品一覧で対象商品を選択して実行します。
         </p>
         <ul className="mt-2 text-xs text-slate-500 list-disc pl-5 space-y-0.5">
           <li>NEコードはメーカーコード・JAN・数量から自動生成されます（手修正も可能）。掲載商品名は商品名から自動補完されます。</li>
-          <li>単品行の「セット行」ボタンで、数量違いのセット商品行を自動展開できます（販売価格だけ入力すれば OK）。</li>
+          <li>
+            <span className="font-semibold">バリエーションキー</span>が同じ行は保存時に1商品へ統合され、
+            楽天では同じ商品管理番号（メーカーコード-JAN下4桁）のSKU（バリエーション）として登録されます。
+            NE側は従来どおり行（SKU）ごとに分かれたまま連携されます。
+          </li>
+          <li>
+            カテゴリは<span className="font-semibold">モール基本カテゴリIDだけ入力すればOK</span>です。
+            保存時に商品属性（項目・単位）と YahooカテゴリID/パスを自動補完します（商品編集画面と同じ仕組み。手入力があれば手入力を優先）。
+          </li>
+          <li>単品行の「セット行」ボタンで、数量違いのセット商品行を自動展開できます（販売価格だけ入力すれば OK。バリエーションキーも引き継がれます）。</li>
           <li>Enter キーで下の行へ移動します（Excel と同じ操作感。最終行では行が自動追加されます）。</li>
-          <li>「テンプレートDL」で列見出し＋入力例入りの CSV を取得し、Excel で記入 → コピーして「貼り付け取込」できます。</li>
+          <li>「テンプレートDL」で列見出し＋入力例（バリエーション統合の2行デモ付き）入りの CSV を取得し、Excel で記入 → コピーして「貼り付け取込」できます。</li>
           <li>商品説明文などの長文列は、セルの「✎」を押すと下の拡大エディタで編集できます。</li>
         </ul>
       </div>
@@ -227,8 +298,8 @@ export function BulkGridEditor() {
         <div className="rounded border border-slate-200 bg-white p-3 space-y-2">
           <p className="text-sm text-slate-600">
             Excel（ダウンロードしたテンプレート、または従来のデータ入力シート）で行を選択してコピーし、下の枠に貼り付けてください。
-            列の並びはこのグリッドと同じです（従来どおり基本18列だけの貼り付けも可）。
-            見出し行や左端の空列が含まれていても自動で読み飛ばします。NEコード・掲載商品名が空欄なら自動補完します。
+            列の並びはこのグリッドと同じです（従来どおり基本18列・バリエーションキー無しの27列だけの貼り付けも可）。
+            見出し行・左端の空列・「※」で始まる説明行が含まれていても自動で読み飛ばします。NEコード・掲載商品名が空欄なら自動補完します。
           </p>
           <textarea
             value={pasteText}
@@ -275,7 +346,7 @@ export function BulkGridEditor() {
             </tr>
             {/* 2段目: 列見出し（* = 必須、⚡ = 自動補完、✎ = 長文は拡大エディタで編集） */}
             <tr>
-              {ALL_GRID_COLUMNS.map((col) => (
+              {BULK_GRID_COLUMNS.map((col) => (
                 <th key={col.key} className="px-1 py-2 text-left whitespace-nowrap sticky top-6 z-20 bg-slate-100" title={col.autoHint ?? ""}>
                   <span className={col.width + " inline-block px-1"}>
                     {col.label}
@@ -294,8 +365,8 @@ export function BulkGridEditor() {
               return (
                 <tr key={r.uid} className="border-t border-slate-100 align-top">
                   <td className="px-2 py-1 text-slate-400 sticky left-0 bg-white z-10">{rowIndex + 1}</td>
-                  {ALL_GRID_COLUMNS.map((col) => {
-                    const value = r.data[col.key];
+                  {BULK_GRID_COLUMNS.map((col) => {
+                    const value = r.data[col.key] ?? "";
                     const cellClass =
                       "w-full rounded border px-1 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 " +
                       (!blank && errors.length > 0 ? "border-red-200 " : "border-slate-200 ") +
