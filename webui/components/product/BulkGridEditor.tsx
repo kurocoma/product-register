@@ -16,11 +16,14 @@ import {
   columnGroups,
   emptyGridRow,
   expandSetRows,
+  fillDown,
   isRowBlank,
+  parseClipboardColumn,
   parseQuantities,
   parseTsv,
   validateGridRows,
 } from "@/lib/product/grid-rows";
+import { CategoryAssistPanel } from "@/components/product/CategoryAssistPanel";
 import {
   fetchGenreAttributes,
   type GenreAttribute,
@@ -94,6 +97,8 @@ export function BulkGridEditor() {
   const [summary, setSummary] = useState("");
   /** 長文セル（説明文HTML等）の拡大エディタで開いているセル。行は uid で追跡（行削除でズレない）。 */
   const [expandedCell, setExpandedCell] = useState<{ uid: number; key: GridColumnKey } | null>(null);
+  /** カテゴリ読み込みパネルの対象行。セル操作・行番号クリックで追跡（uid = 行削除でズレない）。 */
+  const [activeUid, setActiveUid] = useState<number | null>(null);
   const pendingFocusRef = useRef<{ rowIndex: number; key: string } | null>(null);
 
   // 行追加直後の Enter 移動先へフォーカス（新しい行の描画完了後に実行）
@@ -107,6 +112,12 @@ export function BulkGridEditor() {
   const validation = useMemo(() => validateGridRows(rows.map((r) => r.data)), [rows]);
   const filledCount = useMemo(() => rows.filter((r) => !isRowBlank(r.data)).length, [rows]);
   const groups = useMemo(() => columnGroups(BULK_GRID_COLUMNS), []);
+
+  /** カテゴリ読み込みパネルの対象行 index。未選択・削除済みなら先頭行。 */
+  const activeRowIndex = useMemo(() => {
+    const i = rows.findIndex((r) => r.uid === activeUid);
+    return i >= 0 ? i : 0;
+  }, [rows, activeUid]);
 
   /** 拡大エディタの対象行（削除済みなら null → パネルは自動で閉じる） */
   const expandedTarget = useMemo(() => {
@@ -135,6 +146,69 @@ export function BulkGridEditor() {
     setRows((prev) =>
       prev.map((r, i) => (i === rowIndex ? { ...r, data: applyFieldChange(r.data, key, value), result: undefined } : r)),
     );
+  };
+
+  /** 1行の行データを差し替える（カテゴリ読み込みパネルの属性値入力・Yahoo適用から使う）。 */
+  const updateRowData = (rowIndex: number, next: GridRow) => {
+    setRows((prev) => prev.map((r, i) => (i === rowIndex ? { ...r, data: next, result: undefined } : r)));
+  };
+
+  /** 複数行の行データをまとめて差し替える（フィルダウン・同カテゴリ一括適用から使う）。
+   * 参照が変わった行だけ result をリセットする。 */
+  const updateRowsData = (next: GridRow[]) => {
+    setRows((prev) => prev.map((r, i) => (next[i] === r.data ? r : { ...r, data: next[i] ?? r.data, result: undefined })));
+  };
+
+  /** 列方向の貼り付け: values を rowIndex のセルから下方向へ展開する（不足行は自動追加）。 */
+  const pasteColumnValues = (rowIndex: number, key: GridColumnKey, values: string[]) => {
+    const label = BULK_GRID_COLUMNS.find((c) => c.key === key)?.label ?? key;
+    setRows((prev) => {
+      const next = [...prev];
+      while (next.length < rowIndex + values.length) next.push(newRow());
+      return next.map((r, i) => {
+        const vi = i - rowIndex;
+        if (vi < 0 || vi >= values.length) return r;
+        return { ...r, data: applyFieldChange(r.data, key, values[vi]), result: undefined };
+      });
+    });
+    setSummary(
+      values.length === 1
+        ? `「${label}」の ${rowIndex + 1} 行目に貼り付けました`
+        : `「${label}」の ${rowIndex + 1}〜${rowIndex + values.length} 行目に ${values.length} 件を下方向へ貼り付けました`,
+    );
+  };
+
+  /** グリッドのセルへの貼り付け（Excel の列コピー対応）。
+   * - タブなし・改行あり（Excel の1列コピー）→ そのセルから下方向へ展開（セル内改行のクォートも解釈）
+   * - タブあり（表全体のコピー）→ 従来の貼り付け取込と同じ行追加（parseTsv）
+   * - 改行もタブもない単一値 → ブラウザ標準の貼り付けのまま */
+  const onCellPaste = (e: React.ClipboardEvent, rowIndex: number, key: GridColumnKey) => {
+    const text = e.clipboardData.getData("text");
+    if (!text.includes("\t") && !text.includes("\n")) return;
+    e.preventDefault();
+    if (text.includes("\t")) {
+      importTsv(text);
+      return;
+    }
+    const values = parseClipboardColumn(text);
+    if (values.length === 0) return;
+    pasteColumnValues(rowIndex, key, values);
+  };
+
+  /** 下方向コピー（フィルダウン）: セルの値を最終行までコピーする（確認ダイアログ付き）。 */
+  const fillDownFrom = (rowIndex: number, key: GridColumnKey) => {
+    const label = BULK_GRID_COLUMNS.find((c) => c.key === key)?.label ?? key;
+    const count = rows.length - 1 - rowIndex;
+    if (count <= 0) {
+      window.alert("コピー先の行がありません（最終行のセルです。先に「+ 行を追加」してください）。");
+      return;
+    }
+    const ok = window.confirm(
+      `「${label}」の ${rowIndex + 1} 行目の値を、下の ${count} 行（${rows.length} 行目まで）へコピーします。よろしいですか？`,
+    );
+    if (!ok) return;
+    updateRowsData(fillDown(rows.map((r) => r.data), key, rowIndex));
+    setSummary(`「${label}」を ${rowIndex + 2}〜${rows.length} 行目（${count} 行）へ下方向コピーしました`);
   };
 
   const addRow = () => setRows((prev) => [...prev, newRow()]);
@@ -287,6 +361,15 @@ export function BulkGridEditor() {
             カテゴリは<span className="font-semibold">モール基本カテゴリIDだけ入力すればOK</span>です。
             保存時に商品属性（項目・単位）と YahooカテゴリID/パスを自動補完します（商品編集画面と同じ仕組み。手入力があれば手入力を優先）。
           </li>
+          <li>
+            モール基本カテゴリID⚡を入力したら、右の<span className="font-semibold">カテゴリ読み込みパネル</span>の「📥 読み込み」で
+            商品属性の項目・単位と Yahoo カテゴリ候補を先に表示できます（値を入力するだけで対象行に反映。対象行はセルまたは行番号のクリックで切替）。
+          </li>
+          <li>
+            <span className="font-semibold">Excel の1列コピー（縦方向）</span>は、貼り付けたいセルに Ctrl+V するとそのセルから下方向へ展開されます
+            （行が足りなければ自動追加。セル内改行を含む値も1セル=1値で取り込みます）。表全体のコピー（複数列）は従来どおり行として取り込みます。
+          </li>
+          <li>各セル右の「↓」で、そのセルの値を最終行まで<span className="font-semibold">下方向コピー</span>できます（コピー件数を確認してから実行）。</li>
           <li>単品行の「セット行」ボタンで、数量違いのセット商品行を自動展開できます（販売価格だけ入力すれば OK。バリエーションキーも引き継がれます）。</li>
           <li>Enter キーで下の行へ移動します（Excel と同じ操作感。最終行では行が自動追加されます）。</li>
           <li>「テンプレートDL」で列見出し＋入力例（バリエーション統合の2行デモ付き）入りの CSV を取得し、Excel で記入 → コピーして「貼り付け取込」できます。</li>
@@ -337,7 +420,9 @@ export function BulkGridEditor() {
         </div>
       )}
 
-      <div className="bg-white rounded border border-slate-200 overflow-auto max-h-[70vh]">
+      {/* 左: グリッド / 右: カテゴリ読み込みパネル（対象行の属性・Yahoo候補） */}
+      <div className="flex items-start gap-4">
+      <div className="flex-1 min-w-0 bg-white rounded border border-slate-200 overflow-auto max-h-[70vh]">
         <table className="text-xs border-collapse">
           <thead>
             {/* 1段目: 列グループ見出し（基本情報/価格/配送/カテゴリ/商品説明/Yahoo）。縦スクロールしても固定。 */}
@@ -376,9 +461,19 @@ export function BulkGridEditor() {
             {rows.map((r, rowIndex) => {
               const errors = validation.get(rowIndex) ?? [];
               const blank = isRowBlank(r.data);
+              const isActiveRow = rowIndex === activeRowIndex;
               return (
                 <tr key={r.uid} className="border-t border-slate-100 align-top">
-                  <td className="px-2 py-1 text-slate-400 sticky left-0 bg-white z-10">{rowIndex + 1}</td>
+                  <td
+                    className={
+                      "px-2 py-1 sticky left-0 z-10 cursor-pointer " +
+                      (isActiveRow ? "bg-emerald-100 text-emerald-800 font-semibold" : "bg-white text-slate-400 hover:bg-emerald-50")
+                    }
+                    onClick={() => setActiveUid(r.uid)}
+                    title="クリックすると右のカテゴリ読み込みパネルの対象行になります"
+                  >
+                    {rowIndex + 1}
+                  </td>
                   {BULK_GRID_COLUMNS.map((col) => {
                     const value = r.data[col.key] ?? "";
                     const cellClass =
@@ -388,46 +483,63 @@ export function BulkGridEditor() {
                     const isExpanded = expandedCell?.uid === r.uid && expandedCell?.key === col.key;
                     return (
                       <td key={col.key} className="px-1 py-1">
-                        <div className={col.width}>
-                          {col.long ? (
-                            <button
-                              type="button"
-                              id={cellId(rowIndex, col.key)}
-                              onClick={() => setExpandedCell(isExpanded ? null : { uid: r.uid, key: col.key })}
-                              title="クリックすると下の拡大エディタで編集できます（HTML可）"
-                              className={
-                                cellClass +
-                                "block truncate text-left bg-white hover:bg-violet-50 " +
-                                (isExpanded ? "ring-2 ring-violet-400 " : "") +
-                                (value.trim() === "" ? "text-slate-400" : "")
-                              }
-                            >
-                              {value.trim() === "" ? "✎ 入力…" : `✎ (${value.length}) ${value}`}
-                            </button>
-                          ) : col.input === "select" ? (
-                            <select
-                              id={cellId(rowIndex, col.key)}
-                              value={value}
-                              onChange={(e) => editCell(rowIndex, col.key, e.target.value)}
-                              onKeyDown={(e) => onCellKeyDown(e, rowIndex, col.key)}
-                              className={cellClass + "bg-white"}
-                            >
-                              {(col.options ?? []).includes(value) ? null : <option value={value}>{value}</option>}
-                              {(col.options ?? []).map((o) => (
-                                <option key={o} value={o}>{o}</option>
-                              ))}
-                            </select>
-                          ) : (
-                            <input
-                              id={cellId(rowIndex, col.key)}
-                              type="text"
-                              inputMode={col.input === "number" ? "numeric" : undefined}
-                              value={value}
-                              onChange={(e) => editCell(rowIndex, col.key, e.target.value)}
-                              onKeyDown={(e) => onCellKeyDown(e, rowIndex, col.key)}
-                              className={cellClass + (col.input === "number" ? "text-right" : "")}
-                            />
-                          )}
+                        <div className={col.width + " flex items-center gap-0.5"}>
+                          <div className="flex-1 min-w-0">
+                            {col.long ? (
+                              <button
+                                type="button"
+                                id={cellId(rowIndex, col.key)}
+                                onClick={() => setExpandedCell(isExpanded ? null : { uid: r.uid, key: col.key })}
+                                onFocus={() => setActiveUid(r.uid)}
+                                onPaste={(e) => onCellPaste(e, rowIndex, col.key)}
+                                title="クリックすると下の拡大エディタで編集できます（HTML可）。Excel の列コピーはこのセルに Ctrl+V で下方向へ貼り付けられます"
+                                className={
+                                  cellClass +
+                                  "block truncate text-left bg-white hover:bg-violet-50 " +
+                                  (isExpanded ? "ring-2 ring-violet-400 " : "") +
+                                  (value.trim() === "" ? "text-slate-400" : "")
+                                }
+                              >
+                                {value.trim() === "" ? "✎ 入力…" : `✎ (${value.length}) ${value}`}
+                              </button>
+                            ) : col.input === "select" ? (
+                              <select
+                                id={cellId(rowIndex, col.key)}
+                                value={value}
+                                onChange={(e) => editCell(rowIndex, col.key, e.target.value)}
+                                onKeyDown={(e) => onCellKeyDown(e, rowIndex, col.key)}
+                                onFocus={() => setActiveUid(r.uid)}
+                                onPaste={(e) => onCellPaste(e, rowIndex, col.key)}
+                                className={cellClass + "bg-white"}
+                              >
+                                {(col.options ?? []).includes(value) ? null : <option value={value}>{value}</option>}
+                                {(col.options ?? []).map((o) => (
+                                  <option key={o} value={o}>{o}</option>
+                                ))}
+                              </select>
+                            ) : (
+                              <input
+                                id={cellId(rowIndex, col.key)}
+                                type="text"
+                                inputMode={col.input === "number" ? "numeric" : undefined}
+                                value={value}
+                                onChange={(e) => editCell(rowIndex, col.key, e.target.value)}
+                                onKeyDown={(e) => onCellKeyDown(e, rowIndex, col.key)}
+                                onFocus={() => setActiveUid(r.uid)}
+                                onPaste={(e) => onCellPaste(e, rowIndex, col.key)}
+                                className={cellClass + (col.input === "number" ? "text-right" : "")}
+                              />
+                            )}
+                          </div>
+                          <button
+                            type="button"
+                            tabIndex={-1}
+                            onClick={() => fillDownFrom(rowIndex, col.key)}
+                            title={`「${col.label}」のこの値を最終行まで下方向コピーします（コピー件数を確認してから実行）`}
+                            className="shrink-0 rounded px-0.5 text-[10px] leading-4 text-slate-300 hover:text-blue-700 hover:bg-blue-100"
+                          >
+                            ↓
+                          </button>
                         </div>
                       </td>
                     );
@@ -475,6 +587,14 @@ export function BulkGridEditor() {
             })}
           </tbody>
         </table>
+      </div>
+
+      <CategoryAssistPanel
+        rows={rows.map((row) => row.data)}
+        selectedIndex={activeRowIndex}
+        onRowChange={updateRowData}
+        onRowsChange={updateRowsData}
+      />
       </div>
 
       {/* 長文列（説明文HTML等）の拡大エディタ。セル内編集の苦痛を避け、行の ✎ セルをクリックで開く。 */}

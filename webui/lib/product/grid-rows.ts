@@ -29,6 +29,10 @@ import { ProductInputSchema, type ProductInput } from "./schema";
  * - Excel からのコピー（TSV）を parseTsv で行に変換 → 既存シートからの移行はコピペのみ
  */
 
+/** 商品属性1件分（カテゴリ読み込みパネルで入力する項目・値・単位）。
+ * schema.ts の AttributeSchema / genreAttributesToInputs と同形。 */
+export type GridRowAttribute = { item: string; value: string; unit: string; requirement: string };
+
 /** グリッド1行。入力途中の値を保持するため全て文字列で持つ（数値変換は保存時）。 */
 export type GridRow = {
   ne_code: string;
@@ -62,11 +66,16 @@ export type GridRow = {
   /** バリエーションキー（同じ値の行は保存時に1商品へ統合）。
    * 既存27列の後方互換を保つため optional（未入力の行はプロパティ自体を持たない）。 */
   variation_key?: string;
+  /** 商品属性（カテゴリ読み込みパネルで入力した項目・値・単位）。
+   * グリッド列ではなく行に紐づく付帯データ。optional（後方互換）。
+   * 保存時は ProductInput.attributes に入り、カテゴリ由来の自動補完（applyCategoryAutofill）は
+   * ここに入力済みの値を item 単位で保持する（手入力優先の既存規則のまま）。 */
+  attributes?: GridRowAttribute[];
   /** 自動補完の管理フラグ。ユーザーが手入力したら false になり追従を止める。 */
   auto: { ne_code: boolean; display_name: boolean };
 };
 
-export type GridColumnKey = Exclude<keyof GridRow, "auto">;
+export type GridColumnKey = Exclude<keyof GridRow, "auto" | "attributes">;
 
 export type GridColumn = {
   key: GridColumnKey;
@@ -347,6 +356,9 @@ function gridRowToRaw(row: GridRow): Record<string, unknown> {
     yahoo_path: row.yahoo_path.trim(),
     unit: row.unit.trim(),
     variation_key: (row.variation_key ?? "").trim(),
+    // カテゴリ読み込みパネルで入力した商品属性（項目・値・単位）。
+    // 保存時の自動補完（applyCategoryAutofill）は item 単位でこの値を保持する（手入力優先）。
+    attributes: row.attributes ?? [],
   };
 }
 
@@ -443,6 +455,44 @@ export function parseTsv(text: string): GridRow[] {
   return out;
 }
 
+/** Excel の「1列だけ」のコピー（タブなし・改行区切り）をセル値の配列に変換する。
+ * グリッドの任意のセルへ貼り付けたとき「そのセルから下方向へ展開」するために使う（列方向貼り付け）。
+ * - Excel はセル内改行を含むセルをダブルクォートで包む（例: 複数行HTMLの free2 列）
+ *   → papaparse の RFC 風クォート解釈で 1セル=1値 として取り込む（"" エスケープも対応）
+ * - Excel のコピーは必ず末尾に改行が付く → それ由来の最終空要素だけ除去する
+ *   （途中の空セルは「空値の貼り付け」として保持し、行ズレを起こさない）
+ * - 値は加工しない（HTML の空白・改行をそのまま保持する）。複数列（タブ入り）を渡された場合は
+ *   各行の先頭列だけを返す（呼び出し側がタブ有無で表貼り付けと分岐する前提）。 */
+export function parseClipboardColumn(text: string): string[] {
+  if (text === "") return [];
+  const parsed = Papa.parse<string[]>(text, { delimiter: "\t" });
+  const values = (parsed.data ?? []).map((r) => r[0] ?? "");
+  if (values.length > 0 && values[values.length - 1] === "") values.pop();
+  return values;
+}
+
+/** フィルダウン（下方向コピー）: rows[fromIndex] の key 列の値を、下の行へコピーする純関数。
+ * - count 省略時は最終行まで、指定時は fromIndex+count 行目まで（配列の範囲内に丸める）。
+ * - 反映は applyFieldChange 経由（例: JANコードをコピーすると自動追従中の NEコードが再生成される、
+ *   NEコード列へのコピーは自動追従を止める、といったセル編集と同じ連動をする）。
+ * - コピー先が無い場合は同じ配列をそのまま返す（呼び出し側が no-op を判定できる）。 */
+export function fillDown(
+  rows: GridRow[],
+  key: GridColumnKey,
+  fromIndex: number,
+  count?: number,
+): GridRow[] {
+  const source = rows[fromIndex];
+  if (!source) return rows;
+  const value = source[key] ?? "";
+  const end =
+    count === undefined
+      ? rows.length - 1
+      : Math.min(fromIndex + Math.max(0, Math.floor(count)), rows.length - 1);
+  if (end <= fromIndex) return rows;
+  return rows.map((row, i) => (i > fromIndex && i <= end ? applyFieldChange(row, key, value) : row));
+}
+
 /** buildProductsFromRows の1件分。保存する ProductInput と、元になった行の対応を持つ。 */
 export type BuiltProduct = {
   /** 保存する商品。行に入力エラーがある場合は null（理由は errors）。 */
@@ -519,6 +569,9 @@ export function buildProductsFromRows(rows: GridRow[]): BuiltProduct[] {
         quantity: toNumber(row.quantity),
         variation_value: variationLabelOf(row),
         shipping_type: row.shipping_type.trim() || "送料別",
+        // 行の商品属性はSKU単位にも持たせる（楽天はジャンル必須属性を variant 単位で送るため。
+        // 保存時の applyCategoryAutofill が variant.attributes にも同じマージ規則を適用する）
+        attributes: row.attributes ?? [],
       }));
       const input = ProductInputSchema.parse({
         ...gridRowToRaw(rep.row),
