@@ -126,11 +126,15 @@ export function CategoryAssistPanel({ rows, selectedIndex, onRowChange, onRowsCh
     setMessage(`商品属性の値を、同じカテゴリID ${categoryId} の他 ${result.appliedRows} 行へコピーしました`);
   };
 
-  /** 読み込んだ属性定義から単位の候補ヒントを引く（ツールチップ表示用） */
-  const unitHint = (item: string): string => {
+  /** 読み込んだ属性定義から単位の候補一覧を引く（datalist の選択肢・ツールチップ表示用）。
+   * マスタの unit_choices はパイプ区切り（例: 分|時間）。一部データの / 区切りも許容する。 */
+  const unitChoicesOf = (item: string): string[] => {
     const def = current?.attrs.find((a) => a.item_name === item);
-    if (!def) return "";
-    return def.unit_choices ? `単位の候補: ${def.unit_choices}` : "";
+    if (!def?.unit_choices) return [];
+    return def.unit_choices
+      .split(/[|/]/)
+      .map((u) => u.trim())
+      .filter((u) => u !== "");
   };
 
   return (
@@ -181,6 +185,8 @@ export function CategoryAssistPanel({ rows, selectedIndex, onRowChange, onRowsCh
           <div className="space-y-1.5">
             {attributes.map((a, i) => {
               const required = isRequiredAttribute(a.requirement);
+              const unitChoices = unitChoicesOf(a.item);
+              const unitListId = unitChoices.length > 0 ? `bulk-unit-choices-${i}` : undefined;
               return (
                 <div
                   key={`${a.item}-${i}`}
@@ -209,10 +215,19 @@ export function CategoryAssistPanel({ rows, selectedIndex, onRowChange, onRowsCh
                       type="text"
                       value={a.unit}
                       placeholder="単位"
-                      title={unitHint(a.item)}
+                      list={unitListId}
+                      title={unitChoices.length > 0 ? `単位の候補: ${unitChoices.join(" / ")}` : ""}
                       onChange={(e) => row && onRowChange(selectedIndex, setRowAttribute(row, i, { unit: e.target.value }))}
                       className="w-16 rounded border border-slate-300 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
                     />
+                    {/* 単位の入力ミス防止: マスタの unit_choices を datalist で候補表示（自由入力も可） */}
+                    {unitListId && (
+                      <datalist id={unitListId}>
+                        {unitChoices.map((u) => (
+                          <option key={u} value={u} />
+                        ))}
+                      </datalist>
+                    )}
                   </div>
                 </div>
               );

@@ -455,6 +455,26 @@ export function parseTsv(text: string): GridRow[] {
   return out;
 }
 
+/** グリッドのセルへ貼り付けられたテキストのルーティング判定（列方向貼り付け/表取込/標準貼り付け）。
+ * 生テキストの文字検査（`\t` の有無）では、クォート済みセル内のタブ（例: タブでインデントされた
+ * 複数行HTMLの free2 列を1列コピーした場合）を表コピーと誤判定してしまう。
+ * papaparse は引用構造を解釈できるため、先にクォート対応でパースし「結果の列数」で判定する:
+ * - "single": 改行もタブも含まない単一値 → ブラウザ標準の貼り付けに任せる（カーソル位置へ挿入）
+ * - "table" : パース後に2列以上の行がある（Excel の表全体・複数列コピー）→ parseTsv で行取込
+ * - "column": パース後も1列幅（クォート内のタブ・改行は1セルの中身）→ parseClipboardColumn で下方向展開 */
+export function classifyClipboard(text: string): "single" | "column" | "table" {
+  if (!text.includes("\t") && !text.includes("\n")) return "single";
+  const parsed = Papa.parse<string[]>(text, { delimiter: "\t" });
+  let rows = parsed.data ?? [];
+  // Excel のコピーは必ず末尾に改行が付き、パース結果の最終行が空1セルになる → 列数判定から除外
+  if (rows.length > 0) {
+    const last = rows[rows.length - 1];
+    if (last.length === 1 && (last[0] ?? "") === "") rows = rows.slice(0, -1);
+  }
+  if (rows.length === 0) return "single";
+  return rows.some((r) => r.length > 1) ? "table" : "column";
+}
+
 /** Excel の「1列だけ」のコピー（タブなし・改行区切り）をセル値の配列に変換する。
  * グリッドの任意のセルへ貼り付けたとき「そのセルから下方向へ展開」するために使う（列方向貼り付け）。
  * - Excel はセル内改行を含むセルをダブルクォートで包む（例: 複数行HTMLの free2 列）
@@ -462,7 +482,7 @@ export function parseTsv(text: string): GridRow[] {
  * - Excel のコピーは必ず末尾に改行が付く → それ由来の最終空要素だけ除去する
  *   （途中の空セルは「空値の貼り付け」として保持し、行ズレを起こさない）
  * - 値は加工しない（HTML の空白・改行をそのまま保持する）。複数列（タブ入り）を渡された場合は
- *   各行の先頭列だけを返す（呼び出し側がタブ有無で表貼り付けと分岐する前提）。 */
+ *   各行の先頭列だけを返す（呼び出し側が classifyClipboard で表貼り付けと分岐する前提）。 */
 export function parseClipboardColumn(text: string): string[] {
   if (text === "") return [];
   const parsed = Papa.parse<string[]>(text, { delimiter: "\t" });

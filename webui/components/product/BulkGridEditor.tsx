@@ -13,6 +13,7 @@ import {
   applyFieldChange,
   buildProductsFromRows,
   buildTemplateCsv,
+  classifyClipboard,
   columnGroups,
   emptyGridRow,
   expandSetRows,
@@ -179,14 +180,17 @@ export function BulkGridEditor() {
   };
 
   /** グリッドのセルへの貼り付け（Excel の列コピー対応）。
-   * - タブなし・改行あり（Excel の1列コピー）→ そのセルから下方向へ展開（セル内改行のクォートも解釈）
-   * - タブあり（表全体のコピー）→ 従来の貼り付け取込と同じ行追加（parseTsv）
-   * - 改行もタブもない単一値 → ブラウザ標準の貼り付けのまま */
+   * 振り分けは classifyClipboard（クォート対応パース後の列数判定。クォート済みセル内の
+   * タブ・改行は1セルの中身として扱うため、タブ入りHTMLの1列コピーも表取込へ誤ルートしない）:
+   * - column（1列コピー）→ そのセルから下方向へ展開
+   * - table（2列以上 = 表全体のコピー）→ 従来の貼り付け取込と同じ行追加（parseTsv）
+   * - single（改行もタブもない単一値）→ ブラウザ標準の貼り付けのまま */
   const onCellPaste = (e: React.ClipboardEvent, rowIndex: number, key: GridColumnKey) => {
     const text = e.clipboardData.getData("text");
-    if (!text.includes("\t") && !text.includes("\n")) return;
+    const kind = classifyClipboard(text);
+    if (kind === "single") return;
     e.preventDefault();
-    if (text.includes("\t")) {
+    if (kind === "table") {
       importTsv(text);
       return;
     }
@@ -195,29 +199,43 @@ export function BulkGridEditor() {
     pasteColumnValues(rowIndex, key, values);
   };
 
-  /** 下方向コピー（フィルダウン）: セルの値を最終行までコピーする（確認ダイアログ付き）。 */
+  /** 下方向コピー（フィルダウン）: セルの値を下の行へコピーする。
+   * コピーする行数は入力で指定できる（そのまま OK なら従来どおり最終行まで。
+   * fillDown の count 引数を使うため、途中の行までの範囲コピーができる）。 */
   const fillDownFrom = (rowIndex: number, key: GridColumnKey) => {
     const label = BULK_GRID_COLUMNS.find((c) => c.key === key)?.label ?? key;
-    const count = rows.length - 1 - rowIndex;
-    if (count <= 0) {
+    const max = rows.length - 1 - rowIndex;
+    if (max <= 0) {
       window.alert("コピー先の行がありません（最終行のセルです。先に「+ 行を追加」してください）。");
       return;
     }
-    const ok = window.confirm(
-      `「${label}」の ${rowIndex + 1} 行目の値を、下の ${count} 行（${rows.length} 行目まで）へコピーします。よろしいですか？`,
+    const answer = window.prompt(
+      `「${label}」の ${rowIndex + 1} 行目の値を下方向へコピーします。\n` +
+        `コピーする行数を入力してください（1〜${max}。そのまま OK で最終行の ${rows.length} 行目まで）`,
+      String(max),
     );
-    if (!ok) return;
-    updateRowsData(fillDown(rows.map((r) => r.data), key, rowIndex));
-    setSummary(`「${label}」を ${rowIndex + 2}〜${rows.length} 行目（${count} 行）へ下方向コピーしました`);
+    if (answer == null) return; // キャンセル
+    const count = answer.trim() === "" ? max : Number(answer.trim());
+    if (!Number.isInteger(count) || count < 1 || count > max) {
+      window.alert(`コピーする行数は 1〜${max} の整数で入力してください。`);
+      return;
+    }
+    updateRowsData(fillDown(rows.map((r) => r.data), key, rowIndex, count));
+    setSummary(`「${label}」を ${rowIndex + 2}〜${rowIndex + 1 + count} 行目（${count} 行）へ下方向コピーしました`);
   };
 
   const addRow = () => setRows((prev) => [...prev, newRow()]);
 
+  /** 行削除。カテゴリ読み込みパネルの対象行を消したときは、直近の行（同じ位置に繰り上がった行、
+   * 最終行を消したときはその上の行）を対象に維持する（先頭行へ暗黙に戻さない）。 */
   const removeRow = (rowIndex: number) => {
-    setRows((prev) => {
-      const next = prev.filter((_, i) => i !== rowIndex);
-      return next.length === 0 ? [newRow()] : next;
-    });
+    const removed = rows[rowIndex];
+    const rest = rows.filter((_, i) => i !== rowIndex);
+    const next = rest.length === 0 ? [newRow()] : rest;
+    if (removed && removed.uid === activeUid) {
+      setActiveUid(next[Math.min(rowIndex, next.length - 1)].uid);
+    }
+    setRows(next);
   };
 
   /** 単品行からセット行を自動展開（省力化）。数量以外の共通項目は引き継ぎ、価格だけ入力する。 */
@@ -369,7 +387,7 @@ export function BulkGridEditor() {
             <span className="font-semibold">Excel の1列コピー（縦方向）</span>は、貼り付けたいセルに Ctrl+V するとそのセルから下方向へ展開されます
             （行が足りなければ自動追加。セル内改行を含む値も1セル=1値で取り込みます）。表全体のコピー（複数列）は従来どおり行として取り込みます。
           </li>
-          <li>各セル右の「↓」で、そのセルの値を最終行まで<span className="font-semibold">下方向コピー</span>できます（コピー件数を確認してから実行）。</li>
+          <li>各セル右の「↓」で、そのセルの値を<span className="font-semibold">下方向コピー</span>できます（コピーする行数を指定可能。そのまま OK で最終行まで）。</li>
           <li>単品行の「セット行」ボタンで、数量違いのセット商品行を自動展開できます（販売価格だけ入力すれば OK。バリエーションキーも引き継がれます）。</li>
           <li>Enter キーで下の行へ移動します（Excel と同じ操作感。最終行では行が自動追加されます）。</li>
           <li>「テンプレートDL」で列見出し＋入力例（バリエーション統合の2行デモ付き）入りの CSV を取得し、Excel で記入 → コピーして「貼り付け取込」できます。</li>
@@ -535,7 +553,7 @@ export function BulkGridEditor() {
                             type="button"
                             tabIndex={-1}
                             onClick={() => fillDownFrom(rowIndex, col.key)}
-                            title={`「${col.label}」のこの値を最終行まで下方向コピーします（コピー件数を確認してから実行）`}
+                            title={`「${col.label}」のこの値を下方向コピーします（コピーする行数を指定可能。そのまま OK で最終行まで）`}
                             className="shrink-0 rounded px-0.5 text-[10px] leading-4 text-slate-300 hover:text-blue-700 hover:bg-blue-100"
                           >
                             ↓
