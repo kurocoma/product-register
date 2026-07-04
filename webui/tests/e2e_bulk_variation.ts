@@ -90,9 +90,9 @@ import { readFileSync } from "node:fs";
   {
     const attrs = await fetchGenreAttributes(ssr as any, product.mall_category_id);
     const yahoo = await fetchYahooCategoryMapping(ssr as any, product.mall_category_id);
-    // テンプレ例は yahoo_category_id 入り → 手入力優先の確認のため一旦空にして補完させる
-    const blank = { ...product, yahoo_category_id: "", yahoo_path: "" };
-    const { product: filledProduct, filled } = applyCategoryAutofill(blank as any, attrs, yahoo);
+    // テンプレ例の Yahoo 2列は空欄（「カテゴリIDのみ入力→保存で補完」を例自体が体現）→ そのまま補完させる
+    record("テンプレ例のYahooカテゴリID/パスは空欄（自動補完デモ）", product.yahoo_category_id === "" && product.yahoo_path === "", `id=「${product.yahoo_category_id}」 path=「${product.yahoo_path}」`);
+    const { product: filledProduct, filled } = applyCategoryAutofill(product as any, attrs, yahoo);
     record(`カテゴリ${product.mall_category_id}の推奨属性取得（products/newと同一ソース）`, true, `attrs=${attrs.length}件, yahoo=${yahoo ? yahoo.yahoo_category_id : "なし"}`);
     if (attrs.length > 0) {
       record("商品属性（項目・単位）が自動設定される", filled.attributes && filledProduct.attributes.length === attrs.length && filledProduct.variants.every((v) => v.attributes.length === attrs.length),
@@ -100,9 +100,10 @@ import { readFileSync } from "node:fs";
     }
     if (yahoo) {
       record("YahooカテゴリIDが自動補完される", filled.yahoo && filledProduct.yahoo_category_id === yahoo.yahoo_category_id, `yahoo_category_id=${filledProduct.yahoo_category_id}`);
-      // 手入力優先: 元のテンプレ値(13457)が入っている場合は上書きされない
-      const { product: kept } = applyCategoryAutofill(product, attrs, yahoo);
-      record("手入力のYahooカテゴリIDは上書きしない", kept.yahoo_category_id === product.yahoo_category_id, `kept=${kept.yahoo_category_id}`);
+      // 手入力優先: 手で値を入れた場合は上書きされない
+      const manual = { ...product, yahoo_category_id: "99999", yahoo_path: "手入力＞パス" };
+      const { product: kept } = applyCategoryAutofill(manual as any, attrs, yahoo);
+      record("手入力のYahooカテゴリIDは上書きしない", kept.yahoo_category_id === "99999" && kept.yahoo_path === "手入力＞パス", `kept=${kept.yahoo_category_id}`);
       product = filledProduct as any;
     }
   }

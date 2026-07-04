@@ -146,8 +146,10 @@ export function BulkRegisterPanel({
   };
 
   const judgeLabel = (r: BulkItemResult, committed: boolean) => {
+    // Yahoo の統合商品（多SKU）のSKU別集約（例「4SKU中4件登録」）等の補足表示
+    const note = r.note ? <span className="text-slate-500">（{r.note}）</span> : null;
     if (committed) {
-      if (r.ok) return <span className="text-green-700">✓ {r.action === "update" ? "上書き更新しました" : "新規登録しました"}</span>;
+      if (r.ok) return <span className="text-green-700">✓ {r.action === "update" ? "上書き更新しました" : "新規登録しました"}{note}</span>;
       if (r.missing && r.missing.length > 0) {
         return <span className="text-red-600">✗ 必須項目不足: {missingFieldLabels(r.missing).join("、")}</span>;
       }
@@ -155,9 +157,9 @@ export function BulkRegisterPanel({
     }
     if (r.ok) {
       return r.willOverwrite ? (
-        <span className="text-amber-700">⚠ 登録可能（既存あり・上書き更新になります）</span>
+        <span className="text-amber-700">⚠ 登録可能（既存あり・上書き更新になります）{note}</span>
       ) : (
-        <span className="text-green-700">○ 登録可能（新規作成）</span>
+        <span className="text-green-700">○ 登録可能（新規作成）{note}</span>
       );
     }
     if (r.missing && r.missing.length > 0) {

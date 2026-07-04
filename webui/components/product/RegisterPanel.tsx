@@ -3,7 +3,11 @@
 import { useState } from "react";
 
 type Mall = "rakuten" | "yahoo";
-type Preview = { valid: boolean; missing: string[]; willOverwrite: boolean; key: string; body?: unknown; params?: unknown };
+type Preview = {
+  valid: boolean; missing: string[]; willOverwrite: boolean; key: string; body?: unknown; params?: unknown;
+  /** Yahoo: 統合商品（多SKU）は SKU ごとに分けて登録するため、その件数（単一商品は 1）。 */
+  skuCount?: number;
+};
 
 /** 商品をモールAPIで直接登録するパネル。CSVダウンロードと並走（置換しない）。
  * 「登録内容を確認(dry-run)」→「登録する」の2段。上書き時は確認。Yahooは反映(submit)を別ボタン。 */
@@ -39,6 +43,7 @@ export function RegisterPanel({ productId }: { productId?: string }) {
         valid: j.valid, missing: j.missing || [], willOverwrite: j.willOverwrite,
         key: mall === "rakuten" ? j.manageNumber : j.itemCode,
         body: j.body, params: j.params,
+        skuCount: typeof j.skuCount === "number" ? j.skuCount : 1,
       });
     } catch (e) { setErr("通信エラー: " + (e instanceof Error ? e.message : String(e))); }
     finally { setBusy(false); }
@@ -57,7 +62,8 @@ export function RegisterPanel({ productId }: { productId?: string }) {
       if (!res.ok || !j.ok) { setErr(j.error || `登録失敗 (HTTP ${res.status})`); return; }
       setMsg(mall === "rakuten"
         ? `✓ 楽天に${j.created ? "新規登録" : "更新"}しました (${j.manageNumber})`
-        : `✓ Yahooに${j.wasUpdate ? "更新" : "登録"}しました (${j.itemCode})。「Yahooに反映」で公開できます`);
+        // 統合商品（多SKU）は SKU 別の成否を集約表示（例「4SKU中4件登録」）
+        : `✓ Yahooに${j.wasUpdate ? "更新" : "登録"}しました (${j.skuSummary ? `${j.itemCode} ほか: ${j.skuSummary.message}` : j.itemCode})。「Yahooに反映」で公開できます`);
     } catch (e) { setErr("通信エラー: " + (e instanceof Error ? e.message : String(e))); }
     finally { setBusy(false); }
   };
@@ -109,6 +115,9 @@ export function RegisterPanel({ productId }: { productId?: string }) {
       {preview && (
         <div className={`text-xs rounded p-2 ${preview.valid ? "bg-slate-50 text-slate-700" : "bg-amber-50 text-amber-800"}`}>
           <div>対象: <span className="font-mono">{preview.key}</span> / {preview.willOverwrite ? "⚠ 既存を上書き" : "新規登録"}</div>
+          {(preview.skuCount ?? 1) > 1 && (
+            <div>Yahooは{preview.skuCount}SKUに分けて登録します（item_code=各SKUのNEコード）</div>
+          )}
           {!preview.valid && <div>必須不足: {preview.missing.join(", ")}</div>}
           {preview.valid && <div className="text-green-700">✓ 必須項目OK。「登録」で送信します</div>}
         </div>

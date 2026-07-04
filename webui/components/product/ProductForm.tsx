@@ -22,6 +22,7 @@ import {
   isRequiredAttribute,
 } from "@/lib/product/genre-attributes";
 import { fetchYahooCategoryMapping } from "@/lib/product/category-mapping";
+import { mergeGenreAttributes } from "@/lib/product/category-autofill";
 import { Accordion, AccordionItem } from "@/components/ui/accordion";
 import { Input, Label } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -422,14 +423,9 @@ function AttributeSection() {
         return;
       }
       // 既存の入力値（item→value/unit）を保持しつつ、推奨項目で置き換える
+      // （マージ規則は一括登録の自動補完と共有の mergeGenreAttributes を使う = 単一実装）
       const current = watch("attributes") || [];
-      const byItem = new Map(current.map((a) => [a.item, a]));
-      const next = genreAttributesToInputs(attrs).map((a) => {
-        const prev = byItem.get(a.item);
-        return prev
-          ? { item: a.item, value: prev.value, unit: prev.unit || a.unit, requirement: a.requirement }
-          : a;
-      });
+      const next = mergeGenreAttributes(current, genreAttributesToInputs(attrs));
       replace(next);
       setMessage(`カテゴリID ${id} の推奨属性 ${next.length} 件を読み込みました`);
     } catch (e) {

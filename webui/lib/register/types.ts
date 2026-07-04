@@ -35,6 +35,8 @@ export type BulkItemResult = {
   error?: string;
   /** commit で実際にモールへ送信し成功したか。 */
   registered?: boolean;
+  /** 補足表示（ユーザー向け日本語）。例: Yahoo の統合商品は「4SKU中4件登録」等のSKU別集約。 */
+  note?: string;
 };
 
 export type BulkSummary = {

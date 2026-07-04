@@ -5,6 +5,7 @@ import {
   getProduct,
   listProducts,
 } from "@/lib/product/repository";
+import { yahooItemsForProduct } from "@/lib/product/yahoo-split";
 import { RakutenConverter, manageNumberOf } from "@/lib/converters/rakuten";
 import { NEConverter } from "@/lib/converters/ne";
 import { YahooConverter } from "@/lib/converters/yahoo";
@@ -55,8 +56,10 @@ export async function GET(
       break;
     }
     case "yahoo": {
+      // Yahoo は統合商品（多SKU）でも SKU ごとに別商品として行を出力する
+      // （ユーザー要件「Yahooは分ける」。item_code = 各SKUのNEコード）
       const c = new YahooConverter();
-      csvRows = c.convert(peers);
+      csvRows = c.convert(peers.flatMap(yahooItemsForProduct));
       encoding = c.encoding;
       filename = FILENAMES.yahoo;
       break;

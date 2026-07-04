@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import JSZip from "jszip";
 import { createClient } from "@/lib/supabase/server";
 import { dbRowToProductInput, listProducts } from "@/lib/product/repository";
+import { yahooItemsForProduct } from "@/lib/product/yahoo-split";
 import { recordHistory } from "@/lib/history/recorder";
 import { RakutenConverter } from "@/lib/converters/rakuten";
 import { NEConverter } from "@/lib/converters/ne";
@@ -32,8 +33,10 @@ export async function POST(req: Request) {
     zip.file("rakuten_normal_item.csv", writeCsv(c.convert(products), c.encoding));
   }
   if (malls.includes("yahoo")) {
+    // Yahoo は統合商品（バリエーションキーで1商品化した多SKU）でも SKU ごとに
+    // 別商品として出力する（ユーザー要件「Yahooは分ける」。従来のSKU別行を維持）
     const c = new YahooConverter();
-    zip.file("yahoo.csv", writeCsv(c.convert(products), c.encoding));
+    zip.file("yahoo.csv", writeCsv(c.convert(products.flatMap(yahooItemsForProduct)), c.encoding));
   }
   if (malls.includes("ne_single") || malls.includes("ne_set")) {
     const c = new NEConverter();

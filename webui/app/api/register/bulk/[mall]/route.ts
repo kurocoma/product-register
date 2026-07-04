@@ -105,9 +105,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ mall: s
           : await dryRunYahooRegister(cfg!, product);
       const key = plan.mall === "rakuten" ? plan.manageNumber : plan.itemCode;
       const itemPlan = { key, exists: plan.exists, valid: plan.valid, missing: plan.missing };
+      // Yahoo の統合商品（多SKU）は SKU ごとに分けて登録する旨を行結果に補足する
+      const splitNote =
+        plan.mall === "yahoo" && plan.items && plan.items.length > 1
+          ? `Yahooは${plan.items.length}SKUに分けて登録します（item_code=各SKUのNEコード）`
+          : undefined;
 
       if (dryRun || !plan.valid) {
-        results.push(toDryRunItemResult(id, info, itemPlan));
+        results.push({ ...toDryRunItemResult(id, info, itemPlan), ...(splitNote ? { note: splitNote } : {}) });
         continue;
       }
 
@@ -143,6 +148,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ mall: s
         });
         continue;
       }
+      // Yahoo の統合商品は SKU 別の成否を集約表示（例「4SKU中4件登録」。部分失敗も理由付きで補足）
+      const skuNote = commit.mall === "yahoo" && commit.skuSummary ? commit.skuSummary.message : undefined;
       results.push({
         id,
         ...info,
@@ -152,6 +159,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ mall: s
         action: plan.exists ? "update" : "create",
         key,
         registered: true,
+        ...(skuNote ? { note: skuNote } : {}),
       });
     } catch (e) {
       // 1件の失敗（DB取得・変換・想定外例外）で全体を止めない

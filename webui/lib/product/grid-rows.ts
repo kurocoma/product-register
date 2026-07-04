@@ -91,6 +91,11 @@ export type GridColumn = {
   /** バリエーション統合デモ用の2行目入力例（未指定列は example を引き継ぐ）。
    * バリエーションキー入りテンプレートだけが使う（従来テンプレの出力は不変）。 */
   example2?: string;
+  /** バリエーションキー入りテンプレート（BULK_GRID_COLUMNS）専用の入力例。
+   * "" を明示すると空欄になる（例: YahooカテゴリID/パスは空欄のまま保存時に自動補完＝
+   * 「カテゴリIDのみ入力→保存で補完」を例自体が体現する）。未指定は example を使う。
+   * 既定27列テンプレの出力には影響しない。 */
+  bulkExample?: string;
 };
 
 /** データ入力シートの列順そのまま（基本18列）。 */
@@ -124,8 +129,10 @@ export const GRID_COLUMNS_EXTRA: GridColumn[] = [
   { key: "keyword", label: "検索キーワード", group: "商品説明", input: "text", width: "w-44", example: "レモネード 沖縄 バヤリース" },
   { key: "maker_name", label: "メーカー名", group: "商品説明", input: "text", width: "w-32", example: "沖縄バヤリース" },
   { key: "brand_name", label: "ブランド名", group: "商品説明", input: "text", width: "w-32", example: "バヤリース" },
-  { key: "yahoo_category_id", label: "YahooカテゴリID", group: "Yahoo", input: "text", width: "w-28", autoHint: "空欄ならモール基本カテゴリIDから保存時に自動補完（手入力優先）", example: "13457" },
-  { key: "yahoo_path", label: "Yahooストアカテゴリパス", group: "Yahoo", input: "text", width: "w-48", autoHint: "空欄ならモール基本カテゴリIDから保存時に自動補完（手入力優先）", example: "食品、飲料、製菓＞ソフトドリンク、ジュース" },
+  // Yahoo 2列: バリエーションキー入りテンプレ（bulkExample）では空欄にする
+  // （空欄→保存時にモール基本カテゴリIDから自動補完される、を入力例自体が体現するため）
+  { key: "yahoo_category_id", label: "YahooカテゴリID", group: "Yahoo", input: "text", width: "w-28", autoHint: "空欄ならモール基本カテゴリIDから保存時に自動補完（手入力優先）", example: "13457", bulkExample: "" },
+  { key: "yahoo_path", label: "Yahooストアカテゴリパス", group: "Yahoo", input: "text", width: "w-48", autoHint: "空欄ならモール基本カテゴリIDから保存時に自動補完（手入力優先）", example: "食品、飲料、製菓＞ソフトドリンク、ジュース", bulkExample: "" },
   { key: "unit", label: "単位", group: "Yahoo", input: "text", width: "w-16", example: "本" },
 ];
 
@@ -171,13 +178,18 @@ export const TEMPLATE_NOTE =
 /** 貼り付け取込用テンプレートCSVを生成する（UTF-8 BOM 付き = Excel でそのまま開ける）。
  * 1行目 = グリッド列と同一の見出し（列定義が単一源泉）、2行目 = 入力例1行。
  * バリエーションキー列を含む列定義（BULK_GRID_COLUMNS）で呼ぶと、同じキーで統合される
- * セット行の入力例（3行目）と説明行（※・4行目）を追加する。既定の27列テンプレは従来と同一出力。 */
+ * セット行の入力例（3行目）と説明行（※・4行目）を追加する。既定の27列テンプレは従来と同一出力。
+ * バリエーションキー入りテンプレでは bulkExample を優先する（YahooカテゴリID/パスを空欄にして
+ * 「モール基本カテゴリIDのみ入力→保存で自動補完」を入力例のまま体現する。※説明行と挙動が一致）。 */
 export function buildTemplateCsv(columns: GridColumn[] = ALL_GRID_COLUMNS): string {
+  const hasVariationKey = columns.some((c) => c.key === "variation_key");
+  const exampleOf = (c: GridColumn) =>
+    (hasVariationKey ? c.bulkExample ?? c.example : c.example) ?? c.defaultValue ?? "";
   const header = columns.map((c) => c.label);
-  const example = columns.map((c) => c.example ?? c.defaultValue ?? "");
+  const example = columns.map(exampleOf);
   const rows: string[][] = [header, example];
-  if (columns.some((c) => c.key === "variation_key")) {
-    rows.push(columns.map((c) => c.example2 ?? c.example ?? c.defaultValue ?? ""));
+  if (hasVariationKey) {
+    rows.push(columns.map((c) => c.example2 ?? exampleOf(c)));
     rows.push([TEMPLATE_NOTE]);
   }
   return "\uFEFF" + Papa.unparse(rows, { newline: "\r\n" });

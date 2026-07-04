@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
-import { upsertProduct } from "@/lib/product/repository";
+import { deleteProduct, upsertProduct } from "@/lib/product/repository";
+import { saveGroupWithCleanup } from "@/lib/product/bulk-save";
 import {
   BULK_GRID_COLUMNS,
   TEMPLATE_FILENAME,
@@ -220,19 +221,32 @@ export function BulkGridEditor() {
         // カテゴリ由来の自動補完（属性・Yahooカテゴリ。手入力があれば上書きしない）
         const info = await fetchCategoryInfo(supabase, b.input.mall_category_id, categoryCache);
         const { product, filled } = applyCategoryAutofill(b.input, info.attrs, info.yahoo);
-        // 統合グループは既に保存済みの行があればその商品を更新する（重複登録しない）
-        const savedId = members.map((m) => m.savedId).find((id) => !!id);
-        const saved = await upsertProduct(supabase, product, savedId);
+        // 統合グループは既に保存済みの行があればその商品（primary）を更新する（重複登録しない）。
+        // 行ごとに別々の savedId が混在する場合（例: 先に個別保存 → 後からキーを付けて再保存）は、
+        // 統合先への保存成功後に吸収された旧フラット商品を削除する（孤児化＝一覧重複・NE CSV 二重出力の防止）。
+        const { savedId, wasUpdate, cleanedIds, cleanupFailed } = await saveGroupWithCleanup(
+          product,
+          members.map((m) => m.savedId),
+          {
+            upsert: (p, id) => upsertProduct(supabase, p, id),
+            remove: (id) => deleteProduct(supabase, id),
+          },
+        );
         const fills = [
           filled.attributes ? "商品属性" : "",
           filled.yahoo ? "Yahooカテゴリ" : "",
         ].filter(Boolean);
         const fillNote = fills.length > 0 ? `（${fills.join("・")}を自動補完）` : "";
+        const cleanupNote =
+          (cleanedIds.length > 0 ? `（統合により旧商品${cleanedIds.length}件を整理）` : "") +
+          (cleanupFailed.length > 0
+            ? `（旧商品${cleanupFailed.length}件の整理に失敗: ${cleanupFailed.map((f) => f.message).join(" / ")}。商品一覧から削除してください）`
+            : "");
         const message =
           b.variationKey !== ""
-            ? `${savedId ? "統合更新" : "統合登録"}しました（${product.variants.length} SKU / 楽天管理番号 ${product.rakuten_manage_number}）${fillNote}`
-            : `${savedId ? "更新" : "登録"}しました${fillNote}`;
-        for (const m of members) results.set(m.uid, { ok: true, message, savedId: saved.id });
+            ? `${wasUpdate ? "統合更新" : "統合登録"}しました（${product.variants.length} SKU / 楽天管理番号 ${product.rakuten_manage_number}）${fillNote}${cleanupNote}`
+            : `${wasUpdate ? "更新" : "登録"}しました${fillNote}${cleanupNote}`;
+        for (const m of members) results.set(m.uid, { ok: true, message, savedId });
         ok++;
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
