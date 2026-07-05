@@ -3,16 +3,16 @@ import { genreAttributesToInputs, type GenreAttribute } from "./genre-attributes
 import { mergeGenreAttributes } from "./category-autofill";
 import type { YahooCategoryMapping } from "./category-mapping";
 
-/** カテゴリ読み込みパネル（/bulk-register 右側）の純関数層。
+/** /bulk-register の統合「📥 カテゴリ読み込み（属性・YahooID）」の純関数層。
  *
  * データ取得は products/new（ProductForm）と同一ソース（fetchGenreAttributes /
- * fetchYahooCategoryMapping）を CategoryAssistPanel が「読み込み」ボタン押下時にだけ行い、
+ * fetchYahooCategoryMapping）を BulkGridEditor がボタン押下時にだけ行い、
  * 取得結果を行へ反映する処理はすべてここの純関数が担う（ユニットテスト対象）。
  *
  * 規則:
- * - 属性の項目・単位は読み込みで行（GridRow.attributes）へ展開し、値だけ入力すれば良い状態にする。
- *   既に入力済みの値は item 単位で保持する（マージ規則は ProductForm・保存時自動補完と
- *   共有の mergeGenreAttributes = 単一実装）。
+ * - 属性の項目・単位は読み込みで各行の商品属性列（attributesToColumns / applyCategoryLoadToRow）へ
+ *   展開し、値だけ行内で入力すれば良い状態にする。既に入力済みの値は item 単位で保持する
+ *   （マージ規則は ProductForm・保存時自動補完と共有の mergeGenreAttributes = 単一実装）。
  * - Yahoo カテゴリ候補の適用は「空欄のときだけ」（手入力優先の既存規則を維持）。
  */
 
@@ -148,6 +148,81 @@ export function applyYahooMappingsToRows(
     return row;
   });
   return { rows: applied > 0 ? next : rows, applied, skipped, unresolved };
+}
+
+/** カテゴリID 1件分の読み込み結果（推奨属性 + Yahoo候補）。取得失敗・マスタ未登録は
+ * { attrs: [], yahoo: null } として扱う（= 未解決カテゴリ。行は変えず処理は継続する）。 */
+export type CategoryLoadInfo = { attrs: GenreAttribute[]; yahoo: YahooCategoryMapping | null };
+
+/** 統合「📥 カテゴリ読み込み」の1行分: 行自身の モール基本カテゴリID に基づき、
+ * B) 商品属性の項目・単位をその行の商品属性列へ展開（attributesToColumns 再利用 =
+ *    必須優先 top5・推奨単位プリフィル・入力済みの値は item 単位で保持）
+ * A) YahooカテゴリID/パスを空欄のみ適用（applyYahooCandidate と同一規則 = 手入力優先）
+ * の順に適用する。カテゴリID未入力・未解決カテゴリの行は同一参照のまま返す（no-op 判定可能）。 */
+export function applyCategoryLoadToRow(
+  row: GridRow,
+  infoMap: ReadonlyMap<string, CategoryLoadInfo>,
+): GridRow {
+  const id = row.mall_category_id.trim();
+  if (id === "") return row;
+  const info = infoMap.get(id);
+  if (!info || (info.attrs.length === 0 && !info.yahoo)) return row;
+  let next = row;
+  if (info.attrs.length > 0) {
+    next = { ...next, ...attributesToColumns(info.attrs, next).columns };
+  }
+  if (info.yahoo) {
+    next = applyYahooCandidate(next, info.yahoo).row;
+  }
+  return next;
+}
+
+/** 統合「📥 カテゴリ読み込み」の全行版: 行ごとのカテゴリIDで applyCategoryLoadToRow を適用し、
+ * 結果表示用の件数を集計する純関数。
+ * - categories: 行に入力されているユニークカテゴリ数（collectMallCategoryIds と同一基準）
+ * - attrRows: 属性を展開した行数 / yahooApplied・yahooSkipped: Yahoo の適用・入力済みスキップ行数
+ * - unresolved: 属性もYahoo候補も見つからなかったカテゴリID（ユニーク・出現順。他行の処理は継続）
+ * - truncatedCategories: 属性が6件以上あり top5 に切り捨てたカテゴリ数（編集画面案内用） */
+export function applyCategoryLoadToRows(
+  rows: GridRow[],
+  infoMap: ReadonlyMap<string, CategoryLoadInfo>,
+): {
+  rows: GridRow[];
+  categories: number;
+  attrRows: number;
+  yahooApplied: number;
+  yahooSkipped: number;
+  unresolved: string[];
+  truncatedCategories: number;
+} {
+  let attrRows = 0;
+  let yahooApplied = 0;
+  let yahooSkipped = 0;
+  const unresolved: string[] = [];
+  const ids = collectMallCategoryIds(rows);
+  const truncatedCategories = ids.filter((id) => (infoMap.get(id)?.attrs.length ?? 0) > 5).length;
+  const next = rows.map((row) => {
+    const id = row.mall_category_id.trim();
+    if (id === "") return row;
+    const info = infoMap.get(id) ?? { attrs: [], yahoo: null };
+    if (info.attrs.length === 0 && !info.yahoo) {
+      if (!unresolved.includes(id)) unresolved.push(id);
+      return row;
+    }
+    let out = row;
+    if (info.attrs.length > 0) {
+      out = { ...out, ...attributesToColumns(info.attrs, out).columns };
+      attrRows++;
+    }
+    if (info.yahoo) {
+      const result = applyYahooCandidate(out, info.yahoo);
+      if (result.appliedId || result.appliedPath) yahooApplied++;
+      else yahooSkipped++;
+      out = result.row;
+    }
+    return out;
+  });
+  return { rows: next, categories: ids.length, attrRows, yahooApplied, yahooSkipped, unresolved, truncatedCategories };
 }
 
 /** fromIndex 行と同じモール基本カテゴリID（trim 比較・空は対象外）を持つ他の行の index 一覧。 */

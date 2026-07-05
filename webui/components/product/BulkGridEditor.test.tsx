@@ -4,14 +4,17 @@ import type { ReactNode } from "react";
 import type { GenreAttribute } from "@/lib/product/genre-attributes";
 import { BulkGridEditor } from "./BulkGridEditor";
 
-/** /bulk-register グリッドの React 回帰テスト（jsdom）。turn-002 の堅牢性修正2件を固定する:
- * 1) カテゴリ読み込みパネルの fetch 中にグリッド側で同じ行を編集しても、fetch 完了時の
- *    書き戻し（関数型更新）で編集が巻き戻らない（競合窓の解消）
+/** /bulk-register グリッドの React 回帰テスト（jsdom）。
+ * 【置換履歴】カテゴリ読み込みパネル廃止（ユーザー明示指示）に伴い、パネルの「📥 読み込み」
+ * 経由で検証していた不変量1を、カテゴリ列グループ見出しの統合「📥 カテゴリ読み込み
+ * （属性・YahooID）」ボタンの新フローへ移植した。検証する不変量は従来と同一:
+ * 1) カテゴリ読み込みの fetch 中にグリッドで同じ行を編集しても、fetch 完了時の
+ *    書き戻し（uid 引き・関数型更新）で編集が巻き戻らない（競合窓の解消）
  * 2) 「Excel から貼り付け取込」枠に1列コピーを貼っても表取込（parseTsv）へ流れず、
  *    セルへ直接貼る案内を出す（NEコード列として誤解釈される誤操作の防止）。
- *    表全体（複数列）のコピーは従来どおり行として取り込まれる（回帰）。 */
+ *    表全体（複数列）のコピーは従来どおり行として取り込まれる（回帰） */
 
-// fetch 層だけ差し替える（純関数 genreAttributesToInputs / isRequiredAttribute は実物のまま）
+// fetch 層だけ差し替える（純関数 attributesToColumns / applyCategoryLoadToRow は実物のまま）
 const mocks = vi.hoisted(() => ({
   fetchGenreAttributes: vi.fn(),
   fetchYahooCategoryMapping: vi.fn(),
@@ -59,28 +62,28 @@ const ATTR: GenreAttribute = {
   sort_order: 1,
 };
 
-describe("カテゴリ読み込みパネル: fetch 中の行編集が巻き戻らない（関数型更新）", () => {
+describe("統合カテゴリ読み込み: fetch 中の行編集が巻き戻らない（uid 引き・関数型更新）", () => {
   it("読み込み中にグリッドで商品名を編集 → fetch 完了後も編集が保持され、属性も展開される", async () => {
     const d = deferred<GenreAttribute[]>();
     mocks.fetchGenreAttributes.mockReturnValue(d.promise);
     mocks.fetchYahooCategoryMapping.mockResolvedValue(null);
     render(<BulkGridEditor />);
 
-    // 1行目にカテゴリIDを入れて「読み込み」（fetch は未解決のまま保留）
+    // 1行目にカテゴリIDを入れて統合ボタンで読み込み（fetch は未解決のまま保留）
     fireEvent.change(cellInput(0, "mall_category_id"), { target: { value: "110692" } });
-    fireEvent.click(screen.getByRole("button", { name: /読み込み（属性・Yahoo候補）/ }));
+    fireEvent.click(screen.getByRole("button", { name: /カテゴリ読み込み（属性・YahooID）/ }));
     expect(mocks.fetchGenreAttributes).toHaveBeenCalledTimes(1);
 
     // fetch 中（読み込み中…表示）にユーザーが同じ行の商品名を編集する
     expect(screen.getByRole("button", { name: /読み込み中…/ })).toBeInTheDocument();
     fireEvent.change(cellInput(0, "product_name"), { target: { value: "編集中の商品名" } });
 
-    // fetch 完了 → パネルに属性の項目が並ぶ
+    // fetch 完了 → 属性がグリッドの商品属性列へ展開される
     await act(async () => {
       d.resolve([ATTR]);
     });
-    await waitFor(() => expect(screen.getByTitle("内容量")).toBeInTheDocument());
-    expect(screen.getByPlaceholderText("値")).toBeInTheDocument();
+    await waitFor(() => expect(cellInput(0, "attribute_item_1").value).toBe("内容量"));
+    expect(cellInput(0, "attribute_unit_1").value).toBe("ml");
 
     // 競合窓の回帰: fetch 開始時の行（商品名が空）で上書きされず、編集が残る
     expect(cellInput(0, "product_name").value).toBe("編集中の商品名");

@@ -4,14 +4,16 @@ import type { ReactNode } from "react";
 import type { GenreAttribute } from "@/lib/product/genre-attributes";
 import { BulkGridEditor } from "./BulkGridEditor";
 
-/** /bulk-register グリッドの React 回帰テスト（jsdom）。turn-003 の堅牢性修正を固定する:
- * カテゴリ読み込みパネルの fetch 完了時の書き戻しは、クリック時に捕捉した「配列 index」
- * ではなく行の uid で対象行を特定する。これにより
+/** /bulk-register グリッドの React 回帰テスト（jsdom）。
+ * 【置換履歴】カテゴリ読み込みパネル廃止（ユーザー明示指示）に伴い、パネル経由だった
+ * turn-003 の不変量を、統合「📥 カテゴリ読み込み（属性・YahooID）」ボタンの新フローへ移植した。
+ * 検証する不変量は従来と同一 — 読み込みの書き戻しはクリック時に捕捉した「配列 index」ではなく
+ * 行の uid で対象行を特定する:
  * 1) fetch 中に対象行より上の行を削除して index が繰り上がっても、属性は元の対象行へ
  *    正しく反映される（index ずれによる別の行への誤書き込み防止）
  * 2) fetch 中に対象行自体を削除したときは、どの行にも書き込まず無害に何もしない */
 
-// fetch 層だけ差し替える（純関数 genreAttributesToInputs / isRequiredAttribute は実物のまま）
+// fetch 層だけ差し替える（純関数 attributesToColumns / applyCategoryLoadToRow は実物のまま）
 const mocks = vi.hoisted(() => ({
   fetchGenreAttributes: vi.fn(),
   fetchYahooCategoryMapping: vi.fn(),
@@ -41,17 +43,11 @@ const cellInput = (row: number, key: string) =>
   document.getElementById(`bulkgrid-${row}-${key}`) as HTMLInputElement;
 const rowCount = () => document.querySelectorAll("tbody tr").length;
 
-/** N 行目の行番号セル（クリックでカテゴリ読み込みパネルの対象行になる） */
-const rowNumberCell = (n: number) => {
-  const cell = screen
-    .getAllByTitle("クリックすると右のカテゴリ読み込みパネルの対象行になります")
-    .find((el) => el.textContent === String(n));
-  if (!cell) throw new Error(`行番号 ${n} のセルが見つかりません`);
-  return cell;
-};
-
 /** N 行目の「✕」（行削除）ボタン */
 const removeRowButton = (n: number) => screen.getAllByTitle("この行を削除")[n - 1];
+
+/** 統合カテゴリ読み込みボタン（カテゴリ列グループ見出し） */
+const loadButton = () => screen.getByRole("button", { name: /カテゴリ読み込み（属性・YahooID）/ });
 
 /** 解決タイミングを手動制御できる Promise（fetch 中の行削除を確実に再現するため） */
 function deferred<T>() {
@@ -71,7 +67,7 @@ const ATTR: GenreAttribute = {
   sort_order: 1,
 };
 
-describe("カテゴリ読み込みパネル: 書き戻し先を uid で特定（fetch 中の行削除で index がずれても誤書き込みしない）", () => {
+describe("統合カテゴリ読み込み: 書き戻し先を uid で特定（fetch 中の行削除で index がずれても誤書き込みしない）", () => {
   it("読み込み中に対象行より上の行を削除 → 属性は繰り上がった正しい行（uid）へ反映される", async () => {
     const d = deferred<GenreAttribute[]>();
     mocks.fetchGenreAttributes.mockReturnValue(d.promise);
@@ -84,9 +80,8 @@ describe("カテゴリ読み込みパネル: 書き戻し先を uid で特定（
     fireEvent.change(cellInput(1, "mall_category_id"), { target: { value: "110692" } });
     fireEvent.change(cellInput(2, "product_name"), { target: { value: "下の行" } });
 
-    // 2行目を対象行にして「読み込み」（fetch は未解決のまま保留）
-    fireEvent.click(rowNumberCell(2));
-    fireEvent.click(screen.getByRole("button", { name: /読み込み（属性・Yahoo候補）/ }));
+    // 統合ボタンで読み込み（fetch は未解決のまま保留）
+    fireEvent.click(loadButton());
     expect(mocks.fetchGenreAttributes).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: /読み込み中…/ })).toBeInTheDocument();
 
@@ -100,22 +95,15 @@ describe("カテゴリ読み込みパネル: 書き戻し先を uid で特定（
     await act(async () => {
       d.resolve([ATTR]);
     });
-    await waitFor(() => expect(screen.getByTitle("内容量")).toBeInTheDocument());
-    // パネルの対象行は繰り上がった 1 行目の「対象行」のまま（属性入力欄が並ぶ）
-    expect(screen.getByText("属性対象の商品")).toBeInTheDocument();
-    expect(screen.getByPlaceholderText("値")).toBeInTheDocument();
+    await waitFor(() => expect(cellInput(0, "attribute_item_1").value).toBe("内容量"));
+    expect(cellInput(0, "attribute_unit_1").value).toBe("ml");
 
-    // 誤書き込みの検査: 下の行（2行目）へ切り替えると属性は未読み込みのまま
-    fireEvent.click(rowNumberCell(2));
-    expect(screen.queryByTitle("内容量")).not.toBeInTheDocument();
-    expect(screen.getByText(/未読み込みです。「読み込み」を押すと項目・単位が表示されます。/)).toBeInTheDocument();
-
-    // 対象行（1行目）へ戻すと属性が表示される = 属性が対象行の行データに入っている
-    fireEvent.click(rowNumberCell(1));
-    expect(screen.getByTitle("内容量")).toBeInTheDocument();
+    // 誤書き込みの検査: 下の行（2行目）には属性が入らない
+    expect(cellInput(1, "attribute_item_1").value).toBe("");
     // 行データ自体も無傷（カテゴリID・商品名が対象行に残っている）
     expect(cellInput(0, "mall_category_id").value).toBe("110692");
     expect(cellInput(0, "product_name").value).toBe("属性対象の商品");
+    expect(cellInput(1, "product_name").value).toBe("下の行");
   });
 
   it("読み込み中に対象行自体を削除 → どの行にも属性を書き込まず無害に何もしない", async () => {
@@ -124,12 +112,12 @@ describe("カテゴリ読み込みパネル: 書き戻し先を uid で特定（
     mocks.fetchYahooCategoryMapping.mockResolvedValue(null);
     render(<BulkGridEditor />);
 
-    // 1行目=消える行（カテゴリID入り・既定の対象行）/ 2行目=残る行
+    // 1行目=消える行（カテゴリID入り）/ 2行目=残る行
     fireEvent.change(cellInput(0, "product_name"), { target: { value: "消える行" } });
     fireEvent.change(cellInput(0, "mall_category_id"), { target: { value: "110692" } });
     fireEvent.change(cellInput(1, "product_name"), { target: { value: "残る行" } });
 
-    fireEvent.click(screen.getByRole("button", { name: /読み込み（属性・Yahoo候補）/ }));
+    fireEvent.click(loadButton());
     expect(mocks.fetchGenreAttributes).toHaveBeenCalledTimes(1);
     expect(screen.getByRole("button", { name: /読み込み中…/ })).toBeInTheDocument();
 
@@ -138,20 +126,15 @@ describe("カテゴリ読み込みパネル: 書き戻し先を uid で特定（
     expect(rowCount()).toBe(2);
     expect(cellInput(0, "product_name").value).toBe("残る行");
 
-    // fetch 完了 → クラッシュせず、繰り上がった「残る行」にも属性が入らない（旧実装は index=0 へ誤書き込み）
+    // fetch 完了 → クラッシュせず、繰り上がった「残る行」にも属性が入らない（index=0 への誤書き込み防止）
     await act(async () => {
       d.resolve([ATTR]);
     });
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: /読み込み（属性・Yahoo候補）/ })).toBeInTheDocument(),
+      expect(screen.getByRole("button", { name: /カテゴリ読み込み（属性・YahooID）/ })).toBeInTheDocument(),
     );
-    expect(screen.queryByTitle("内容量")).not.toBeInTheDocument();
-
-    // 全行を対象行に切り替えて確認: どの行にも属性が展開されていない
-    fireEvent.click(rowNumberCell(2));
-    expect(screen.queryByTitle("内容量")).not.toBeInTheDocument();
-    fireEvent.click(rowNumberCell(1));
-    expect(screen.queryByTitle("内容量")).not.toBeInTheDocument();
+    expect(cellInput(0, "attribute_item_1").value).toBe("");
+    expect(cellInput(1, "attribute_item_1").value).toBe("");
 
     // 残った行のデータは無傷（属性以外も書き換わっていない）
     expect(cellInput(0, "product_name").value).toBe("残る行");

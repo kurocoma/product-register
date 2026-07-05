@@ -3,8 +3,9 @@
 //   A) 列方向貼り付け: text セルへの縦コピー展開 / 不足行の自動追加 / select セルへの paste 発火 /
 //      クォート済みセル内タブの1列コピーが表取込へ誤ルートされない（classifyClipboard）/ 長文✎セル
 //   B) 下方向コピー（↓）: prompt の既定値で最終行まで / 行数指定で途中まで / 不正入力は alert で中断
-//   C) カテゴリ読み込み: 読み込み→属性の項目・単位がグリッドの商品属性列（attribute_item_N 等）へ
-//      展開（必須優先 top5・推奨単位プリフィル）→値を行内入力→対象行切替でも値が残る→
+//   C) 統合カテゴリ読み込み（カテゴリ列グループ見出しの「📥 カテゴリ読み込み（属性・YahooID）」）:
+//      読み込み→属性の項目・単位がグリッドの商品属性列（attribute_item_N 等）へ展開
+//      （必須優先 top5・推奨単位プリフィル）→値を行内入力→他操作の後も値が残る→
 //      一括保存で ProductInput.attributes として DB に永続化（後片付けつき）
 // 使い方(webui): dev server を起動した状態で  npx tsx tests/e2e_bulk_paste_dom.ts
 //   ベースURLは E2E_BASE（既定 http://localhost:3000）。Playwright は devDependencies に含まれる
@@ -138,7 +139,7 @@ import { readFileSync } from "node:fs";
     await new Promise((r) => setTimeout(r, 400));
     record("B3 不正入力は alert で中断・キャンセルは no-op（1行目の値のまま）", alerted && (await page.inputValue(cell(1, "product_name"))) === "", `dialogs=${dialogLog.slice(-3).join(" / ")}`);
 
-    // ============ C) カテゴリ読み込み → 属性がグリッドの商品属性列へ展開 → 値を行内入力 → 保存で永続化 ============
+    // ============ C) 統合カテゴリ読み込み → 属性がグリッドの商品属性列へ展開 → 値を行内入力 → 保存で永続化 ============
     await page.goto(BASE + "/bulk-register", { waitUntil: "networkidle" });
     // 前回失敗の残骸を削除
     for (const p of (await listProducts(ssr as any)).filter((p) => p.ne_code === NE)) await deleteProduct(ssr as any, p.id);
@@ -163,7 +164,8 @@ import { readFileSync } from "node:fs";
       await page.fill(cell(0, "product_name"), "E2E DOM貼り付け検証商品");
       await page.fill(cell(0, "selling_price"), "100");
       await page.fill(cell(0, "mall_category_id"), genreId);
-      await page.getByRole("button", { name: /読み込み（属性・Yahoo候補）/ }).click();
+      // カテゴリ列グループ見出しの統合ボタン（旧パネルは廃止）
+      await page.getByRole("button", { name: /カテゴリ読み込み（属性・YahooID）/ }).click();
 
       // C1: 属性の項目が右パネルではなくグリッドの商品属性列（attribute_item_N）へ展開される
       const c1 = await waitFor(
@@ -183,12 +185,12 @@ import { readFileSync } from "node:fs";
       }
       record("C2 単位列に推奨単位がプリフィルされる（5枠が期待どおり）", unitsOk, unitDetail.join(" ") || "単位なしジャンル");
 
-      // C3: 値はグリッドの行内で入力 → 対象行を切り替えても値が残る（行の state に保持されている）
+      // C3: 値はグリッドの行内で入力 → 他のセル・行を操作しても値が残る（行の state に保持されている）
       await page.fill(cell(0, "attribute_value_1"), "DOMテスト値7");
-      await page.locator("tbody tr").nth(1).locator("td").first().click(); // 対象行を2行目へ
-      await page.locator("tbody tr").nth(0).locator("td").first().click(); // 1行目へ戻す
+      await page.focus(cell(1, "product_name")); // 別の行のセルへフォーカス移動
+      await page.focus(cell(0, "ne_code")); // 元の行へ戻る
       const c3 = await waitFor(async () => (await page.inputValue(cell(0, "attribute_value_1"))) === "DOMテスト値7");
-      record("C3 行内で入力した属性値が対象行切替後も残る", c3);
+      record("C3 行内で入力した属性値が他セル操作後も残る", c3);
 
       // 一括保存 → DB の extra.attributes に入る（ProductInput.attributes として復元できる）
       await page.getByRole("button", { name: /一括保存/ }).click();

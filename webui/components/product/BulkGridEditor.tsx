@@ -25,10 +25,10 @@ import {
   validateGridRows,
 } from "@/lib/product/grid-rows";
 import {
-  applyYahooMappingsToRows,
+  applyCategoryLoadToRow,
+  applyCategoryLoadToRows,
   collectMallCategoryIds,
 } from "@/lib/product/category-assist";
-import { CategoryAssistPanel } from "@/components/product/CategoryAssistPanel";
 import {
   fetchGenreAttributes,
   type GenreAttribute,
@@ -115,11 +115,10 @@ export function BulkGridEditor() {
   const [summary, setSummary] = useState("");
   /** 長文セル（説明文HTML等）の拡大エディタで開いているセル。行は uid で追跡（行削除でズレない）。 */
   const [expandedCell, setExpandedCell] = useState<{ uid: number; key: GridColumnKey } | null>(null);
-  /** カテゴリ読み込みパネルの対象行。セル操作・行番号クリックで追跡（uid = 行削除でズレない）。 */
-  const [activeUid, setActiveUid] = useState<number | null>(null);
-  /** 「YahooカテゴリIDをコピー」の実行中フラグと、カテゴリID→Yahoo候補のキャッシュ（再実行で再取得しない） */
-  const [yahooApplying, setYahooApplying] = useState(false);
-  const yahooCacheRef = useRef(new Map<string, YahooCategoryMapping | null>());
+  /** 統合「📥 カテゴリ読み込み」の実行中フラグと、カテゴリID→属性/Yahoo候補のキャッシュ
+   * （同一IDは再実行でも再取得しない） */
+  const [categoryLoading, setCategoryLoading] = useState(false);
+  const categoryCacheRef = useRef(new Map<string, CategoryInfo>());
   const pendingFocusRef = useRef<{ rowIndex: number; key: string } | null>(null);
 
   // 行追加直後の Enter 移動先へフォーカス（新しい行の描画完了後に実行）
@@ -133,12 +132,6 @@ export function BulkGridEditor() {
   const validation = useMemo(() => validateGridRows(rows.map((r) => r.data)), [rows]);
   const filledCount = useMemo(() => rows.filter((r) => !isRowBlank(r.data)).length, [rows]);
   const groups = useMemo(() => columnGroups(BULK_GRID_ALL_COLUMNS), []);
-
-  /** カテゴリ読み込みパネルの対象行 index。未選択・削除済みなら先頭行。 */
-  const activeRowIndex = useMemo(() => {
-    const i = rows.findIndex((r) => r.uid === activeUid);
-    return i >= 0 ? i : 0;
-  }, [rows, activeUid]);
 
   /** 拡大エディタの対象行（削除済みなら null → パネルは自動で閉じる） */
   const expandedTarget = useMemo(() => {
@@ -169,16 +162,18 @@ export function BulkGridEditor() {
     );
   };
 
-  /** 1行の行データを差し替える（カテゴリ読み込みパネルの属性値入力・Yahoo適用から使う）。
+  /** 1行の行データを差し替える（統合カテゴリ読み込みの fetch 完了時の書き戻しから使う）。
    * 行は index ではなく uid で特定する（fetch 中の行削除・取込で index がずれても
    * 正しい行へ届き、対象行自体が削除済みなら何もしない = 別の行への誤書き込み防止）。
-   * 関数型（現在の行 → 次の行）も受け付け、setRows の関数型更新の中で「最新の行」に適用する。
-   * パネルの読み込み fetch 完了時の書き戻しはこちらを使う（fetch 中のセル編集が巻き戻らない）。 */
+   * 関数型（現在の行 → 次の行）も受け付け、setRows の関数型更新の中で「最新の行」に適用する
+   * （fetch 中のセル編集が巻き戻らない）。関数が同一参照を返した行は no-op（result も保持）。 */
   const updateRowData = (uid: number, next: GridRow | ((current: GridRow) => GridRow)) => {
     setRows((prev) =>
-      prev.map((r) =>
-        r.uid === uid ? { ...r, data: typeof next === "function" ? next(r.data) : next, result: undefined } : r,
-      ),
+      prev.map((r) => {
+        if (r.uid !== uid) return r;
+        const data = typeof next === "function" ? next(r.data) : next;
+        return data === r.data ? r : { ...r, data, result: undefined };
+      }),
     );
   };
 
@@ -254,54 +249,53 @@ export function BulkGridEditor() {
 
   const addRow = () => setRows((prev) => [...prev, newRow()]);
 
-  /** カテゴリ列グループ見出しの「YahooカテゴリIDをコピー」。
-   * 全行のモール基本カテゴリIDのユニーク集合を fetchYahooCategoryMapping（キャッシュ有）で解決し、
-   * YahooカテゴリID・パスが空欄の行にだけ適用する（手入力優先。純関数 applyYahooMappingsToRows）。 */
-  const copyYahooCategoryIds = async () => {
-    if (yahooApplying) return;
+  /** カテゴリ列グループ見出しの統合「📥 カテゴリ読み込み（属性・YahooID）」。
+   * 全行のモール基本カテゴリIDのユニーク集合を fetchCategoryInfo（属性 + Yahoo候補。キャッシュ有・
+   * 取得失敗は候補なし扱いで続行）で解決し、各行へ行単位で
+   * B) 商品属性の項目・単位をその行の商品属性列へ展開（attributesToColumns = 必須優先 top5・
+   *    推奨単位プリフィル・入力済みの値は item 単位で保持）
+   * A) YahooカテゴリID/パスを空欄のみ適用（手入力優先）
+   * を適用する（純関数 applyCategoryLoadToRow）。件数はクリック時スナップショット
+   * （applyCategoryLoadToRows）で算出し、適用そのものは uid 引きの関数型更新で行う
+   * （fetch 中の行編集が巻き戻らず、行削除で index がずれても別の行へ誤書き込みしない）。 */
+  const loadCategories = async () => {
+    if (categoryLoading) return;
     const current = rows;
     const ids = collectMallCategoryIds(current.map((r) => r.data));
     if (ids.length === 0) {
       setSummary("モール基本カテゴリIDが入力された行がありません。先にカテゴリ列を入力してください。");
       return;
     }
-    setYahooApplying(true);
+    setCategoryLoading(true);
     try {
       const supabase = createClient();
-      const mappings = new Map<string, YahooCategoryMapping | null>();
+      const infoMap = new Map<string, CategoryInfo>();
       for (const id of ids) {
-        if (!yahooCacheRef.current.has(id)) {
-          let mapping: YahooCategoryMapping | null = null;
-          try {
-            mapping = await fetchYahooCategoryMapping(supabase, id);
-          } catch {
-            /* 取得失敗は候補なし扱い（他の行の適用は続行） */
-          }
-          yahooCacheRef.current.set(id, mapping);
-        }
-        mappings.set(id, yahooCacheRef.current.get(id) ?? null);
+        // fetchCategoryInfo は取得失敗を { attrs: [], yahoo: null } に丸める＝未解決カテゴリとして
+        // 集計されるだけで、他の行・他のカテゴリの処理は継続する
+        infoMap.set(id, await fetchCategoryInfo(supabase, id, categoryCacheRef.current));
       }
-      const result = applyYahooMappingsToRows(current.map((r) => r.data), mappings);
-      if (result.applied > 0) updateRowsData(result.rows);
+      const counted = applyCategoryLoadToRows(current.map((r) => r.data), infoMap);
+      for (const r of current) {
+        updateRowData(r.uid, (currentRow) => applyCategoryLoadToRow(currentRow, infoMap));
+      }
       setSummary(
-        `YahooカテゴリID/パスを ${result.applied} 行に適用（${result.skipped} 行は入力済みのためスキップ）` +
-          (result.unresolved > 0 ? `。Yahoo候補が見つからないカテゴリIDの行が ${result.unresolved} 行あります` : ""),
+        `カテゴリ${counted.categories}種を読み込み: 属性を${counted.attrRows}行に展開` +
+          `／YahooID を${counted.yahooApplied}行に適用（${counted.yahooSkipped}行は入力済みスキップ）` +
+          `／未解決カテゴリ: ${counted.unresolved.length > 0 ? counted.unresolved.join("・") : "なし"}` +
+          (counted.truncatedCategories > 0 ? "（6件目以降の属性は保存後に編集画面で入力できます）" : ""),
       );
     } finally {
-      setYahooApplying(false);
+      setCategoryLoading(false);
     }
   };
 
-  /** 行削除。カテゴリ読み込みパネルの対象行を消したときは、直近の行（同じ位置に繰り上がった行、
-   * 最終行を消したときはその上の行）を対象に維持する（先頭行へ暗黙に戻さない）。 */
+  /** 行削除。最後の1行を消したときは空の新規行を1行残す。 */
   const removeRow = (rowIndex: number) => {
-    const removed = rows[rowIndex];
-    const rest = rows.filter((_, i) => i !== rowIndex);
-    const next = rest.length === 0 ? [newRow()] : rest;
-    if (removed && removed.uid === activeUid) {
-      setActiveUid(next[Math.min(rowIndex, next.length - 1)].uid);
-    }
-    setRows(next);
+    setRows((prev) => {
+      const rest = prev.filter((_, i) => i !== rowIndex);
+      return rest.length === 0 ? [newRow()] : rest;
+    });
   };
 
   /** 単品行からセット行を自動展開（省力化）。数量以外の共通項目は引き継ぎ、価格だけ入力する。 */
@@ -463,14 +457,11 @@ export function BulkGridEditor() {
             保存時に商品属性（項目・単位）と YahooカテゴリID/パスを自動補完します（商品編集画面と同じ仕組み。手入力があれば手入力を優先）。
           </li>
           <li>
-            モール基本カテゴリID⚡を入力したら、右の<span className="font-semibold">カテゴリ読み込みパネル</span>の「📥 読み込み」1回で、
-            商品属性の項目・単位がグリッド右側の<span className="font-semibold">商品属性列</span>に入り、
+            モール基本カテゴリID⚡を入力したら、カテゴリ見出しの
+            <span className="font-semibold">「📥 カテゴリ読み込み（属性・YahooID）」</span>1回で、全行まとめて
+            行ごとのカテゴリIDに基づき、商品属性の項目・単位がグリッド右側の<span className="font-semibold">商品属性列</span>に入り、
             <span className="font-semibold">YahooカテゴリID・パスも空欄の行へ自動で入ります</span>
-            （同じカテゴリIDの行にもまとめて反映・手入力優先。値は行内で入力するだけ。対象行はセルまたは行番号のクリックで切替）。
-          </li>
-          <li>
-            カテゴリ見出しの<span className="font-semibold">「YahooカテゴリIDをコピー」</span>で、全行のモール基本カテゴリIDから
-            YahooカテゴリID・パスを一括で埋められます（空欄の行のみ・手入力優先）。
+            （手入力があれば上書きしません。属性の値は行内で入力するだけ）。
           </li>
           <li>
             <span className="font-semibold">Excel の1列コピー（縦方向）</span>は、「貼り付け取込」の枠ではなく貼り付けたいセルに直接 Ctrl+V するとそのセルから下方向へ展開されます
@@ -531,9 +522,7 @@ export function BulkGridEditor() {
         </div>
       )}
 
-      {/* 左: グリッド / 右: カテゴリ読み込みパネル（対象行の属性・Yahoo候補） */}
-      <div className="flex items-start gap-4">
-      <div className="flex-1 min-w-0 bg-white rounded border border-slate-200 overflow-auto max-h-[70vh]">
+      <div className="bg-white rounded border border-slate-200 overflow-auto max-h-[70vh]">
         <table className="text-xs border-collapse">
           <thead>
             {/* 1段目: 列グループ見出し（基本情報/価格/配送/カテゴリ/商品説明/Yahoo）。縦スクロールしても固定。 */}
@@ -553,12 +542,12 @@ export function BulkGridEditor() {
                       {g.name}
                       <button
                         type="button"
-                        onClick={copyYahooCategoryIds}
-                        disabled={yahooApplying}
-                        title="全行のモール基本カテゴリIDから YahooカテゴリID・Yahooストアカテゴリパスを一括で埋めます（空欄の行のみ・手入力優先）"
+                        onClick={loadCategories}
+                        disabled={categoryLoading}
+                        title="全行のモール基本カテゴリIDを読み込み、行ごとに 1) 商品属性の項目・単位を右の商品属性列へ展開（値は行内で入力）、2) YahooカテゴリID・パスを空欄の行にだけ適用します（手入力があれば上書きしません）"
                         className="rounded border border-emerald-500 bg-white px-1.5 py-0 text-[10px] font-normal leading-4 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        {yahooApplying ? "適用中…" : "YahooカテゴリIDをコピー"}
+                        {categoryLoading ? "読み込み中…" : "📥 カテゴリ読み込み（属性・YahooID）"}
                       </button>
                     </span>
                   ) : (
@@ -587,17 +576,9 @@ export function BulkGridEditor() {
             {rows.map((r, rowIndex) => {
               const errors = validation.get(rowIndex) ?? [];
               const blank = isRowBlank(r.data);
-              const isActiveRow = rowIndex === activeRowIndex;
               return (
                 <tr key={r.uid} className="border-t border-slate-100 align-top">
-                  <td
-                    className={
-                      "px-2 py-1 sticky left-0 z-10 cursor-pointer " +
-                      (isActiveRow ? "bg-emerald-100 text-emerald-800 font-semibold" : "bg-white text-slate-400 hover:bg-emerald-50")
-                    }
-                    onClick={() => setActiveUid(r.uid)}
-                    title="クリックすると右のカテゴリ読み込みパネルの対象行になります"
-                  >
+                  <td className="px-2 py-1 sticky left-0 z-10 bg-white text-slate-400">
                     {rowIndex + 1}
                   </td>
                   {BULK_GRID_ALL_COLUMNS.map((col) => {
@@ -616,7 +597,6 @@ export function BulkGridEditor() {
                                 type="button"
                                 id={cellId(rowIndex, col.key)}
                                 onClick={() => setExpandedCell(isExpanded ? null : { uid: r.uid, key: col.key })}
-                                onFocus={() => setActiveUid(r.uid)}
                                 onPaste={(e) => onCellPaste(e, rowIndex, col.key)}
                                 title="クリックすると下の拡大エディタで編集できます（HTML可）。Excel の列コピーはこのセルに Ctrl+V で下方向へ貼り付けられます"
                                 className={
@@ -634,7 +614,6 @@ export function BulkGridEditor() {
                                 value={value}
                                 onChange={(e) => editCell(rowIndex, col.key, e.target.value)}
                                 onKeyDown={(e) => onCellKeyDown(e, rowIndex, col.key)}
-                                onFocus={() => setActiveUid(r.uid)}
                                 onPaste={(e) => onCellPaste(e, rowIndex, col.key)}
                                 className={cellClass + "bg-white"}
                               >
@@ -652,7 +631,6 @@ export function BulkGridEditor() {
                                 placeholder={attributeCellPlaceholder(col.key, r.data)}
                                 onChange={(e) => editCell(rowIndex, col.key, e.target.value)}
                                 onKeyDown={(e) => onCellKeyDown(e, rowIndex, col.key)}
-                                onFocus={() => setActiveUid(r.uid)}
                                 onPaste={(e) => onCellPaste(e, rowIndex, col.key)}
                                 className={cellClass + (col.input === "number" ? "text-right" : "")}
                               />
@@ -714,15 +692,6 @@ export function BulkGridEditor() {
             })}
           </tbody>
         </table>
-      </div>
-
-      <CategoryAssistPanel
-        rows={rows.map((row) => row.data)}
-        rowUids={rows.map((row) => row.uid)}
-        selectedIndex={activeRowIndex}
-        selectedUid={rows[activeRowIndex]?.uid ?? -1}
-        onRowChange={updateRowData}
-      />
       </div>
 
       {/* 長文列（説明文HTML等）の拡大エディタ。セル内編集の苦痛を避け、行の ✎ セルをクリックで開く。 */}
