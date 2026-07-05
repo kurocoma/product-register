@@ -2,7 +2,7 @@
 
 import { useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
-import type { GridRow } from "@/lib/product/grid-rows";
+import { flatAttributesOf, type GridRow } from "@/lib/product/grid-rows";
 import {
   fetchGenreAttributes,
   isRequiredAttribute,
@@ -15,10 +15,8 @@ import {
 import {
   applyYahooCandidate,
   applyYahooToSameCategory,
-  copyAttributesToSameCategory,
-  loadAttributesIntoRow,
+  attributesToColumns,
   sameCategoryRowIndexes,
-  setRowAttribute,
 } from "@/lib/product/category-assist";
 import { Button } from "@/components/ui/button";
 
@@ -28,6 +26,8 @@ type LoadedCategory = { attrs: GenreAttribute[]; yahoo: YahooCategoryMapping | n
 type Props = {
   /** グリッドの全行（表示・同カテゴリ判定に使う。編集は onRowChange / onRowsChange 経由） */
   rows: GridRow[];
+  /** rows と同じ並びの行 uid 一覧（読み込み結果を同じカテゴリIDの行へも uid 引きで書き戻すため） */
+  rowUids: number[];
   /** 対象行の index（グリッドのセル操作・行番号クリックで親が追跡する。表示・同カテゴリ判定用） */
   selectedIndex: number;
   /** 対象行の uid（行の追加・削除で index がずれても変わらない恒久ID。onRowChange の行指定用） */
@@ -43,14 +43,15 @@ type Props = {
 
 /** /bulk-register 右側のカテゴリ読み込みパネル。
  * 対象行の「モール基本カテゴリID」を『📥 読み込み』ボタンの明示操作で読み込み（自動fetchしない）、
- * - 商品属性: 項目・単位を縦に並べ、値を入力するだけの状態にする（値は対象行の attributes へ即反映）
+ * - 商品属性: 項目・単位をグリッドの商品属性列（attribute_item_N / attribute_unit_N）へ展開する
+ *   （attributesToColumns。必須優先で先頭5件・推奨単位プリフィル・入力済みの値は item 単位で保持）。
+ *   同じカテゴリIDの行にもまとめて展開し、値はグリッドの行内で入力する（パネルでは入力しない）。
  * - Yahooカテゴリ: 変換候補（ID/名称/パス）を表示し「適用」で行へ（空欄のときだけ = 手入力優先）
- * - 同じカテゴリIDの行が複数あるときは、属性値・Yahoo候補を全行へまとめて適用できる
  * データ取得は products/new（ProductForm）・保存時自動補完と同一ソースを使う。 */
-export function CategoryAssistPanel({ rows, selectedIndex, selectedUid, onRowChange, onRowsChange }: Props) {
+export function CategoryAssistPanel({ rows, rowUids, selectedIndex, selectedUid, onRowChange, onRowsChange }: Props) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
-  /** 直近に読み込んだカテゴリID とその結果（Yahoo候補・単位候補の表示に使う） */
+  /** 直近に読み込んだカテゴリID とその結果（Yahoo候補・必須バッジ・単位候補の表示に使う） */
   const [loaded, setLoaded] = useState<{ categoryId: string; info: LoadedCategory } | null>(null);
   const cacheRef = useRef(new Map<string, LoadedCategory>());
 
@@ -59,7 +60,10 @@ export function CategoryAssistPanel({ rows, selectedIndex, selectedUid, onRowCha
   const sameCategoryOthers = row ? sameCategoryRowIndexes(rows, selectedIndex).length : 0;
   /** 読み込み済み情報が対象行のカテゴリIDと一致しているときだけ Yahoo 候補等を表示する */
   const current = loaded && loaded.categoryId === categoryId ? loaded.info : null;
-  const attributes = row?.attributes ?? [];
+  /** 対象行の商品属性列に展開済みの項目（グリッドのフラット5枠から表示。値の入力は行内） */
+  const flatAttrs = row ? flatAttributesOf(row) : [];
+  /** 6件目以降で切り捨てた属性の件数（編集画面で入力する案内用） */
+  const truncated = current ? Math.max(0, current.attrs.length - 5) : 0;
 
   const load = async () => {
     if (!row || loading) return;
@@ -67,6 +71,10 @@ export function CategoryAssistPanel({ rows, selectedIndex, selectedUid, onRowCha
       setMessage("先に対象行の「モール基本カテゴリID」を入力してください");
       return;
     }
+    // クリック時点の対象行＋同じカテゴリIDの行を uid で捕捉する（fetch 中に行が削除・
+    // 繰り上がりしても正しい行へ届き、削除済みの行へは何も起きない）。
+    const targetUids = [selectedUid, ...sameCategoryRowIndexes(rows, selectedIndex).map((i) => rowUids[i])]
+      .filter((uid): uid is number => uid !== undefined);
     setLoading(true);
     setMessage(null);
     try {
@@ -83,17 +91,23 @@ export function CategoryAssistPanel({ rows, selectedIndex, selectedUid, onRowCha
       if (info.attrs.length === 0 && !info.yahoo) {
         setMessage(`カテゴリID ${categoryId} の商品属性・Yahooカテゴリはマスタに見つかりませんでした`);
       } else {
-        // 項目・単位を対象行へ展開（既に入力済みの値は item 単位で保持される）。
-        // fetch 開始時に捕捉した row をそのまま書き戻すと、読み込み中にグリッド側で行った
-        // 編集が巻き戻るため、関数型更新で「最新の行」へマージする（競合窓の解消）。
-        // 行の指定は uid（クリック時に捕捉）: fetch 中に上の行が削除されて index が
-        // 繰り上がっても正しい行へ反映され、対象行自体が削除済みなら何も起きない。
+        // 項目・単位をグリッドの商品属性列へ展開（既に入力済みの値は item 単位で保持される）。
+        // 反映は関数型更新で「最新の行」へマージする（fetch 中のグリッド編集が巻き戻らない）。
         if (info.attrs.length > 0) {
           const attrs = info.attrs;
-          onRowChange(selectedUid, (current) => loadAttributesIntoRow(current, attrs));
+          for (const uid of targetUids) {
+            onRowChange(uid, (currentRow) => ({
+              ...currentRow,
+              ...attributesToColumns(attrs, currentRow).columns,
+            }));
+          }
         }
+        const cut = Math.max(0, info.attrs.length - 5);
         setMessage(
-          `カテゴリID ${categoryId}: 商品属性 ${info.attrs.length} 件 / Yahoo候補 ${info.yahoo ? "あり" : "なし"}`,
+          `カテゴリID ${categoryId}: 商品属性 ${info.attrs.length} 件をグリッドの商品属性列へ展開しました` +
+            (targetUids.length > 1 ? `（同じカテゴリIDの ${targetUids.length - 1} 行にも適用）` : "") +
+            (cut > 0 ? `（6件目以降の ${cut} 件は保存後に編集画面で入力）` : "") +
+            ` / Yahoo候補 ${info.yahoo ? "あり" : "なし"}`,
         );
       }
     } catch (e) {
@@ -127,18 +141,7 @@ export function CategoryAssistPanel({ rows, selectedIndex, selectedUid, onRowCha
     setMessage(`同じカテゴリID ${categoryId} の ${result.appliedRows} 行に Yahoo カテゴリを適用しました（空欄のみ）`);
   };
 
-  const copyAttributesToAll = () => {
-    if (!row) return;
-    const result = copyAttributesToSameCategory(rows, selectedIndex);
-    if (result.appliedRows === 0) {
-      setMessage("コピー先（同じカテゴリIDの他の行）がありません");
-      return;
-    }
-    onRowsChange(result.rows);
-    setMessage(`商品属性の値を、同じカテゴリID ${categoryId} の他 ${result.appliedRows} 行へコピーしました`);
-  };
-
-  /** 読み込んだ属性定義から単位の候補一覧を引く（datalist の選択肢・ツールチップ表示用）。
+  /** 読み込んだ属性定義から単位の候補一覧を引く（グリッドの単位列へ入力するときの参考表示用）。
    * マスタの unit_choices はパイプ区切り（例: 分|時間）。一部データの / 区切りも許容する。 */
   const unitChoicesOf = (item: string): string[] => {
     const def = current?.attrs.find((a) => a.item_name === item);
@@ -155,7 +158,8 @@ export function CategoryAssistPanel({ rows, selectedIndex, selectedUid, onRowCha
         <h2 className="font-semibold text-emerald-800">📥 カテゴリ読み込みパネル</h2>
         <p className="mt-1 text-xs text-slate-500">
           モール基本カテゴリIDを入力した行のセルをクリック（または行番号をクリック）して対象行を選び、
-          「読み込み」を押すと、商品属性の項目・単位と Yahoo カテゴリ候補がここに表示されます。
+          「読み込み」を押すと、商品属性の項目・単位がグリッド右側の商品属性列に入り、
+          Yahoo カテゴリ候補がここに表示されます。
         </p>
       </div>
 
@@ -174,7 +178,7 @@ export function CategoryAssistPanel({ rows, selectedIndex, selectedUid, onRowCha
         <div className="text-xs text-slate-600">
           モール基本カテゴリID: {categoryId !== "" ? <span className="font-mono">{categoryId}</span> : <span className="text-slate-400">（未入力）</span>}
           {sameCategoryOthers > 0 && (
-            <span className="ml-1 text-emerald-700">（同じIDの行が他に {sameCategoryOthers} 行）</span>
+            <span className="ml-1 text-emerald-700">（同じIDの行が他に {sameCategoryOthers} 行 → まとめて展開）</span>
           )}
         </div>
         <Button onClick={load} disabled={loading || !row} variant="outline" className="w-full">
@@ -184,21 +188,25 @@ export function CategoryAssistPanel({ rows, selectedIndex, selectedUid, onRowCha
 
       {message && <p className="text-xs text-blue-700">{message}</p>}
 
-      {/* 商品属性: 読み込んだ項目・単位が並び、値を入力するだけ（対象行の保存データへ即反映） */}
+      {/* 商品属性: 項目・単位はグリッドの商品属性列へ展開済み。値の入力は行内で行う（ここでは入力しない） */}
       <div className="space-y-2">
         <h3 className="text-xs font-semibold text-slate-600 border-b border-slate-200 pb-1">
-          商品属性（値を入力するだけで {row ? selectedIndex + 1 : "-"} 行目に反映）
+          商品属性（{row ? `${selectedIndex + 1} 行目` : "-"} の展開状況）
         </h3>
-        {attributes.length === 0 ? (
+        {flatAttrs.length === 0 ? (
           <p className="text-xs text-slate-400">
             未読み込みです。「読み込み」を押すと項目・単位が表示されます。
           </p>
         ) : (
           <div className="space-y-1.5">
-            {attributes.map((a, i) => {
-              const required = isRequiredAttribute(a.requirement);
+            <p className="rounded border border-emerald-200 bg-emerald-50 px-2 py-1.5 text-xs text-emerald-800">
+              属性はグリッド右側の商品属性列（項目・単位）に展開しました。値は行内で入力してください
+              {truncated > 0 && <>（6件目以降の属性: {truncated}件は編集画面で入力）</>}。
+            </p>
+            {flatAttrs.map((a, i) => {
+              const def = current?.attrs.find((d) => d.item_name === a.item);
+              const required = def ? isRequiredAttribute(def.requirement) : false;
               const unitChoices = unitChoicesOf(a.item);
-              const unitListId = unitChoices.length > 0 ? `bulk-unit-choices-${i}` : undefined;
               return (
                 <div
                   key={`${a.item}-${i}`}
@@ -208,52 +216,21 @@ export function CategoryAssistPanel({ rows, selectedIndex, selectedUid, onRowCha
                   }
                 >
                   <div className="flex items-center gap-1 text-xs text-slate-700">
+                    <span className="shrink-0 text-slate-400">{i + 1}.</span>
                     <span className="truncate" title={a.item}>{a.item}</span>
                     {required && (
                       <span className="shrink-0 text-[10px] font-bold text-rose-700 bg-rose-200 rounded px-1">
-                        {a.requirement}
+                        {def!.requirement}
                       </span>
                     )}
                   </div>
-                  <div className="mt-1 flex items-center gap-1">
-                    <input
-                      type="text"
-                      value={a.value}
-                      placeholder="値"
-                      onChange={(e) => row && onRowChange(selectedUid, setRowAttribute(row, i, { value: e.target.value }))}
-                      className="flex-1 min-w-0 rounded border border-slate-300 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                    />
-                    <input
-                      type="text"
-                      value={a.unit}
-                      placeholder="単位"
-                      list={unitListId}
-                      title={unitChoices.length > 0 ? `単位の候補: ${unitChoices.join(" / ")}` : ""}
-                      onChange={(e) => row && onRowChange(selectedUid, setRowAttribute(row, i, { unit: e.target.value }))}
-                      className="w-16 rounded border border-slate-300 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                    />
-                    {/* 単位の入力ミス防止: マスタの unit_choices を datalist で候補表示（自由入力も可） */}
-                    {unitListId && (
-                      <datalist id={unitListId}>
-                        {unitChoices.map((u) => (
-                          <option key={u} value={u} />
-                        ))}
-                      </datalist>
-                    )}
+                  <div className="mt-0.5 text-[10px] text-slate-500">
+                    値: {a.value.trim() !== "" ? a.value : "（行内で入力）"} / 単位: {a.unit.trim() !== "" ? a.unit : "（なし）"}
+                    {unitChoices.length > 0 && <>（単位の候補: {unitChoices.join(" / ")}）</>}
                   </div>
                 </div>
               );
             })}
-            {sameCategoryOthers > 0 && (
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={copyAttributesToAll}
-                title="この行の属性の値・単位を、同じモール基本カテゴリIDの他の行へコピーします（コピー元が空欄の項目は、コピー先の入力値を消しません）"
-              >
-                属性値を同カテゴリの他 {sameCategoryOthers} 行へコピー
-              </Button>
-            )}
           </div>
         )}
       </div>

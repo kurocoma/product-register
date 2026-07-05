@@ -3,8 +3,9 @@
 //   A) 列方向貼り付け: text セルへの縦コピー展開 / 不足行の自動追加 / select セルへの paste 発火 /
 //      クォート済みセル内タブの1列コピーが表取込へ誤ルートされない（classifyClipboard）/ 長文✎セル
 //   B) 下方向コピー（↓）: prompt の既定値で最終行まで / 行数指定で途中まで / 不正入力は alert で中断
-//   C) カテゴリ読み込みパネル: 読み込み→項目・単位表示（単位は datalist 候補つき）→値入力→
-//      行切替でも値が残る→一括保存で ProductInput.attributes として DB に永続化（後片付けつき）
+//   C) カテゴリ読み込み: 読み込み→属性の項目・単位がグリッドの商品属性列（attribute_item_N 等）へ
+//      展開（必須優先 top5・推奨単位プリフィル）→値を行内入力→対象行切替でも値が残る→
+//      一括保存で ProductInput.attributes として DB に永続化（後片付けつき）
 // 使い方(webui): dev server を起動した状態で  npx tsx tests/e2e_bulk_paste_dom.ts
 //   ベースURLは E2E_BASE（既定 http://localhost:3000）。Playwright は devDependencies に含まれる
 //   （ブラウザ未取得なら npx playwright install chromium）。
@@ -137,32 +138,57 @@ import { readFileSync } from "node:fs";
     await new Promise((r) => setTimeout(r, 400));
     record("B3 不正入力は alert で中断・キャンセルは no-op（1行目の値のまま）", alerted && (await page.inputValue(cell(1, "product_name"))) === "", `dialogs=${dialogLog.slice(-3).join(" / ")}`);
 
-    // ============ C) カテゴリ読み込みパネル → 値入力 → 保存で attributes 永続化 ============
+    // ============ C) カテゴリ読み込み → 属性がグリッドの商品属性列へ展開 → 値を行内入力 → 保存で永続化 ============
     await page.goto(BASE + "/bulk-register", { waitUntil: "networkidle" });
     // 前回失敗の残骸を削除
     for (const p of (await listProducts(ssr as any)).filter((p) => p.ne_code === NE)) await deleteProduct(ssr as any, p.id);
-    // 単位候補（unit_choices）を持つ属性マスタからカテゴリIDを選ぶ（datalist の実証込み）
+    // 単位候補（unit_choices）を持つ属性マスタからカテゴリIDを選ぶ（推奨単位プリフィルの実証込み）
     const { data: attrRows } = await (ssr as any).from("rakuten_genre_attributes").select("genre_id, item_name, unit_choices").neq("unit_choices", "").limit(1);
     const genreId: string = attrRows?.[0]?.genre_id != null ? String(attrRows[0].genre_id) : "";
     if (genreId === "") {
       record("C 章スキップ", true, "rakuten_genre_attributes に unit_choices 付きマスタが無いため（環境依存）");
     } else {
+      // 期待値は実装と同じ純関数（attributesToColumns = 必須優先 top5・推奨単位プリフィル）で組む
+      const { attributesToColumns } = await import("@/lib/product/category-assist");
+      const { emptyGridRow } = await import("@/lib/product/grid-rows");
+      const { data: genreAttrs } = await (ssr as any)
+        .from("rakuten_genre_attributes")
+        .select("item_name, requirement, recommended_unit, unit_choices, has_unit, sort_order")
+        .eq("genre_id", genreId)
+        .order("sort_order", { ascending: true });
+      const expected = attributesToColumns((genreAttrs ?? []) as any, emptyGridRow()).columns as Record<string, string>;
+
       await page.fill(cell(0, "maker_code"), "e2edom");
       await page.fill(cell(0, "jan_code"), "4514603470006");
       await page.fill(cell(0, "product_name"), "E2E DOM貼り付け検証商品");
       await page.fill(cell(0, "selling_price"), "100");
       await page.fill(cell(0, "mall_category_id"), genreId);
       await page.getByRole("button", { name: /読み込み（属性・Yahoo候補）/ }).click();
-      const c1 = await waitFor(async () => (await page.locator('aside input[placeholder="値"]').count()) > 0, 15000);
-      record("C1 読み込みで属性の項目・単位がパネルに並ぶ", c1, `genre=${genreId} 項目数=${await page.locator('aside input[placeholder="値"]').count()}`);
-      record("C2 単位入力に datalist 候補が付く（unit_choices）", (await page.locator("aside datalist option").count()) > 0, `候補数=${await page.locator("aside datalist option").count()}`);
 
-      // 値を入力 → 行を切り替えて戻っても残る（行の state に保持されている）
-      await page.locator('aside input[placeholder="値"]').first().fill("DOMテスト値7");
+      // C1: 属性の項目が右パネルではなくグリッドの商品属性列（attribute_item_N）へ展開される
+      const c1 = await waitFor(
+        async () => expected.attribute_item_1 !== "" && (await page.inputValue(cell(0, "attribute_item_1"))) === expected.attribute_item_1,
+        15000,
+      );
+      record("C1 読み込みで属性の項目がグリッドの商品属性列に入る", c1, `genre=${genreId} item1=${await page.inputValue(cell(0, "attribute_item_1"))}`);
+
+      // C2: 単位列に楽天推奨単位がプリフィルされる（5枠すべて attributesToColumns の期待値どおり）
+      let unitsOk = true;
+      const unitDetail: string[] = [];
+      for (let n = 1; n <= 5; n++) {
+        const got = await page.inputValue(cell(0, `attribute_unit_${n}`));
+        const want = expected[`attribute_unit_${n}`] ?? "";
+        if (got !== want) unitsOk = false;
+        if (got !== "" || want !== "") unitDetail.push(`${n}:${got || "(空)"}${got === want ? "" : `≠${want}`}`);
+      }
+      record("C2 単位列に推奨単位がプリフィルされる（5枠が期待どおり）", unitsOk, unitDetail.join(" ") || "単位なしジャンル");
+
+      // C3: 値はグリッドの行内で入力 → 対象行を切り替えても値が残る（行の state に保持されている）
+      await page.fill(cell(0, "attribute_value_1"), "DOMテスト値7");
       await page.locator("tbody tr").nth(1).locator("td").first().click(); // 対象行を2行目へ
       await page.locator("tbody tr").nth(0).locator("td").first().click(); // 1行目へ戻す
-      const c3 = await waitFor(async () => (await page.locator('aside input[placeholder="値"]').first().inputValue()) === "DOMテスト値7");
-      record("C3 入力した属性値が行切替後も対象行に残る", c3);
+      const c3 = await waitFor(async () => (await page.inputValue(cell(0, "attribute_value_1"))) === "DOMテスト値7");
+      record("C3 行内で入力した属性値が対象行切替後も残る", c3);
 
       // 一括保存 → DB の extra.attributes に入る（ProductInput.attributes として復元できる）
       await page.getByRole("button", { name: /一括保存/ }).click();
@@ -171,8 +197,8 @@ import { readFileSync } from "node:fs";
       record("C4 一括保存が成功（画面の保存結果）", c4 && summaryText.includes("成功 1 商品"), summaryText.trim());
       const saved = (await listProducts(ssr as any)).find((p) => p.ne_code === NE);
       const attrs = saved ? dbRowToProductInput(saved as any).attributes ?? [] : [];
-      const hit = attrs.find((a: any) => a.value === "DOMテスト値7");
-      record("C5 パネルで入力した属性値が DB に永続化（attributes に値が残る）", !!saved && !!hit, saved ? `item=${hit?.item ?? "?"} attrs=${attrs.length}件` : "商品が見つからない");
+      const hit = attrs.find((a: any) => a.value === "DOMテスト値7" && a.item === expected.attribute_item_1);
+      record("C5 商品属性列で入力した値が DB に永続化（attributes に項目・値が残る）", !!saved && !!hit, saved ? `item=${hit?.item ?? "?"} attrs=${attrs.length}件` : "商品が見つからない");
     }
   } finally {
     // --- 後片付け（テスト商品削除 → ブラウザ終了） ---

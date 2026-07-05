@@ -66,11 +66,31 @@ export type GridRow = {
   /** バリエーションキー（同じ値の行は保存時に1商品へ統合）。
    * 既存27列の後方互換を保つため optional（未入力の行はプロパティ自体を持たない）。 */
   variation_key?: string;
-  /** 商品属性（カテゴリ読み込みパネルで入力した項目・値・単位）。
+  /** 商品属性（旧: カテゴリ読み込みパネルで入力した項目・値・単位）。
    * グリッド列ではなく行に紐づく付帯データ。optional（後方互換）。
-   * 保存時は ProductInput.attributes に入り、カテゴリ由来の自動補完（applyCategoryAutofill）は
-   * ここに入力済みの値を item 単位で保持する（手入力優先の既存規則のまま）。 */
+   * 現在は下のフラット15列（attribute_item_1〜attribute_unit_5）が入力の主経路で、
+   * item が1つでも入っていればフラット列が優先される（attributesForSave）。 */
   attributes?: GridRowAttribute[];
+  /** 商品属性のグリッド列（項目・値・単位 ×5枠）。カテゴリ読み込み（📥）が項目・単位を展開し、
+   * 値だけ行内で入力する。ProductInput の同名フラット項目にそのまま渡り、attributes[] にも
+   * 変換される（attribute_item_N が非空なら row.attributes より優先）。
+   * 既存27列＋バリエーションキーの後方互換を保つため optional（未入力の行はプロパティ自体を
+   * 持たない = emptyGridRow のキー集合を変えない）。 */
+  attribute_item_1?: string;
+  attribute_value_1?: string;
+  attribute_unit_1?: string;
+  attribute_item_2?: string;
+  attribute_value_2?: string;
+  attribute_unit_2?: string;
+  attribute_item_3?: string;
+  attribute_value_3?: string;
+  attribute_unit_3?: string;
+  attribute_item_4?: string;
+  attribute_value_4?: string;
+  attribute_unit_4?: string;
+  attribute_item_5?: string;
+  attribute_value_5?: string;
+  attribute_unit_5?: string;
   /** 自動補完の管理フラグ。ユーザーが手入力したら false になり追従を止める。 */
   auto: { ne_code: boolean; display_name: boolean };
 };
@@ -163,8 +183,57 @@ export const VARIATION_KEY_COLUMN: GridColumn = {
  * グリッドUI・貼り付け取込・テンプレートCSV（UI からのDL）はこちらを単一源泉に使う。 */
 export const BULK_GRID_COLUMNS: GridColumn[] = [...ALL_GRID_COLUMNS, VARIATION_KEY_COLUMN];
 
+/** 商品属性のグリッド列（項目・値・単位 ×5枠 = 15列）。既存28列の「後ろ」に置く
+ * （旧テンプレ・従来27/28列コピペを壊さない）。項目・単位はカテゴリ読み込み（📥）や
+ * テンプレ入力例で埋まり、値だけ行内で入力する。入力例は島レモネードの実データ相当。 */
+const ATTRIBUTE_EXAMPLES: [item: string, value: string, unit: string][] = [
+  ["内容量", "500", "ml"],
+  ["賞味期限", "6", "ヶ月"],
+  ["果汁", "10", "％"],
+  ["総本数", "1", "本"],
+  ["カフェイン量", "0", "mg"],
+];
+export const ATTRIBUTE_GRID_COLUMNS: GridColumn[] = ATTRIBUTE_EXAMPLES.flatMap(
+  ([item, value, unit], i): GridColumn[] => {
+    const n = i + 1;
+    return [
+      {
+        key: `attribute_item_${n}` as GridColumnKey,
+        label: `商品属性（項目）${n}`,
+        group: "商品属性",
+        input: "text",
+        width: "w-32",
+        autoHint: "モール基本カテゴリID⚡の「📥 読み込み」または保存時にカテゴリの推奨項目を自動補完（手入力優先）",
+        example: item,
+      },
+      {
+        key: `attribute_value_${n}` as GridColumnKey,
+        label: `商品属性（値）${n}`,
+        group: "商品属性",
+        input: "text",
+        width: "w-24",
+        example: value,
+      },
+      {
+        key: `attribute_unit_${n}` as GridColumnKey,
+        label: `商品属性（単位）${n}`,
+        group: "商品属性",
+        input: "text",
+        width: "w-16",
+        autoHint: "「📥 読み込み」で楽天推奨単位をプリフィル（手入力優先）",
+        example: unit,
+      },
+    ];
+  },
+);
+
+/** 一括登録グリッドの全列（28列 + 商品属性15列 = 43列）。
+ * グリッドUI・貼り付け取込・テンプレートCSV は今後こちらを単一源泉に使う
+ * （BULK_GRID_COLUMNS はテストで内容固定のため追加専用のこの配列で拡張）。 */
+export const BULK_GRID_ALL_COLUMNS: GridColumn[] = [...BULK_GRID_COLUMNS, ...ATTRIBUTE_GRID_COLUMNS];
+
 const COLUMN_KEYS: GridColumnKey[] = ALL_GRID_COLUMNS.map((c) => c.key);
-const BULK_COLUMN_KEYS: GridColumnKey[] = BULK_GRID_COLUMNS.map((c) => c.key);
+const BULK_ALL_COLUMN_KEYS: GridColumnKey[] = BULK_GRID_ALL_COLUMNS.map((c) => c.key);
 
 /** 連続する同じ group の列を束ねる（グリッドの列グループ見出し行用）。 */
 export function columnGroups(columns: GridColumn[] = ALL_GRID_COLUMNS): { name: string; span: number }[] {
@@ -331,10 +400,41 @@ export function validateGridRows(rows: GridRow[]): Map<number, string[]> {
   return result;
 }
 
+/** 商品属性のフラット列（attribute_item_1〜attribute_unit_5）を項目・値・単位の配列にする。
+ * item が空の枠は飛ばし、値・単位は trim する（resolveAttributes と同じ「項目名が主」の規則）。
+ * requirement はフラット列に持たないため空（保存時の applyCategoryAutofill が推奨側で補う）。 */
+export function flatAttributesOf(row: GridRow): GridRowAttribute[] {
+  const out: GridRowAttribute[] = [];
+  for (let n = 1; n <= 5; n++) {
+    const item = (row[`attribute_item_${n}` as GridColumnKey] ?? "").trim();
+    if (item === "") continue;
+    out.push({
+      item,
+      value: (row[`attribute_value_${n}` as GridColumnKey] ?? "").trim(),
+      unit: (row[`attribute_unit_${n}` as GridColumnKey] ?? "").trim(),
+      requirement: "",
+    });
+  }
+  return out;
+}
+
+/** 保存に使う商品属性。attribute_item_N のどれかが非空ならフラット15列から構築して
+ * row.attributes より優先する（グリッド列に入力した値が保存・変換・登録に確実に届く）。
+ * 全て空なら従来どおり row.attributes ?? []。 */
+function attributesForSave(row: GridRow): GridRowAttribute[] {
+  const flat = flatAttributesOf(row);
+  return flat.length > 0 ? flat : row.attributes ?? [];
+}
+
 /** グリッド行 → ProductInputSchema.parse に渡す生オブジェクト。
  * gridRowToProductInput（1行=1商品）と buildProductsFromRows（バリエーション統合）が共有する。 */
 function gridRowToRaw(row: GridRow): Record<string, unknown> {
+  // 商品属性のフラット15列は trim して ProductInput の同名フィールドへそのまま渡す
+  const flatAttributeFields = Object.fromEntries(
+    ATTRIBUTE_GRID_COLUMNS.map((c) => [c.key, (row[c.key] ?? "").trim()]),
+  );
   return {
+    ...flatAttributeFields,
     ne_code: row.ne_code.trim(),
     jan_code: row.jan_code.trim(),
     maker_code: row.maker_code.trim(),
@@ -364,9 +464,9 @@ function gridRowToRaw(row: GridRow): Record<string, unknown> {
     yahoo_path: row.yahoo_path.trim(),
     unit: row.unit.trim(),
     variation_key: (row.variation_key ?? "").trim(),
-    // カテゴリ読み込みパネルで入力した商品属性（項目・値・単位）。
+    // 商品属性（項目・値・単位）。フラット15列に入力があればそちらを優先する。
     // 保存時の自動補完（applyCategoryAutofill）は item 単位でこの値を保持する（手入力優先）。
-    attributes: row.attributes ?? [],
+    attributes: attributesForSave(row),
   };
 }
 
@@ -418,8 +518,9 @@ export function expandSetRows(source: GridRow, quantities: number[]): GridRow[] 
  * - 引用符付き・セル内改行（Excel のコピー形式）は papaparse で解釈
  * - 見出し行（「NEコード」「JANコード」を含む行）と説明行（先頭セルが「※」で始まる行）は自動スキップ
  * - シート A 列（空欄）ごとコピーした場合は先頭の空列を自動で除去
- * - 列は BULK_GRID_COLUMNS の列順（基本18列+拡張9列+バリエーションキー）として解釈し、余分な列は無視。
- *   旧シートどおり基本18列・従来27列だけの貼り付けも先頭からの部分列としてそのまま取り込める
+ * - 列は BULK_GRID_ALL_COLUMNS の列順（基本18列+拡張9列+バリエーションキー+商品属性15列）として
+ *   解釈し、余分な列は無視。旧シートどおり基本18列・従来27/28列だけの貼り付けも
+ *   先頭からの部分列としてそのまま取り込める
  * - 空欄の NEコード・掲載商品名は取込直後に自動補完 */
 export function parseTsv(text: string): GridRow[] {
   if (text.trim() === "") return [];
@@ -443,16 +544,16 @@ export function parseTsv(text: string): GridRow[] {
     if (janAt(2) && !janAt(1)) {
       offset = 1;
     } else if (!janAt(1)) {
-      // 2) JAN でも判別できない場合は列数で判定: 全列(28列)より多い → A列混入とみなす。
+      // 2) JAN でも判別できない場合は列数で判定: 全列(43列)より多い → A列混入とみなす。
       const maxCols = Math.max(...rows.map((r) => r.length));
-      if (maxCols > BULK_GRID_COLUMNS.length) offset = 1;
+      if (maxCols > BULK_GRID_ALL_COLUMNS.length) offset = 1;
     }
   }
 
   const out: GridRow[] = [];
   for (const cells of rows) {
     const row = emptyGridRow();
-    BULK_COLUMN_KEYS.forEach((key, i) => {
+    BULK_ALL_COLUMN_KEYS.forEach((key, i) => {
       const v = cells[offset + i];
       if (v !== undefined && v !== "") row[key] = v;
     });
@@ -598,8 +699,9 @@ export function buildProductsFromRows(rows: GridRow[]): BuiltProduct[] {
         variation_value: variationLabelOf(row),
         shipping_type: row.shipping_type.trim() || "送料別",
         // 行の商品属性はSKU単位にも持たせる（楽天はジャンル必須属性を variant 単位で送るため。
-        // 保存時の applyCategoryAutofill が variant.attributes にも同じマージ規則を適用する）
-        attributes: row.attributes ?? [],
+        // 保存時の applyCategoryAutofill が variant.attributes にも同じマージ規則を適用する）。
+        // フラット15列に入力があればそちらを優先（gridRowToRaw と同じ規則）。
+        attributes: attributesForSave(row),
       }));
       const input = ProductInputSchema.parse({
         ...gridRowToRaw(rep.row),

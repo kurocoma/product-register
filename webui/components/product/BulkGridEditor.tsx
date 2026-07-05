@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { deleteProduct, upsertProduct } from "@/lib/product/repository";
 import { saveGroupWithCleanup } from "@/lib/product/bulk-save";
 import {
-  BULK_GRID_COLUMNS,
+  BULK_GRID_ALL_COLUMNS,
   TEMPLATE_FILENAME,
   type GridColumnKey,
   type GridRow,
@@ -24,6 +24,10 @@ import {
   parseTsv,
   validateGridRows,
 } from "@/lib/product/grid-rows";
+import {
+  applyYahooMappingsToRows,
+  collectMallCategoryIds,
+} from "@/lib/product/category-assist";
 import { CategoryAssistPanel } from "@/components/product/CategoryAssistPanel";
 import {
   fetchGenreAttributes,
@@ -59,7 +63,18 @@ const GROUP_COLORS: Record<string, string> = {
   商品説明: "bg-violet-100 text-violet-800",
   Yahoo: "bg-rose-100 text-rose-800",
   バリエーション: "bg-orange-100 text-orange-800",
+  商品属性: "bg-teal-100 text-teal-800",
 };
+
+/** 商品属性の値・単位セルのプレースホルダ。同じ枠の項目（attribute_item_N）が入っている行だけ
+ * 「値」「単位」を出す（項目が無い枠は入力対象でないことが分かる）。他の列は undefined。 */
+function attributeCellPlaceholder(key: GridColumnKey, row: GridRow): string | undefined {
+  const m = /^attribute_(value|unit)_([1-5])$/.exec(key);
+  if (!m) return undefined;
+  const item = (row[`attribute_item_${m[2]}` as GridColumnKey] ?? "").trim();
+  if (item === "") return undefined;
+  return m[1] === "value" ? "値" : "単位";
+}
 
 /** モール基本カテゴリID → 推奨属性 / Yahooカテゴリ の取得結果（保存中は同一IDを1回だけ取得） */
 type CategoryInfo = { attrs: GenreAttribute[]; yahoo: YahooCategoryMapping | null };
@@ -102,6 +117,9 @@ export function BulkGridEditor() {
   const [expandedCell, setExpandedCell] = useState<{ uid: number; key: GridColumnKey } | null>(null);
   /** カテゴリ読み込みパネルの対象行。セル操作・行番号クリックで追跡（uid = 行削除でズレない）。 */
   const [activeUid, setActiveUid] = useState<number | null>(null);
+  /** 「YahooカテゴリIDをコピー」の実行中フラグと、カテゴリID→Yahoo候補のキャッシュ（再実行で再取得しない） */
+  const [yahooApplying, setYahooApplying] = useState(false);
+  const yahooCacheRef = useRef(new Map<string, YahooCategoryMapping | null>());
   const pendingFocusRef = useRef<{ rowIndex: number; key: string } | null>(null);
 
   // 行追加直後の Enter 移動先へフォーカス（新しい行の描画完了後に実行）
@@ -114,7 +132,7 @@ export function BulkGridEditor() {
 
   const validation = useMemo(() => validateGridRows(rows.map((r) => r.data)), [rows]);
   const filledCount = useMemo(() => rows.filter((r) => !isRowBlank(r.data)).length, [rows]);
-  const groups = useMemo(() => columnGroups(BULK_GRID_COLUMNS), []);
+  const groups = useMemo(() => columnGroups(BULK_GRID_ALL_COLUMNS), []);
 
   /** カテゴリ読み込みパネルの対象行 index。未選択・削除済みなら先頭行。 */
   const activeRowIndex = useMemo(() => {
@@ -127,16 +145,16 @@ export function BulkGridEditor() {
     if (!expandedCell) return null;
     const rowIndex = rows.findIndex((r) => r.uid === expandedCell.uid);
     if (rowIndex < 0) return null;
-    const col = BULK_GRID_COLUMNS.find((c) => c.key === expandedCell.key);
+    const col = BULK_GRID_ALL_COLUMNS.find((c) => c.key === expandedCell.key);
     if (!col) return null;
     return { rowIndex, col, value: rows[rowIndex].data[expandedCell.key] ?? "" };
   }, [expandedCell, rows]);
 
   /** テンプレートCSVのダウンロード（UTF-8 BOM付き = Excel でそのまま開ける）。
-   * 見出しはグリッド列と同一（列定義 BULK_GRID_COLUMNS が単一源泉）。
+   * 見出しはグリッド列と同一（列定義 BULK_GRID_ALL_COLUMNS が単一源泉）。
    * 2〜3行目はバリエーションキー統合の入力例（単品+セット）、末尾は※説明行。 */
   const downloadTemplate = () => {
-    const blob = new Blob([buildTemplateCsv(BULK_GRID_COLUMNS)], { type: "text/csv;charset=utf-8" });
+    const blob = new Blob([buildTemplateCsv(BULK_GRID_ALL_COLUMNS)], { type: "text/csv;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
@@ -172,7 +190,7 @@ export function BulkGridEditor() {
 
   /** 列方向の貼り付け: values を rowIndex のセルから下方向へ展開する（不足行は自動追加）。 */
   const pasteColumnValues = (rowIndex: number, key: GridColumnKey, values: string[]) => {
-    const label = BULK_GRID_COLUMNS.find((c) => c.key === key)?.label ?? key;
+    const label = BULK_GRID_ALL_COLUMNS.find((c) => c.key === key)?.label ?? key;
     setRows((prev) => {
       const next = [...prev];
       while (next.length < rowIndex + values.length) next.push(newRow());
@@ -213,7 +231,7 @@ export function BulkGridEditor() {
    * コピーする行数は入力で指定できる（そのまま OK なら従来どおり最終行まで。
    * fillDown の count 引数を使うため、途中の行までの範囲コピーができる）。 */
   const fillDownFrom = (rowIndex: number, key: GridColumnKey) => {
-    const label = BULK_GRID_COLUMNS.find((c) => c.key === key)?.label ?? key;
+    const label = BULK_GRID_ALL_COLUMNS.find((c) => c.key === key)?.label ?? key;
     const max = rows.length - 1 - rowIndex;
     if (max <= 0) {
       window.alert("コピー先の行がありません（最終行のセルです。先に「+ 行を追加」してください）。");
@@ -235,6 +253,44 @@ export function BulkGridEditor() {
   };
 
   const addRow = () => setRows((prev) => [...prev, newRow()]);
+
+  /** カテゴリ列グループ見出しの「YahooカテゴリIDをコピー」。
+   * 全行のモール基本カテゴリIDのユニーク集合を fetchYahooCategoryMapping（キャッシュ有）で解決し、
+   * YahooカテゴリID・パスが空欄の行にだけ適用する（手入力優先。純関数 applyYahooMappingsToRows）。 */
+  const copyYahooCategoryIds = async () => {
+    if (yahooApplying) return;
+    const current = rows;
+    const ids = collectMallCategoryIds(current.map((r) => r.data));
+    if (ids.length === 0) {
+      setSummary("モール基本カテゴリIDが入力された行がありません。先にカテゴリ列を入力してください。");
+      return;
+    }
+    setYahooApplying(true);
+    try {
+      const supabase = createClient();
+      const mappings = new Map<string, YahooCategoryMapping | null>();
+      for (const id of ids) {
+        if (!yahooCacheRef.current.has(id)) {
+          let mapping: YahooCategoryMapping | null = null;
+          try {
+            mapping = await fetchYahooCategoryMapping(supabase, id);
+          } catch {
+            /* 取得失敗は候補なし扱い（他の行の適用は続行） */
+          }
+          yahooCacheRef.current.set(id, mapping);
+        }
+        mappings.set(id, yahooCacheRef.current.get(id) ?? null);
+      }
+      const result = applyYahooMappingsToRows(current.map((r) => r.data), mappings);
+      if (result.applied > 0) updateRowsData(result.rows);
+      setSummary(
+        `YahooカテゴリID/パスを ${result.applied} 行に適用（${result.skipped} 行は入力済みのためスキップ）` +
+          (result.unresolved > 0 ? `。Yahoo候補が見つからないカテゴリIDの行が ${result.unresolved} 行あります` : ""),
+      );
+    } finally {
+      setYahooApplying(false);
+    }
+  };
 
   /** 行削除。カテゴリ読み込みパネルの対象行を消したときは、直近の行（同じ位置に繰り上がった行、
    * 最終行を消したときはその上の行）を対象に維持する（先頭行へ暗黙に戻さない）。 */
@@ -391,7 +447,7 @@ export function BulkGridEditor() {
         <h1 className="text-2xl font-bold">一括登録（まとめて入力）</h1>
         <p className="mt-1 text-sm text-slate-600">
           Excel のデータ入力シートと同じ列構成（基本18列）に、商品説明文・Yahooカテゴリ等の拡張列とバリエーションキーを加えた
-          {BULK_GRID_COLUMNS.length}列で、複数商品をまとめて登録できます。
+          {BULK_GRID_ALL_COLUMNS.length}列で、複数商品をまとめて登録できます。
           保存した商品は<Link href="/products" className="text-blue-600 hover:underline">商品一覧</Link>に表示され、
           モール（楽天 / Yahoo）への一括登録・一括反映は商品一覧で対象商品を選択して実行します。
         </p>
@@ -408,7 +464,12 @@ export function BulkGridEditor() {
           </li>
           <li>
             モール基本カテゴリID⚡を入力したら、右の<span className="font-semibold">カテゴリ読み込みパネル</span>の「📥 読み込み」で
-            商品属性の項目・単位と Yahoo カテゴリ候補を先に表示できます（値を入力するだけで対象行に反映。対象行はセルまたは行番号のクリックで切替）。
+            商品属性の項目・単位がグリッド右側の<span className="font-semibold">商品属性列</span>に入ります
+            （同じカテゴリIDの行にもまとめて展開。値は行内で入力するだけ。対象行はセルまたは行番号のクリックで切替）。
+          </li>
+          <li>
+            カテゴリ見出しの<span className="font-semibold">「YahooカテゴリIDをコピー」</span>で、全行のモール基本カテゴリIDから
+            YahooカテゴリID・パスを一括で埋められます（空欄の行のみ・手入力優先）。
           </li>
           <li>
             <span className="font-semibold">Excel の1列コピー（縦方向）</span>は、「貼り付け取込」の枠ではなく貼り付けたいセルに直接 Ctrl+V するとそのセルから下方向へ展開されます
@@ -486,7 +547,22 @@ export function BulkGridEditor() {
                     (GROUP_COLORS[g.name] ?? "bg-slate-200 text-slate-700")
                   }
                 >
-                  {g.name}
+                  {g.name === "カテゴリ" ? (
+                    <span className="inline-flex items-center gap-1.5">
+                      {g.name}
+                      <button
+                        type="button"
+                        onClick={copyYahooCategoryIds}
+                        disabled={yahooApplying}
+                        title="全行のモール基本カテゴリIDから YahooカテゴリID・Yahooストアカテゴリパスを一括で埋めます（空欄の行のみ・手入力優先）"
+                        className="rounded border border-emerald-500 bg-white px-1.5 py-0 text-[10px] font-normal leading-4 text-emerald-700 hover:bg-emerald-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                      >
+                        {yahooApplying ? "適用中…" : "YahooカテゴリIDをコピー"}
+                      </button>
+                    </span>
+                  ) : (
+                    g.name
+                  )}
                 </th>
               ))}
               <th rowSpan={2} className="px-2 py-2 text-left whitespace-nowrap sticky top-0 z-20 bg-slate-100">操作</th>
@@ -494,7 +570,7 @@ export function BulkGridEditor() {
             </tr>
             {/* 2段目: 列見出し（* = 必須、⚡ = 自動補完、✎ = 長文は拡大エディタで編集） */}
             <tr>
-              {BULK_GRID_COLUMNS.map((col) => (
+              {BULK_GRID_ALL_COLUMNS.map((col) => (
                 <th key={col.key} className="px-1 py-2 text-left whitespace-nowrap sticky top-6 z-20 bg-slate-100" title={col.autoHint ?? ""}>
                   <span className={col.width + " inline-block px-1"}>
                     {col.label}
@@ -523,7 +599,7 @@ export function BulkGridEditor() {
                   >
                     {rowIndex + 1}
                   </td>
-                  {BULK_GRID_COLUMNS.map((col) => {
+                  {BULK_GRID_ALL_COLUMNS.map((col) => {
                     const value = r.data[col.key] ?? "";
                     const cellClass =
                       "w-full rounded border px-1 py-0.5 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500 " +
@@ -572,6 +648,7 @@ export function BulkGridEditor() {
                                 type="text"
                                 inputMode={col.input === "number" ? "numeric" : undefined}
                                 value={value}
+                                placeholder={attributeCellPlaceholder(col.key, r.data)}
                                 onChange={(e) => editCell(rowIndex, col.key, e.target.value)}
                                 onKeyDown={(e) => onCellKeyDown(e, rowIndex, col.key)}
                                 onFocus={() => setActiveUid(r.uid)}
@@ -640,6 +717,7 @@ export function BulkGridEditor() {
 
       <CategoryAssistPanel
         rows={rows.map((row) => row.data)}
+        rowUids={rows.map((row) => row.uid)}
         selectedIndex={activeRowIndex}
         selectedUid={rows[activeRowIndex]?.uid ?? -1}
         onRowChange={updateRowData}
