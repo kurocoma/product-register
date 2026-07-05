@@ -463,9 +463,10 @@ export function BulkGridEditor() {
             保存時に商品属性（項目・単位）と YahooカテゴリID/パスを自動補完します（商品編集画面と同じ仕組み。手入力があれば手入力を優先）。
           </li>
           <li>
-            モール基本カテゴリID⚡を入力したら、右の<span className="font-semibold">カテゴリ読み込みパネル</span>の「📥 読み込み」で
-            商品属性の項目・単位がグリッド右側の<span className="font-semibold">商品属性列</span>に入ります
-            （同じカテゴリIDの行にもまとめて展開。値は行内で入力するだけ。対象行はセルまたは行番号のクリックで切替）。
+            モール基本カテゴリID⚡を入力したら、右の<span className="font-semibold">カテゴリ読み込みパネル</span>の「📥 読み込み」1回で、
+            商品属性の項目・単位がグリッド右側の<span className="font-semibold">商品属性列</span>に入り、
+            <span className="font-semibold">YahooカテゴリID・パスも空欄の行へ自動で入ります</span>
+            （同じカテゴリIDの行にもまとめて反映・手入力優先。値は行内で入力するだけ。対象行はセルまたは行番号のクリックで切替）。
           </li>
           <li>
             カテゴリ見出しの<span className="font-semibold">「YahooカテゴリIDをコピー」</span>で、全行のモール基本カテゴリIDから
@@ -721,7 +722,6 @@ export function BulkGridEditor() {
         selectedIndex={activeRowIndex}
         selectedUid={rows[activeRowIndex]?.uid ?? -1}
         onRowChange={updateRowData}
-        onRowsChange={updateRowsData}
       />
       </div>
 

@@ -14,7 +14,7 @@ import {
 } from "@/lib/product/category-mapping";
 import {
   applyYahooCandidate,
-  applyYahooToSameCategory,
+  applyYahooMappingsToRows,
   attributesToColumns,
   sameCategoryRowIndexes,
 } from "@/lib/product/category-assist";
@@ -37,18 +37,19 @@ type Props = {
    * fetch 完了後の書き戻しなど非同期の反映は必ず関数型（現在の行 → 次の行）で
    * 渡すこと（親が最新の行にマージするため、fetch 中のグリッド編集が巻き戻らない）。 */
   onRowChange: (uid: number, next: GridRow | ((current: GridRow) => GridRow)) => void;
-  /** 複数行の一括更新（同じカテゴリの行すべてに適用） */
-  onRowsChange: (next: GridRow[]) => void;
 };
 
 /** /bulk-register 右側のカテゴリ読み込みパネル。
  * 対象行の「モール基本カテゴリID」を『📥 読み込み』ボタンの明示操作で読み込み（自動fetchしない）、
+ * 1クリックで以下を対象行＋同じカテゴリIDの行へまとめて反映する（統合フロー）:
  * - 商品属性: 項目・単位をグリッドの商品属性列（attribute_item_N / attribute_unit_N）へ展開する
  *   （attributesToColumns。必須優先で先頭5件・推奨単位プリフィル・入力済みの値は item 単位で保持）。
- *   同じカテゴリIDの行にもまとめて展開し、値はグリッドの行内で入力する（パネルでは入力しない）。
- * - Yahooカテゴリ: 変換候補（ID/名称/パス）を表示し「適用」で行へ（空欄のときだけ = 手入力優先）
+ *   値はグリッドの行内で入力する（パネルでは入力しない）。
+ * - Yahooカテゴリ: 変換候補（ID/パス）を空欄の行へ自動適用する（手入力優先。規則はカテゴリ列
+ *   グループ見出しの「YahooカテゴリIDをコピー」と同一 = applyYahooMappingsToRows / applyYahooCandidate）。
+ *   候補（ID/名称/パス/確度）は読み取り専用でパネルに表示する。
  * データ取得は products/new（ProductForm）・保存時自動補完と同一ソースを使う。 */
-export function CategoryAssistPanel({ rows, rowUids, selectedIndex, selectedUid, onRowChange, onRowsChange }: Props) {
+export function CategoryAssistPanel({ rows, rowUids, selectedIndex, selectedUid, onRowChange }: Props) {
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   /** 直近に読み込んだカテゴリID とその結果（Yahoo候補・必須バッジ・単位候補の表示に使う） */
@@ -73,8 +74,11 @@ export function CategoryAssistPanel({ rows, rowUids, selectedIndex, selectedUid,
     }
     // クリック時点の対象行＋同じカテゴリIDの行を uid で捕捉する（fetch 中に行が削除・
     // 繰り上がりしても正しい行へ届き、削除済みの行へは何も起きない）。
-    const targetUids = [selectedUid, ...sameCategoryRowIndexes(rows, selectedIndex).map((i) => rowUids[i])]
-      .filter((uid): uid is number => uid !== undefined);
+    const sameCategoryIndexes = sameCategoryRowIndexes(rows, selectedIndex);
+    const targetIndexes = [selectedIndex, ...sameCategoryIndexes];
+    const targetUids = [selectedUid, ...sameCategoryIndexes.map((i) => rowUids[i])].filter(
+      (uid): uid is number => uid !== undefined,
+    );
     setLoading(true);
     setMessage(null);
     try {
@@ -91,54 +95,48 @@ export function CategoryAssistPanel({ rows, rowUids, selectedIndex, selectedUid,
       if (info.attrs.length === 0 && !info.yahoo) {
         setMessage(`カテゴリID ${categoryId} の商品属性・Yahooカテゴリはマスタに見つかりませんでした`);
       } else {
-        // 項目・単位をグリッドの商品属性列へ展開（既に入力済みの値は item 単位で保持される）。
-        // 反映は関数型更新で「最新の行」へマージする（fetch 中のグリッド編集が巻き戻らない）。
-        if (info.attrs.length > 0) {
-          const attrs = info.attrs;
-          for (const uid of targetUids) {
-            onRowChange(uid, (currentRow) => ({
-              ...currentRow,
-              ...attributesToColumns(attrs, currentRow).columns,
-            }));
-          }
+        const attrs = info.attrs;
+        const mapping = info.yahoo;
+        // Yahoo 適用の件数はクリック時のスナップショットで算出する（適用そのものは下の uid 引き）。
+        // 空欄のみ適用・手入力優先の規則は、ヘッダの「YahooカテゴリIDをコピー」と同一実装
+        // （applyYahooMappingsToRows → applyYahooCandidate）を再利用する（二重実装しない）。
+        let applied = 0;
+        let skipped = 0;
+        if (mapping) {
+          const counted = applyYahooMappingsToRows(
+            targetIndexes.map((i) => rows[i]).filter(Boolean),
+            new Map([[categoryId, mapping]]),
+          );
+          applied = counted.applied;
+          skipped = counted.skipped;
         }
-        const cut = Math.max(0, info.attrs.length - 5);
-        setMessage(
-          `カテゴリID ${categoryId}: 商品属性 ${info.attrs.length} 件をグリッドの商品属性列へ展開しました` +
-            (targetUids.length > 1 ? `（同じカテゴリIDの ${targetUids.length - 1} 行にも適用）` : "") +
-            (cut > 0 ? `（6件目以降の ${cut} 件は保存後に編集画面で入力）` : "") +
-            ` / Yahoo候補 ${info.yahoo ? "あり" : "なし"}`,
-        );
+        // 属性の項目・単位の展開と Yahoo 自動適用を1回の関数型更新でまとめて反映する
+        // （「最新の行」へマージ = fetch 中のグリッド編集が巻き戻らない。マスタ未登録側はスキップ）。
+        for (const uid of targetUids) {
+          onRowChange(uid, (currentRow) => {
+            const withAttrs =
+              attrs.length > 0
+                ? { ...currentRow, ...attributesToColumns(attrs, currentRow).columns }
+                : currentRow;
+            return mapping ? applyYahooCandidate(withAttrs, mapping).row : withAttrs;
+          });
+        }
+        const cut = Math.max(0, attrs.length - 5);
+        const attrPart =
+          attrs.length > 0
+            ? `商品属性${attrs.length}件を展開` +
+              (cut > 0 ? `（6件目以降の${cut}件は保存後に編集画面で入力）` : "")
+            : "商品属性はマスタに見つかりませんでした";
+        const yahooPart = mapping
+          ? `YahooカテゴリID ${mapping.yahoo_category_id} を${applied}行に適用（${skipped}行は入力済みのためスキップ）`
+          : "Yahooカテゴリ候補なし（YahooカテゴリID・パスは手入力してください）";
+        setMessage(`カテゴリID ${categoryId}: ${attrPart}／${yahooPart}`);
       }
     } catch (e) {
       setMessage("読み込みに失敗しました: " + (e instanceof Error ? e.message : String(e)));
     } finally {
       setLoading(false);
     }
-  };
-
-  const applyYahooToRow = () => {
-    if (!row || !current?.yahoo) return;
-    const result = applyYahooCandidate(row, current.yahoo);
-    if (!result.appliedId && !result.appliedPath) {
-      setMessage("YahooカテゴリID・パスは入力済みのため上書きしませんでした（空欄のときだけ適用します）");
-      return;
-    }
-    onRowChange(selectedUid, result.row);
-    setMessage(
-      `${selectedIndex + 1} 行目に ${[result.appliedId ? "YahooカテゴリID" : "", result.appliedPath ? "Yahooパス" : ""].filter(Boolean).join("・")} を適用しました`,
-    );
-  };
-
-  const applyYahooToAll = () => {
-    if (!current?.yahoo) return;
-    const result = applyYahooToSameCategory(rows, selectedIndex, current.yahoo);
-    if (result.appliedRows === 0) {
-      setMessage("同じカテゴリIDの行はすべて入力済みのため、適用する行がありませんでした");
-      return;
-    }
-    onRowsChange(result.rows);
-    setMessage(`同じカテゴリID ${categoryId} の ${result.appliedRows} 行に Yahoo カテゴリを適用しました（空欄のみ）`);
   };
 
   /** 読み込んだ属性定義から単位の候補一覧を引く（グリッドの単位列へ入力するときの参考表示用）。
@@ -158,8 +156,9 @@ export function CategoryAssistPanel({ rows, rowUids, selectedIndex, selectedUid,
         <h2 className="font-semibold text-emerald-800">📥 カテゴリ読み込みパネル</h2>
         <p className="mt-1 text-xs text-slate-500">
           モール基本カテゴリIDを入力した行のセルをクリック（または行番号をクリック）して対象行を選び、
-          「読み込み」を押すと、商品属性の項目・単位がグリッド右側の商品属性列に入り、
-          Yahoo カテゴリ候補がここに表示されます。
+          「読み込み」を押すと、対象行と同じカテゴリIDの行へまとめて
+          ①商品属性の項目・単位がグリッド右側の商品属性列に入り、
+          ②YahooカテゴリID・パスが空欄の行へ自動で入ります（手入力があれば上書きしません）。
         </p>
       </div>
 
@@ -182,7 +181,7 @@ export function CategoryAssistPanel({ rows, rowUids, selectedIndex, selectedUid,
           )}
         </div>
         <Button onClick={load} disabled={loading || !row} variant="outline" className="w-full">
-          {loading ? "読み込み中…" : "📥 読み込み（属性・Yahoo候補）"}
+          {loading ? "読み込み中…" : "📥 読み込み（属性・Yahoo候補）→ 行へ自動適用"}
         </Button>
       </div>
 
@@ -235,14 +234,14 @@ export function CategoryAssistPanel({ rows, rowUids, selectedIndex, selectedUid,
         )}
       </div>
 
-      {/* Yahoo カテゴリ候補: 適用は空欄のときだけ（手入力優先） */}
+      {/* Yahoo カテゴリ候補: 読み込み時に空欄の行へ自動適用済み。ここは読み取り専用の確認表示 */}
       <div className="space-y-2">
         <h3 className="text-xs font-semibold text-slate-600 border-b border-slate-200 pb-1">
           Yahoo カテゴリ候補
         </h3>
         {!current ? (
           <p className="text-xs text-slate-400">
-            未読み込みです。「読み込み」を押すと変換候補が表示されます。
+            未読み込みです。「読み込み」を押すと変換候補が空欄の行へ自動で入り、内容がここに表示されます。
           </p>
         ) : !current.yahoo ? (
           <p className="text-xs text-slate-500">
@@ -267,24 +266,10 @@ export function CategoryAssistPanel({ rows, rowUids, selectedIndex, selectedUid,
             {current.yahoo.confidence && (
               <div className="text-slate-400">マッピング確度: {current.yahoo.confidence}</div>
             )}
-            <div className="flex gap-1 pt-1">
-              <Button
-                variant="outline"
-                onClick={applyYahooToRow}
-                title="対象行の YahooカテゴリID・Yahooストアカテゴリパスが空欄のときだけ入ります（手入力優先）"
-              >
-                この行に適用
-              </Button>
-              {sameCategoryOthers > 0 && (
-                <Button
-                  variant="outline"
-                  onClick={applyYahooToAll}
-                  title="同じモール基本カテゴリIDの行すべてに適用します（各行とも空欄のときだけ）"
-                >
-                  同カテゴリの全行に適用
-                </Button>
-              )}
-            </div>
+            <p className="pt-1 text-emerald-800">
+              読み込み時に、同じカテゴリIDの行の空欄へ自動適用済みです（手入力があれば上書きしません。
+              修正はグリッドの YahooカテゴリID / Yahooストアカテゴリパス列で行えます）。
+            </p>
           </div>
         )}
       </div>
