@@ -2,7 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { ProductInputSchema, type ProductInput } from "./schema";
 import { recordHistory } from "@/lib/history/recorder";
 
-/** DB の products テーブル上で「主要列」として持つフィールド (28列)。残りは extra JSONB へ。 */
+/** DB の products テーブル上で「主要列」として持つフィールド (25列)。残りは extra JSONB へ。 */
 const MAIN_COLUMNS = [
   "ne_code", "jan_code", "maker_code", "product_type", "quantity",
   "product_name", "display_name", "tax_rate", "cost_price", "selling_price",
