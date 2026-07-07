@@ -104,6 +104,18 @@ export const ProductInputBaseSchema = z.object({
     })
     .default({}),
 
+  // Shopify 固有項目（アプリに対応列が無い status / 商品タイプ / SEO）の編集値。
+  // extra JSONB に往復し（yahoo_rewrite と同じ持ち方）、設定されている項目だけを
+  // shopify-patch が productUpdate の差分計画へ載せる。未設定 = Shopify 現状を保持。
+  shopify_overrides: z
+    .object({
+      status: z.enum(["ACTIVE", "DRAFT", "ARCHIVED"]).optional(),
+      product_type: z.string().optional(),
+      seo_title: z.string().optional(),
+      seo_description: z.string().optional(),
+    })
+    .default({}),
+
   // バリエーション
   option_item_name: z.string().default(""),
   option_horizontal: z.string().default(""),

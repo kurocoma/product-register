@@ -11,6 +11,7 @@ type DiffPreview = { changedFields: Changed[]; skipped: string[]; advanced: stri
 const FIELD_LABEL: Record<string, string> = {
   display_name: "商品名",
   selling_price: "販売価格",
+  display_price: "表示価格",
   description_pc: "商品説明(PC)",
   description_sp: "商品説明(SP)",
   catch_copy_pc: "キャッチコピー",
@@ -20,6 +21,13 @@ const FIELD_LABEL: Record<string, string> = {
   jan_code: "JANコード",
   shipping_type: "送料区分",
   image_count: "画像枚数",
+  // Shopify 拡張分（vendor/tags/status/SEO は shopify-patch の差分計画で使うフィールド名）
+  maker_name: "メーカー名(Vendor)",
+  tags: "タグ",
+  status: "ステータス",
+  shopify_product_type: "商品タイプ(Shopify)",
+  seo_title: "SEOタイトル",
+  seo_description: "SEO説明文",
 };
 const label = (f: string) => FIELD_LABEL[f] ?? f;
 

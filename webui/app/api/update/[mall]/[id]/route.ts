@@ -16,6 +16,7 @@ import { parseYahooItem } from "@/lib/converters/yahoo-item-parser";
 import { buildYahooUpdateParams } from "@/lib/converters/yahoo-patch";
 import { getShopifyConfig } from "@/lib/shopify/auth";
 import { getProduct as getShopifyProduct, updateProduct as updateShopifyProduct, bulkUpdateVariants } from "@/lib/shopify/product-client";
+import { getLocations, setAvailableQuantities } from "@/lib/shopify/inventory-client";
 import { buildShopifyPatchPlan, detectShopifyStructuralChange } from "@/lib/converters/shopify-patch";
 import { productVariants } from "@/lib/product/schema";
 
@@ -76,6 +77,7 @@ async function buildPlan(mall: Mall, product: ProductInput) {
       mall, cfg: scfg, key: gid, changed: splan.changed,
       productUpdateInput: splan.productUpdateInput, variantsInput: splan.variantsInput,
       skipped: splan.skipped, advanced: [] as string[], structural,
+      snapshot: got.product, // 在庫更新(下地)の inventoryItemId 解決に使う
     } as const;
   }
   const cfg = getYahooConfig();
@@ -163,6 +165,34 @@ export async function POST(req: Request, { params }: { params: Promise<{ mall: s
       error: `SKU構成の変更（${plan.structural.join(" / ")}）は「反映」では送れません。価格・商品情報のみの変更は「反映」で可能です。SKUの追加・削除は Shopify 管理画面または CSV 再同期で行ってください。`,
       structural: plan.structural,
     }, { status: 409 });
+  }
+  // Shopify 在庫更新の下地（UI 非公開・スコープ追加後に有効化）: body.inventory = [{ ne_code, quantity }]。
+  // 現アプリのスコープ（read_products / write_products）には在庫系が無いため、実行すると
+  // inventory-client が ACCESS_DENIED を「write_inventory / read_inventory スコープの追加が必要」の
+  // メッセージへ変換して返す（握り潰さない）。商品情報の反映とは混ぜず、在庫指定時は在庫のみ処理する。
+  if (plan.mall === "shopify" && Array.isArray(reqBody?.inventory) && reqBody.inventory.length > 0) {
+    const entries = reqBody.inventory as { ne_code?: string; quantity?: number }[];
+    const loc = await getLocations(plan.cfg);
+    if (!loc.ok) {
+      return NextResponse.json({ ok: false, error: "在庫更新失敗: " + loc.message, needsScope: loc.needsScope }, { status: loc.needsScope ? 403 : 502 });
+    }
+    const locationId = loc.locations.find((l) => l.isActive)?.id ?? loc.locations[0]?.id;
+    if (!locationId) return NextResponse.json({ ok: false, error: "在庫更新失敗: ロケーションが見つかりません" }, { status: 502 });
+    const bySku = new Map(plan.snapshot.variants.map((sv) => [sv.sku.trim(), sv]));
+    const quantities = [];
+    for (const e of entries) {
+      const sv = e.ne_code ? bySku.get(e.ne_code.trim()) : undefined;
+      if (!sv?.inventoryItem?.id || typeof e.quantity !== "number") {
+        return NextResponse.json({ ok: false, error: `在庫更新失敗: SKU「${e.ne_code ?? ""}」の inventoryItem を解決できません` }, { status: 422 });
+      }
+      quantities.push({ inventoryItemId: sv.inventoryItem.id, locationId, quantity: e.quantity });
+    }
+    const r = await setAvailableQuantities(plan.cfg, quantities);
+    if (!r.ok) {
+      return NextResponse.json({ ok: false, error: "在庫更新失敗: " + r.message, needsScope: r.needsScope }, { status: r.needsScope ? 403 : 502 });
+    }
+    await recordHistory(supabase, "edit", id, { via: "api_update_inventory", mall, key: plan.key });
+    return NextResponse.json({ ok: true, mall, key: plan.key, inventoryUpdated: quantities.length });
   }
   if (plan.changed.length === 0) {
     return NextResponse.json({ ok: true, mall, key: plan.key, noChange: true, message: "変更はありません" });

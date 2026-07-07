@@ -11,7 +11,7 @@ import { getItem as getYahooItem } from "@/lib/yahoo/item-client";
 import { parseYahooItem } from "@/lib/converters/yahoo-item-parser";
 import { getShopifyConfig } from "@/lib/shopify/auth";
 import { getProduct as getShopifyProduct } from "@/lib/shopify/product-client";
-import { parseShopifyItem } from "@/lib/converters/shopify-item-parser";
+import { parseShopifyItem, type ShopifyMeta } from "@/lib/converters/shopify-item-parser";
 
 export const runtime = "nodejs";
 
@@ -22,7 +22,7 @@ async function fetchMallSnapshot(
   mall: Mall,
   product: ProductInput,
 ): Promise<
-  | { ok: true; exists: boolean; parsed: Partial<ProductInput>; key: string }
+  | { ok: true; exists: boolean; parsed: Partial<ProductInput>; key: string; shopifyMeta?: ShopifyMeta }
   | { ok: false; error: string; status: number }
 > {
   if (mall === "rakuten") {
@@ -44,8 +44,9 @@ async function fetchMallSnapshot(
     if (!got.exists) return { ok: true, exists: false, parsed: {}, key: gid };
     // fetch(取込)はフラット項目のみマージする（楽天と同じ流儀）。variants[] まで上書きすると
     // 楽天管理の配送詳細・属性が Shopify 由来の空値で消えるため除外する。
-    const { variants: _variants, ...flat } = parseShopifyItem(got.product, { taxRate: product.tax_rate });
-    return { ok: true, exists: true, parsed: flat, key: gid };
+    // _shopifyMeta（対応列が無い項目の構造化保持）は DB マージ対象から分離し、プレビュー参照用に返す。
+    const { variants: _variants, _shopifyMeta, ...flat } = parseShopifyItem(got.product, { taxRate: product.tax_rate });
+    return { ok: true, exists: true, parsed: flat, key: gid, shopifyMeta: _shopifyMeta };
   }
   const cfg = getYahooConfig();
   if (!cfg) return { ok: false, error: "Yahoo 認証情報が未設定です", status: 500 };
@@ -87,6 +88,8 @@ export async function GET(req: Request, { params }: { params: Promise<{ mall: st
 
   return NextResponse.json({
     ok: true, dryRun: true, mall, key: snap.key, exists: snap.exists, parsed: snap.parsed,
+    // Shopify: アプリに対応列が無い項目（status/handle/productType/SEO/在庫等）の参照値（破棄しない）。
+    ...(snap.shopifyMeta ? { shopifyMeta: snap.shopifyMeta } : {}),
   });
 }
 

@@ -7,6 +7,15 @@
 import { shopifyGraphQL, formatUserErrors, type UserError } from "./graphql-client";
 import type { ShopifyConfig } from "./auth";
 
+/** variant 配下の inventoryItem（在庫系 mutation の対象 ID・SKU・追跡・原価）。
+ * cost(unitCost) はスコープ次第で取得できないことがある → その場合 null（getProduct が cost 抜きで再取得）。 */
+export type ShopifyInventoryItemNode = {
+  id: string;
+  sku: string;
+  tracked: boolean | null;
+  cost: string | null; // unitCost.amount（ストア既定通貨。docs/shopify/08 §1-2）
+};
+
 export type ShopifyVariantNode = {
   id: string;
   title: string;
@@ -14,6 +23,10 @@ export type ShopifyVariantNode = {
   price: string;
   compareAtPrice: string | null;
   barcode: string | null;
+  taxable: boolean | null;
+  /** 全ロケーション合計の在庫数（参照用。更新は inventory-client 管轄。docs/shopify/08 §1-4） */
+  inventoryQuantity: number | null;
+  inventoryItem: ShopifyInventoryItemNode | null;
 };
 
 export type ShopifyProductNode = {
@@ -23,7 +36,9 @@ export type ShopifyProductNode = {
   status: string;
   vendor: string;
   handle: string;
+  productType: string;
   tags: string[];
+  seo: { title: string; description: string };
   variants: ShopifyVariantNode[];
 };
 
@@ -41,7 +56,10 @@ export function gidToNumericId(gid: string): string {
 }
 
 // variants は first:50 に抑える（最大クエリコスト 1,000pt 対策。docs/shopify/08 §6-1）。
-const PRODUCT_QUERY = `
+// §1-1〜§1-4 の取得可能項目をすべて取得する。unitCost(原価) はスコープ次第で
+// フィールド単位の ACCESS_DENIED になり得るため、withCost=false の縮退クエリも組める形にする。
+function productQuery(withCost: boolean): string {
+  return `
 query getProduct($id: ID!) {
   product(id: $id) {
     id
@@ -50,7 +68,9 @@ query getProduct($id: ID!) {
     status
     vendor
     handle
+    productType
     tags
+    seo { title description }
     variants(first: 50) {
       edges {
         node {
@@ -60,17 +80,26 @@ query getProduct($id: ID!) {
           price
           compareAtPrice
           barcode
+          taxable
+          inventoryQuantity
+          inventoryItem { id sku tracked${withCost ? " unitCost { amount }" : ""} }
         }
       }
     }
   }
 }`;
+}
 
-type RawVariantEdge = { node?: Partial<ShopifyVariantNode> };
+type RawInventoryItem = { id?: unknown; sku?: unknown; tracked?: unknown; unitCost?: { amount?: unknown } | null };
+type RawVariantNode = Partial<Omit<ShopifyVariantNode, "inventoryItem">> & { inventoryItem?: RawInventoryItem | null };
+type RawVariantEdge = { node?: RawVariantNode };
 
 function parseProductNode(raw: Record<string, unknown>): ShopifyProductNode {
   const edges = ((raw.variants as { edges?: RawVariantEdge[] } | undefined)?.edges ?? []) as RawVariantEdge[];
   const str = (x: unknown): string => (typeof x === "string" ? x : "");
+  const strOrNull = (x: unknown): string | null => (typeof x === "string" ? x : null);
+  const boolOrNull = (x: unknown): boolean | null => (typeof x === "boolean" ? x : null);
+  const seo = (raw.seo ?? {}) as { title?: unknown; description?: unknown };
   return {
     id: str(raw.id),
     title: str(raw.title),
@@ -78,15 +107,25 @@ function parseProductNode(raw: Record<string, unknown>): ShopifyProductNode {
     status: str(raw.status),
     vendor: str(raw.vendor),
     handle: str(raw.handle),
+    productType: str(raw.productType),
     tags: Array.isArray(raw.tags) ? raw.tags.filter((t): t is string => typeof t === "string") : [],
-    variants: edges.map((e) => ({
-      id: str(e.node?.id),
-      title: str(e.node?.title),
-      sku: str(e.node?.sku),
-      price: str(e.node?.price),
-      compareAtPrice: typeof e.node?.compareAtPrice === "string" ? e.node.compareAtPrice : null,
-      barcode: typeof e.node?.barcode === "string" ? e.node.barcode : null,
-    })),
+    seo: { title: str(seo.title), description: str(seo.description) },
+    variants: edges.map((e) => {
+      const ii = e.node?.inventoryItem;
+      return {
+        id: str(e.node?.id),
+        title: str(e.node?.title),
+        sku: str(e.node?.sku),
+        price: str(e.node?.price),
+        compareAtPrice: strOrNull(e.node?.compareAtPrice),
+        barcode: strOrNull(e.node?.barcode),
+        taxable: boolOrNull(e.node?.taxable),
+        inventoryQuantity: typeof e.node?.inventoryQuantity === "number" ? e.node.inventoryQuantity : null,
+        inventoryItem: ii
+          ? { id: str(ii.id), sku: str(ii.sku), tracked: boolOrNull(ii.tracked), cost: strOrNull(ii.unitCost?.amount) }
+          : null,
+      };
+    }),
   };
 }
 
@@ -94,9 +133,14 @@ export type GetProductResult =
   | { exists: true; product: ShopifyProductNode }
   | { exists: false; message: string };
 
-/** product query で現状取得（編集スナップショット兼用）。存在しない gid は exists:false。 */
+/** product query で現状取得（編集スナップショット兼用）。存在しない gid は exists:false。
+ * unitCost(原価) がスコープ不足のフィールド単位 ACCESS_DENIED で取れない場合は、
+ * cost 抜きの縮退クエリで再取得して parse を続行する（取得失敗で全体を落とさない）。 */
 export async function getProduct(cfg: ShopifyConfig, gid: string): Promise<GetProductResult> {
-  const r = await shopifyGraphQL(cfg, PRODUCT_QUERY, { id: gid });
+  let r = await shopifyGraphQL(cfg, productQuery(true), { id: gid });
+  if (!r.ok && /ACCESS_DENIED|access denied/i.test(r.message)) {
+    r = await shopifyGraphQL(cfg, productQuery(false), { id: gid });
+  }
   if (!r.ok) return { exists: false, message: r.message };
   const node = r.data?.product;
   if (!node || typeof node !== "object") return { exists: false, message: "not found" };

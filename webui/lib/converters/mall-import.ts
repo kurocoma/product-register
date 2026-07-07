@@ -126,6 +126,8 @@ function finalize(
   delete base.is_single;
   delete base.is_set;
   delete (base as { _variantId?: string })._variantId;
+  // Shopify の対応列なし項目の構造化保持（プレビュー参照用）。DB 保存対象ではないため分離する。
+  delete (base as { _shopifyMeta?: unknown })._shopifyMeta;
 
   // 価格を整数円へ正規化（parse 失敗で取込全体を落とさない）。
   // schema は selling_price: z.number().int() なので、小数(例 "1980.5")や NaN/undefined を
