@@ -14,10 +14,14 @@ import { getYahooConfig, getYahooAccessToken } from "@/lib/yahoo/auth";
 import { getItem as getYahooItem, editItem, reservePublish } from "@/lib/yahoo/item-client";
 import { parseYahooItem } from "@/lib/converters/yahoo-item-parser";
 import { buildYahooUpdateParams } from "@/lib/converters/yahoo-patch";
+import { getShopifyConfig } from "@/lib/shopify/auth";
+import { getProduct as getShopifyProduct, updateProduct as updateShopifyProduct, bulkUpdateVariants } from "@/lib/shopify/product-client";
+import { buildShopifyPatchPlan, detectShopifyStructuralChange } from "@/lib/converters/shopify-patch";
+import { productVariants } from "@/lib/product/schema";
 
 export const runtime = "nodejs";
 
-type Mall = "rakuten" | "yahoo";
+type Mall = "rakuten" | "yahoo" | "shopify";
 
 /** モール現状を取得し、diff・送信プランを構築する（dry-run/commit 共通の前処理）。 */
 async function buildPlan(mall: Mall, product: ProductInput) {
@@ -52,6 +56,28 @@ async function buildPlan(mall: Mall, product: ProductInput) {
     if (sc.emptyKey) structural.push("SKU管理番号/NEコード未入力のSKU");
     return { mall, cred, key: manageNumber, changed, body, bodyWithAttributes, skipped, advanced: [] as string[], structural } as const;
   }
+  if (mall === "shopify") {
+    // Shopify は productUpdate(商品情報) + productVariantsBulkUpdate(SKU価格/JAN) の楽天patch型
+    // （送った項目だけ更新・未送信は保持。docs/shopify/08 §4）。productSet は編集フローでは使わない。
+    const scfg = getShopifyConfig();
+    if (!scfg) return { error: "Shopify 認証情報が未設定です（SHOPIFY_SHOP / SHOPIFY_CLIENT_ID / SHOPIFY_CLIENT_SECRET）", status: 500 } as const;
+    const gid = product.shopify_product_id?.trim();
+    if (!gid) return { error: "Shopify 商品IDが未設定です（「モール取込」で Shopify から取込むと自動設定されます）", status: 400 } as const;
+    const got = await getShopifyProduct(scfg, gid);
+    if (!got.exists) return { error: "モールに該当商品が存在しません", status: 404, key: gid } as const;
+    const splan = buildShopifyPatchPlan(product, got.product);
+    // SKU構成変更(追加/削除/キー未入力)は部分更新で表現できない（追加=BulkCreate別系統、削除=productSet全置換のみ）。
+    const sc = detectShopifyStructuralChange(productVariants(product), got.product);
+    const structural: string[] = [];
+    if (sc.added.length) structural.push(`SKU追加(${sc.added.join(", ")})`);
+    if (sc.removed.length) structural.push(`SKU削除(${sc.removed.join(", ")})`);
+    if (sc.emptyKey) structural.push("NEコード未入力のSKU");
+    return {
+      mall, cfg: scfg, key: gid, changed: splan.changed,
+      productUpdateInput: splan.productUpdateInput, variantsInput: splan.variantsInput,
+      skipped: splan.skipped, advanced: [] as string[], structural,
+    } as const;
+  }
   const cfg = getYahooConfig();
   if (!cfg) return { error: "Yahoo 認証情報が未設定です", status: 500 } as const;
   let token: string;
@@ -71,7 +97,7 @@ async function buildPlan(mall: Mall, product: ProductInput) {
 /** GET = 反映プレビュー（書き込みなし）。差分・送信予定ボディ・警告を返す。 */
 export async function GET(req: Request, { params }: { params: Promise<{ mall: string; id: string }> }) {
   const { mall, id } = await params;
-  if (mall !== "rakuten" && mall !== "yahoo") return NextResponse.json({ ok: false, error: "不正なモール指定です" }, { status: 400 });
+  if (mall !== "rakuten" && mall !== "yahoo" && mall !== "shopify") return NextResponse.json({ ok: false, error: "不正なモール指定です" }, { status: 400 });
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ ok: false, error: "未ログインです" }, { status: 401 });
@@ -89,7 +115,14 @@ export async function GET(req: Request, { params }: { params: Promise<{ mall: st
     skipped: plan.skipped,
     advanced: plan.advanced,
     structural: plan.structural,
-    willSend: mall === "rakuten" ? (plan as { body: unknown }).body : (plan as { params: unknown }).params,
+    willSend: mall === "rakuten"
+      ? (plan as { body: unknown }).body
+      : mall === "shopify"
+        ? {
+            productUpdate: (plan as { productUpdateInput: unknown }).productUpdateInput,
+            productVariantsBulkUpdate: (plan as { variantsInput: unknown }).variantsInput,
+          }
+        : (plan as { params: unknown }).params,
     hasChanges: plan.changed.length > 0,
   });
 }
@@ -97,7 +130,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ mall: st
 /** POST = 反映確定（部分更新を送信）。body: { submit?: boolean }（Yahoo の個別反映） */
 export async function POST(req: Request, { params }: { params: Promise<{ mall: string; id: string }> }) {
   const { mall, id } = await params;
-  if (mall !== "rakuten" && mall !== "yahoo") return NextResponse.json({ ok: false, error: "不正なモール指定です" }, { status: 400 });
+  if (mall !== "rakuten" && mall !== "yahoo" && mall !== "shopify") return NextResponse.json({ ok: false, error: "不正なモール指定です" }, { status: 400 });
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ ok: false, error: "未ログインです" }, { status: 401 });
@@ -119,6 +152,15 @@ export async function POST(req: Request, { params }: { params: Promise<{ mall: s
     return NextResponse.json({
       ok: false,
       error: `SKU構成の変更（${plan.structural.join(" / ")}）は「反映」では送れません。価格・配送のみの変更は「反映」で可能です。SKUの追加・削除を含む場合は「楽天へ登録」（全置換）で反映してください。`,
+      structural: plan.structural,
+    }, { status: 409 });
+  }
+  // Shopify: SKU構成変更は部分更新で表現できない（追加=BulkCreate別系統・削除=productSet全置換のみ）。
+  // productSet を誤って部分送信すると未送信 variant が全削除されるため、安全側で反映を中止する。
+  if (plan.mall === "shopify" && plan.structural.length > 0) {
+    return NextResponse.json({
+      ok: false,
+      error: `SKU構成の変更（${plan.structural.join(" / ")}）は「反映」では送れません。価格・商品情報のみの変更は「反映」で可能です。SKUの追加・削除は Shopify 管理画面または CSV 再同期で行ってください。`,
       structural: plan.structural,
     }, { status: 409 });
   }
@@ -150,6 +192,26 @@ export async function POST(req: Request, { params }: { params: Promise<{ mall: s
     }
     await recordHistory(supabase, "edit", id, { via: "api_update", mall, key: plan.key, changedFields });
     return NextResponse.json({ ok: true, mall, key: plan.key, status: result.status, changedFields, skipped: plan.skipped });
+  }
+
+  if (plan.mall === "shopify") {
+    // 価格(SKU) → 商品情報 の順に送る。variants 側は allowPartialUpdates 既定 false =
+    // 1件でもエラーなら全 variant 不成立（原子性。docs/shopify/08 §2）。
+    if (plan.variantsInput.length > 0) {
+      const r = await bulkUpdateVariants(plan.cfg, plan.key, plan.variantsInput);
+      if (!r.ok) {
+        return NextResponse.json({ ok: false, error: "productVariantsBulkUpdate 失敗: " + r.message }, { status: 502 });
+      }
+    }
+    if (plan.productUpdateInput) {
+      const r = await updateShopifyProduct(plan.cfg, plan.productUpdateInput);
+      if (!r.ok) {
+        const note = plan.variantsInput.length > 0 ? "（SKU価格側は反映済みです。再実行すると残りだけ送信されます）" : "";
+        return NextResponse.json({ ok: false, error: "productUpdate 失敗: " + r.message + note }, { status: 502 });
+      }
+    }
+    await recordHistory(supabase, "edit", id, { via: "api_update", mall, key: plan.key, changedFields });
+    return NextResponse.json({ ok: true, mall, key: plan.key, changedFields, skipped: plan.skipped });
   }
 
   // Yahoo

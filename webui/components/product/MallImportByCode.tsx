@@ -3,7 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-type Mall = "rakuten" | "yahoo";
+type Mall = "rakuten" | "yahoo" | "shopify";
+const MALL_LABEL: Record<Mall, string> = { rakuten: "楽天", yahoo: "Yahoo", shopify: "Shopify" };
 
 /** 商品管理番号を入力してモール既存ページから取込み、新規商品として作成→編集画面へ遷移する。
  *  同じ NEコードの商品が既にあれば（重複作成せず）その編集画面を開く。 */
@@ -45,7 +46,12 @@ export function MallImportByCode() {
     }
   };
 
-  const placeholder = mall === "rakuten" ? "例: maker-1234（商品管理番号）" : "例: item-code（商品コード）";
+  const placeholder =
+    mall === "rakuten"
+      ? "例: maker-1234（商品管理番号）"
+      : mall === "shopify"
+        ? "例: 1234567890（商品の数値ID = 管理画面URL末尾）"
+        : "例: item-code（商品コード）";
 
   return (
     <form onSubmit={submit} className="bg-white border border-slate-200 rounded p-4 space-y-3">
@@ -53,7 +59,7 @@ export function MallImportByCode() {
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex text-sm">
-          {(["rakuten", "yahoo"] as Mall[]).map((m) => (
+          {(["rakuten", "yahoo", "shopify"] as Mall[]).map((m) => (
             <button
               key={m}
               type="button"
@@ -66,7 +72,7 @@ export function MallImportByCode() {
                 mall === m ? "border-blue-500 text-blue-700" : "border-transparent text-slate-500 hover:text-slate-700"
               }`}
             >
-              {m === "rakuten" ? "楽天" : "Yahoo"}
+              {MALL_LABEL[m]}
             </button>
           ))}
         </div>
@@ -91,7 +97,9 @@ export function MallImportByCode() {
       <p className="text-xs text-slate-500">
         {mall === "rakuten"
           ? "楽天の「商品管理番号（商品URL）」を入力すると、現在の登録内容を取り込んで新規商品として作成し、編集画面を開きます。"
-          : "Yahoo の「商品コード」を入力すると、現在の登録内容を取り込んで新規商品として作成し、編集画面を開きます。"}
+          : mall === "shopify"
+            ? "Shopify の「商品ID（管理画面 /products/ 末尾の数値）」を入力すると、現在の登録内容を取り込んで新規商品として作成し、編集画面を開きます。"
+            : "Yahoo の「商品コード」を入力すると、現在の登録内容を取り込んで新規商品として作成し、編集画面を開きます。"}
       </p>
 
       {err && <p className="text-sm text-red-600">⚠ {err}</p>}

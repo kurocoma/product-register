@@ -8,6 +8,9 @@ import { parseRakutenItem, parseRakutenVariants } from "@/lib/converters/rakuten
 import { getYahooConfig, getYahooAccessToken } from "@/lib/yahoo/auth";
 import { getItem as getYahooItem } from "@/lib/yahoo/item-client";
 import { parseYahooItem } from "@/lib/converters/yahoo-item-parser";
+import { getShopifyConfig } from "@/lib/shopify/auth";
+import { getProduct as getShopifyProduct, toProductGid } from "@/lib/shopify/product-client";
+import { parseShopifyItem } from "@/lib/converters/shopify-item-parser";
 import { buildImportedProduct } from "@/lib/converters/mall-import";
 
 export const runtime = "nodejs";
@@ -16,7 +19,7 @@ export const runtime = "nodejs";
  *  同じ NEコードの商品が既にあれば作成せずそれを開かせる（重複作成防止）。 */
 export async function POST(req: Request, { params }: { params: Promise<{ mall: string }> }) {
   const { mall } = await params;
-  if (mall !== "rakuten" && mall !== "yahoo") {
+  if (mall !== "rakuten" && mall !== "yahoo" && mall !== "shopify") {
     return NextResponse.json({ ok: false, error: "不正なモール指定です" }, { status: 400 });
   }
 
@@ -58,6 +61,20 @@ export async function POST(req: Request, { params }: { params: Promise<{ mall: s
     // 多SKU(P2): 1商品ページ配下の全SKUを variants[] に取込む（編集画面でまとめて価格・配送改定するため）。
     p.variants = parseRakutenVariants(got.json);
     parsed = p;
+  } else if (mall === "shopify") {
+    const scfg = getShopifyConfig();
+    if (!scfg) return NextResponse.json({ ok: false, error: "Shopify 認証情報が未設定です（SHOPIFY_SHOP / SHOPIFY_CLIENT_ID / SHOPIFY_CLIENT_SECRET）" }, { status: 500 });
+    // 入力は商品の数値ID（管理画面URL /products/{数値} の末尾）または gid。handle 検索は未対応（要確認 §8-1）。
+    const gid = toProductGid(code);
+    if (!gid) {
+      return NextResponse.json({ ok: false, error: `「${code}」は Shopify 商品IDとして解釈できません（管理画面URL末尾の数値ID、または gid://shopify/Product/... を入力してください）` }, { status: 400 });
+    }
+    const got = await getShopifyProduct(scfg, gid);
+    if (!got.exists) {
+      return NextResponse.json({ ok: false, error: `Shopify に商品ID「${code}」の商品が見つかりません` }, { status: 404 });
+    }
+    parsed = parseShopifyItem(got.product);
+    resolvedCode = gid; // shopify_product_id に保存する正規化済み gid
   } else {
     const cfg = getYahooConfig();
     if (!cfg) return NextResponse.json({ ok: false, error: "Yahoo 認証情報が未設定です" }, { status: 500 });
@@ -87,7 +104,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ mall: s
   // 3) 既存照合（あれば作成せず既存を開かせる）
   //    楽天は「1商品ページ=1商品(多SKU)」なので、まず商品管理番号(ページ)で照合する。
   //    同ページの別SKUを取り込んでも同一商品を開き、ページの二重作成を防ぐ。次に NEコードで照合。
-  const existing = await findExistingProduct(supabase, user.id, mall, built.product.rakuten_manage_number, built.neCode);
+  const existing = await findExistingProduct(supabase, user.id, mall, built.product.rakuten_manage_number, built.neCode, built.product.shopify_product_id);
   if (existing?.id) {
     return NextResponse.json({ ok: true, existed: true, productId: existing.id, neCode: built.neCode });
   }
@@ -100,7 +117,7 @@ export async function POST(req: Request, { params }: { params: Promise<{ mall: s
     // 同一 NEコードの同時 POST 競合（check-then-insert の TOCTOU）で UNIQUE 制約に弾かれた場合、
     // 既に作成済みの商品が存在するはず。再照合して存在すれば既存パスと同じく existed:true で開かせる
     // （冪等性: 二重作成は DB 制約で防がれており、敗者リクエストを 500 で落とさない）。
-    const raced = await findExistingProduct(supabase, user.id, mall, built.product.rakuten_manage_number, built.neCode);
+    const raced = await findExistingProduct(supabase, user.id, mall, built.product.rakuten_manage_number, built.neCode, built.product.shopify_product_id);
     if (raced?.id) {
       return NextResponse.json({ ok: true, existed: true, productId: raced.id, neCode: built.neCode });
     }
@@ -112,8 +129,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ mall: s
   return NextResponse.json({ ok: true, existed: false, productId: saved.id, neCode: built.neCode });
 }
 
-/** 既存商品の照合。楽天は商品管理番号(ページ)優先→NEコード。多SKUの同ページ二重作成を防ぐ。
- * rakuten_manage_number は extra(JSON)なので extra->>rakuten_manage_number で絞る。
+/** 既存商品の照合。楽天は商品管理番号(ページ)優先→NEコード、Shopify は gid 優先→NEコード。
+ * 多SKUの同ページ二重作成を防ぐ。モール識別子は extra(JSON)なので extra->> で絞る。
  * 同ページに複数レコードが残る旧データもあり得るため limit(1)（maybeSingleは複数行で例外になる）。 */
 async function findExistingProduct(
   supabase: Awaited<ReturnType<typeof createClient>>,
@@ -121,6 +138,7 @@ async function findExistingProduct(
   mall: string,
   manageNumber: string,
   neCode: string,
+  shopifyProductId = "",
 ): Promise<{ id: string } | null> {
   if (mall === "rakuten" && manageNumber) {
     const { data } = await supabase
@@ -128,6 +146,15 @@ async function findExistingProduct(
       .select("id")
       .eq("user_id", userId)
       .eq("extra->>rakuten_manage_number", manageNumber)
+      .limit(1);
+    if (data && data.length) return data[0] as { id: string };
+  }
+  if (mall === "shopify" && shopifyProductId) {
+    const { data } = await supabase
+      .from("products")
+      .select("id")
+      .eq("user_id", userId)
+      .eq("extra->>shopify_product_id", shopifyProductId)
       .limit(1);
     if (data && data.length) return data[0] as { id: string };
   }

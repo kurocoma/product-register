@@ -38,7 +38,8 @@ function baseCodeOf(p: ProductInput): string {
   return `${p.maker_code}-${p.jan_code.slice(-4)}`;
 }
 
-function priceWithTax(p: { selling_price: number; tax_rate: number }): number {
+/** アプリ税抜価格 → Shopify 税込価格。CSV 出力と API 部分更新（shopify-patch）で同一規約を共有する。 */
+export function priceWithTax(p: { selling_price: number; tax_rate: number }): number {
   return Math.round(p.selling_price * (1 + p.tax_rate / 100));
 }
 
@@ -67,7 +68,8 @@ function getOption1Value(p: ProductInput): string {
   return matched;
 }
 
-function addTableClass(html: string): string {
+/** 説明文中の <table> に itemtable class を付与する。Body(HTML) 生成（CSV/API）共通の整形規約。 */
+export function addTableClass(html: string): string {
   return html.replace(/<table\s[^>]*>/g, (tag) => {
     if (tag.includes("class=")) return tag;
     return tag.replace("<table ", '<table class="itemtable" ');

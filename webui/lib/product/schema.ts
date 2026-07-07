@@ -57,7 +57,7 @@ export const ProductInputBaseSchema = z.object({
   store_category: z.string().default(""),
   // モール掲載状況（反映ボタンの活性判定に使う）。取込/登録/反映成功で各モールを true にする。
   // 楽天は rakuten_manage_number があれば掲載とみなす（後方互換のフォールバック）。
-  mall_listed: z.object({ rakuten: z.boolean().optional(), yahoo: z.boolean().optional() }).default({}),
+  mall_listed: z.object({ rakuten: z.boolean().optional(), yahoo: z.boolean().optional(), shopify: z.boolean().optional() }).default({}),
   // モール識別子: 取込商品の実際の楽天 商品管理番号。
   // 非規約書式(maker-JAN下4桁以外)でも編集→反映で同一商品へ往復させるため保存する。
   // 空のとき buildRakutenManageNumber は従来どおり baseCodeOf を使う（新規登録・既存商品は後方互換）。
@@ -65,6 +65,9 @@ export const ProductInputBaseSchema = z.object({
   // 楽天 variant キー(SKU管理番号)。NEコード(=merchantDefinedSkuId)と別物の外部作成商品で、
   // upsert/patch の variants.{key} に使う実キーを保持する。空のとき ne_code を使う（後方互換）。
   rakuten_variant_id: z.string().default(""),
+  // モール識別子: Shopify 商品の Global ID（gid://shopify/Product/{数値}）。
+  // 取込・編集→反映で同一商品へ往復させる冪等キー（rakuten_manage_number と同じ位置づけ）。
+  shopify_product_id: z.string().default(""),
 
   // 多SKU(variants[]): 1商品ページ(楽天 商品管理番号)配下の複数SKU。未設定(空配列)なら単品=従来動作。
   // 消費側は productVariants() 経由で段階移行する(フラットから1件合成する後方互換あり)。
@@ -170,16 +173,19 @@ export type ProductInput = z.infer<typeof ProductInputSchema>;
 export type ProductInputBase = z.output<typeof ProductInputBaseSchema>;
 export type Variant = z.output<typeof VariantSchema>;
 
-/** モール掲載状況。mall_listed を優先し、楽天は rakuten_manage_number があれば掲載とみなす（後方互換）。
+/** モール掲載状況。mall_listed を優先し、楽天は rakuten_manage_number・Shopify は
+ * shopify_product_id があれば掲載とみなす（後方互換）。
  * 反映ボタンの活性判定に使う（掲載モールだけ有効化）。 */
 export function mallPresence(p: {
-  mall_listed?: { rakuten?: boolean; yahoo?: boolean };
+  mall_listed?: { rakuten?: boolean; yahoo?: boolean; shopify?: boolean };
   rakuten_manage_number?: string;
-}): { rakuten: boolean; yahoo: boolean } {
+  shopify_product_id?: string;
+}): { rakuten: boolean; yahoo: boolean; shopify: boolean } {
   const ml = p.mall_listed ?? {};
   return {
     rakuten: !!ml.rakuten || !!(p.rakuten_manage_number && String(p.rakuten_manage_number).trim()),
     yahoo: !!ml.yahoo,
+    shopify: !!ml.shopify || !!(p.shopify_product_id && String(p.shopify_product_id).trim()),
   };
 }
 

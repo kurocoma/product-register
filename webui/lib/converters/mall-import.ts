@@ -1,6 +1,6 @@
 import { ProductInputSchema, type ProductInput } from "@/lib/product/schema";
 
-type Mall = "rakuten" | "yahoo";
+type Mall = "rakuten" | "yahoo" | "shopify";
 
 export type BuildImportedResult =
   | { ok: true; product: ProductInput; neCode: string }
@@ -71,6 +71,15 @@ export function buildImportedProduct(
     return finalize(mall, code, parsed, { neCode, makerCode, janCode, rakutenManageNumber: code });
   }
 
+  if (mall === "shopify") {
+    // Shopify: code は Global ID（gid://shopify/Product/{数値}）。first variant の SKU
+    // （= CSV 登録規約の NEコード）を NEコードに使い、無ければ gid 数値部で代用する。
+    const numericId = code.split("/").pop() ?? code;
+    const neCode = (parsed.ne_code && parsed.ne_code.trim()) || `shopify-${numericId}`;
+    const janCode = normalizeJan(parsed.jan_code) || "0000000000000";
+    return finalize(mall, code, parsed, { neCode, makerCode: "", janCode, rakutenManageNumber: "", shopifyProductId: code });
+  }
+
   // Yahoo: itemCode をそのまま NEコードに使う。maker は持たない。商品コードの書式制約はない。
   const neCode = code;
   const makerCode = "";
@@ -83,7 +92,7 @@ function finalize(
   mall: Mall,
   code: string,
   parsed: Partial<ProductInput>,
-  ids: { neCode: string; makerCode: string; janCode: string; rakutenManageNumber: string },
+  ids: { neCode: string; makerCode: string; janCode: string; rakutenManageNumber: string; shopifyProductId?: string },
 ): BuildImportedResult {
   const name = (parsed.display_name && parsed.display_name.trim()) || code;
 
@@ -105,8 +114,9 @@ function finalize(
     ne_code: ids.neCode,
     jan_code: ids.janCode,
     maker_code: ids.makerCode,
-    // 実際のモール管理番号（楽天のみ。編集→反映で同一商品へ往復させる冪等キー）
+    // 実際のモール管理番号（編集→反映で同一商品へ往復させる冪等キー。楽天=管理番号 / Shopify=gid）
     rakuten_manage_number: ids.rakutenManageNumber,
+    shopify_product_id: ids.shopifyProductId ?? "",
     // 商品名（管理用）と表示名の両方を埋める
     product_name: name,
     display_name: name,

@@ -9,10 +9,13 @@ import { buildRakutenManageNumber } from "@/lib/converters/rakuten-api";
 import { getYahooConfig, getYahooAccessToken } from "@/lib/yahoo/auth";
 import { getItem as getYahooItem } from "@/lib/yahoo/item-client";
 import { parseYahooItem } from "@/lib/converters/yahoo-item-parser";
+import { getShopifyConfig } from "@/lib/shopify/auth";
+import { getProduct as getShopifyProduct } from "@/lib/shopify/product-client";
+import { parseShopifyItem } from "@/lib/converters/shopify-item-parser";
 
 export const runtime = "nodejs";
 
-type Mall = "rakuten" | "yahoo";
+type Mall = "rakuten" | "yahoo" | "shopify";
 
 /** モール現状を取得して ProductInput 部分へパースする（共通）。 */
 async function fetchMallSnapshot(
@@ -31,6 +34,18 @@ async function fetchMallSnapshot(
     const parsed = parseRakutenItem(got.json);
     delete (parsed as { _variantId?: string })._variantId;
     return { ok: true, exists: true, parsed, key: manageNumber };
+  }
+  if (mall === "shopify") {
+    const scfg = getShopifyConfig();
+    if (!scfg) return { ok: false, error: "Shopify 認証情報が未設定です（SHOPIFY_SHOP / SHOPIFY_CLIENT_ID / SHOPIFY_CLIENT_SECRET）", status: 500 };
+    const gid = product.shopify_product_id?.trim();
+    if (!gid) return { ok: false, error: "Shopify 商品IDが未設定です（「モール取込」で Shopify から取込むと自動設定されます）", status: 400 };
+    const got = await getShopifyProduct(scfg, gid);
+    if (!got.exists) return { ok: true, exists: false, parsed: {}, key: gid };
+    // fetch(取込)はフラット項目のみマージする（楽天と同じ流儀）。variants[] まで上書きすると
+    // 楽天管理の配送詳細・属性が Shopify 由来の空値で消えるため除外する。
+    const { variants: _variants, ...flat } = parseShopifyItem(got.product, { taxRate: product.tax_rate });
+    return { ok: true, exists: true, parsed: flat, key: gid };
   }
   const cfg = getYahooConfig();
   if (!cfg) return { ok: false, error: "Yahoo 認証情報が未設定です", status: 500 };
@@ -58,7 +73,7 @@ function applySnapshot(product: ProductInput, parsed: Partial<ProductInput>): Pr
 /** GET = 取込プレビュー（書き込みなし）。モール現状をパースして返す。 */
 export async function GET(req: Request, { params }: { params: Promise<{ mall: string; id: string }> }) {
   const { mall, id } = await params;
-  if (mall !== "rakuten" && mall !== "yahoo") return NextResponse.json({ ok: false, error: "不正なモール指定です" }, { status: 400 });
+  if (mall !== "rakuten" && mall !== "yahoo" && mall !== "shopify") return NextResponse.json({ ok: false, error: "不正なモール指定です" }, { status: 400 });
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ ok: false, error: "未ログインです" }, { status: 401 });
@@ -78,7 +93,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ mall: st
 /** POST = 取込確定。モール現状をアプリ商品へマージして保存する。 */
 export async function POST(req: Request, { params }: { params: Promise<{ mall: string; id: string }> }) {
   const { mall, id } = await params;
-  if (mall !== "rakuten" && mall !== "yahoo") return NextResponse.json({ ok: false, error: "不正なモール指定です" }, { status: 400 });
+  if (mall !== "rakuten" && mall !== "yahoo" && mall !== "shopify") return NextResponse.json({ ok: false, error: "不正なモール指定です" }, { status: 400 });
   const supabase = await createClient();
   const { data: { user } } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ ok: false, error: "未ログインです" }, { status: 401 });

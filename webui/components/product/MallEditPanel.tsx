@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 
-type Mall = "rakuten" | "yahoo";
+type Mall = "rakuten" | "yahoo" | "shopify";
+const MALL_LABEL: Record<Mall, string> = { rakuten: "楽天", yahoo: "Yahoo", shopify: "Shopify" };
 type Changed = { field: string; before: unknown; after: unknown };
 type DiffPreview = { changedFields: Changed[]; skipped: string[]; advanced: string[]; hasChanges: boolean; key: string };
 
@@ -43,13 +44,13 @@ export function MallEditPanel({ productId }: { productId?: string }) {
 
   // 取込: モール現状をアプリ商品へ反映（保存値を上書き）。成功後リロードしてフォームへ反映。
   const importFromMall = async () => {
-    if (!confirm(`${mall === "rakuten" ? "楽天" : "Yahoo"}の現在の商品内容をこの商品に取り込みます。保存中の内容は上書きされます。続けますか？`)) return;
+    if (!confirm(`${MALL_LABEL[mall]}の現在の商品内容をこの商品に取り込みます。保存中の内容は上書きされます。続けますか？`)) return;
     setBusy(true); reset(); setDiff(null);
     try {
       const res = await fetch(`/api/fetch/${mall}/${productId}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
       const j = await res.json();
       if (!res.ok || !j.ok) { setErr(j.error || `取込失敗 (HTTP ${res.status})`); return; }
-      setMsg(`✓ ${mall === "rakuten" ? "楽天" : "Yahoo"}から取り込みました (${j.key})。画面を更新します…`);
+      setMsg(`✓ ${MALL_LABEL[mall]}から取り込みました (${j.key})。画面を更新します…`);
       setTimeout(() => window.location.reload(), 600);
     } catch (e) { setErr("通信エラー: " + (e instanceof Error ? e.message : String(e))); }
     finally { setBusy(false); }
@@ -79,7 +80,7 @@ export function MallEditPanel({ productId }: { productId?: string }) {
       const j = await res.json();
       if (!res.ok || !j.ok) { setErr(j.error || `反映失敗 (HTTP ${res.status})`); return; }
       const sub = mall === "yahoo" ? (j.submitted ? "（公開反映済み）" : submit ? `（反映保留: ${j.submitMessage}）` : "") : "";
-      setMsg(`✓ ${mall === "rakuten" ? "楽天" : "Yahoo"}へ反映しました (${(j.changedFields || []).map(label).join(", ")})${sub}`);
+      setMsg(`✓ ${MALL_LABEL[mall]}へ反映しました (${(j.changedFields || []).map(label).join(", ")})${sub}`);
       setDiff(null);
     } catch (e) { setErr("通信エラー: " + (e instanceof Error ? e.message : String(e))); }
     finally { setBusy(false); }
@@ -90,14 +91,14 @@ export function MallEditPanel({ productId }: { productId?: string }) {
       <div className="font-semibold">✏️ モール既存商品の編集（取込→差分→反映）</div>
 
       <div className="flex gap-1 text-sm">
-        {(["rakuten", "yahoo"] as Mall[]).map((m) => (
+        {(["rakuten", "yahoo", "shopify"] as Mall[]).map((m) => (
           <button
             key={m}
             type="button"
             onClick={() => { setMall(m); setDiff(null); reset(); }}
             className={`flex-1 rounded-t border-b-2 px-2 py-1 font-medium ${mall === m ? "border-blue-500 text-blue-700" : "border-transparent text-slate-500 hover:text-slate-700"}`}
           >
-            {m === "rakuten" ? "楽天" : "Yahoo"}
+            {MALL_LABEL[m]}
           </button>
         ))}
       </div>
@@ -110,7 +111,7 @@ export function MallEditPanel({ productId }: { productId?: string }) {
           差分を確認
         </button>
         <button onClick={() => applyUpdate(false)} disabled={busy || !diff || !diff.hasChanges} className="rounded bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
-          {mall === "rakuten" ? "楽天へ反映" : "Yahooへ反映"}
+          {`${MALL_LABEL[mall]}へ反映`}
         </button>
         {mall === "yahoo" && (
           <button onClick={() => applyUpdate(true)} disabled={busy || !diff || !diff.hasChanges} className="rounded border border-blue-400 text-blue-700 px-3 py-2 text-sm hover:bg-blue-50 disabled:opacity-50">
