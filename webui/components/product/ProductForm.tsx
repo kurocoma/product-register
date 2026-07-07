@@ -63,7 +63,19 @@ export function ProductForm({
 
   return (
     <FormProvider {...methods}>
-      <Accordion defaultOpen={["basic"]}>
+      {/* トグル(折りたたみ)は初期状態で全セクション展開（開閉自体は引き続き可能） */}
+      <Accordion
+        defaultOpen={[
+          "basic",
+          "variants",
+          "shipping",
+          "description",
+          "yahoo",
+          "variation",
+          "image",
+          "attribute",
+        ]}
+      >
         <AccordionItem value="basic" title="基本情報">
           <BasicInfoSection />
         </AccordionItem>
