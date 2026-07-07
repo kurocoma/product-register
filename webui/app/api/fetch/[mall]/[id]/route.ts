@@ -58,7 +58,8 @@ async function fetchMallSnapshot(
   }
   const got = await getYahooItem(token, cfg.sellerId, product.ne_code);
   if (!got.exists) return { ok: true, exists: false, parsed: {}, key: product.ne_code };
-  return { ok: true, exists: true, parsed: parseYahooItem(got.raw), key: product.ne_code };
+  // 税率フォールバック: XML に TaxrateType が無い場合は商品側の税率で税抜へ変換する（送受対称）。
+  return { ok: true, exists: true, parsed: parseYahooItem(got.raw, { fallbackTaxRate: product.tax_rate }), key: product.ne_code };
 }
 
 /** モール現状をアプリ商品へ適用する（識別子は上書きしない）。 */

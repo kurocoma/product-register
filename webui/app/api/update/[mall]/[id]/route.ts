@@ -90,7 +90,8 @@ async function buildPlan(mall: Mall, product: ProductInput) {
   }
   const got = await getYahooItem(token, cfg.sellerId, product.ne_code);
   if (!got.exists) return { error: "モールに該当商品が存在しません", status: 404, key: product.ne_code } as const;
-  const mallParsed = parseYahooItem(got.raw);
+  // 税率フォールバック: XML に TaxrateType が無い場合は商品側の税率で税抜へ変換する（送受対称）。
+  const mallParsed = parseYahooItem(got.raw, { fallbackTaxRate: product.tax_rate });
   const changed = diffProduct(mallParsed, product);
   const { params, advanced, skipped } = buildYahooUpdateParams(got.raw, changed, product, { sellerId: cfg.sellerId });
   return { mall, cfg, token, key: product.ne_code, changed, params, skipped, advanced, structural: [] as string[] } as const;

@@ -85,13 +85,17 @@ async function main() {
   let product = null;
   try { product = dbRowToProductInput(row); check("dbRowToProductInput 成功(編集画面が壊れない)", true, ""); }
   catch (e) { check("dbRowToProductInput 成功(編集画面が壊れない)", false, String(e).slice(0, 160)); }
-  // Yahoo の Price は「税込」で返るため、register が送った税込価格(=selling_price×(1+税率))が取り込まれる。
-  // これは既存 fetch 機能と同一規約（parseYahooItem が税込 Price をそのまま selling_price へ）。
-  const EXPECT_IMPORTED_PRICE = Math.floor(PRICE * 1.1 + 0.5); // 1280 → 1408
+  // 仕様変更(selling_price 全モール税抜統一): Yahoo の Price は「税込」で返るため、取込時に
+  // parseYahooItem が税抜へ変換して保存する（register 送信の税込化と対称）。
+  // register が送った税込 1408(=1280×1.1) → 取込で税抜 1280 に戻る（往復安定）。
+  // 旧仕様（税込 Price を 1:1 で selling_price へ）の期待値 1408 は本仕様変更で陳腐化したため更新。
+  const EXPECT_IMPORTED_PRICE = PRICE; // 1280（税抜）
   if (product) {
     check("ne_code 一致", product.ne_code === NE, product.ne_code);
     check("jan_code は13桁", /^\d{13}$/.test(product.jan_code), product.jan_code);
-    check("selling_price 取込一致(税込・fetchと同一規約)", product.selling_price === EXPECT_IMPORTED_PRICE, `${product.selling_price} (期待 ${EXPECT_IMPORTED_PRICE})`);
+    check("selling_price 取込一致(税抜へ変換・登録時の値へ往復)", product.selling_price === EXPECT_IMPORTED_PRICE, `${product.selling_price} (期待 ${EXPECT_IMPORTED_PRICE})`);
+    check("tax_rate=10 取込(getItem TaxrateType 由来)", product.tax_rate === 10, String(product.tax_rate));
+    check("display_price=0(二重価格なし→販売価格連動へ正規化)", (product.display_price ?? 0) === 0, String(product.display_price));
     check("display_name 取込一致", product.display_name === NAME, product.display_name);
     check("yahoo_category_id 取込一致", product.yahoo_category_id === "13457", product.yahoo_category_id);
   }

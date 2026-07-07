@@ -4,6 +4,7 @@ import { fitFullWidth } from "@/lib/product/text-fit";
 import type { Converter } from "./base";
 import { ENCODING } from "./base";
 import { buildYahooImgListHtml, buildYahooItemImageUrls } from "./image-url";
+import { yahooTaxInclusive } from "./yahoo-tax";
 
 export const YAHOO_COLUMNS = [
   "path", "name", "code", "sub-code", "original-price", "price", "sale-price", "member-price",
@@ -96,8 +97,10 @@ export class YahooConverter implements Converter {
     // 多SKU商品は variants[0] を代表として従来どおり1行出力する
     // （設計書: Yahoo の多SKUは subcode_param で将来対応。フラット商品は1件合成=従来値）。
     const v = productVariants(p)[0];
-    const taxInclusive = String(Math.floor(v.selling_price * (1 + v.tax_rate / 100) + 0.5));
-    const displayInclusive = String(Math.floor(variantDisplayPrice(p, v) * (1 + v.tax_rate / 100) + 0.5));
+    // selling_price / display_price は税抜（全モール統一）。Yahoo の price / original-price は税込のため
+    // 送信時に税込へ変換する（取込側 parseYahooItem と対称。lib/converters/yahoo-tax.ts）。
+    const taxInclusive = String(yahooTaxInclusive(v.selling_price, v.tax_rate));
+    const displayInclusive = String(yahooTaxInclusive(variantDisplayPrice(p, v), v.tax_rate));
     const taxrateType = String(v.tax_rate / 100);
     const caption = buildCaption(v.ne_code, p.image_count, p.description_pc);
     const explanation = buildExplanation(p.free1, p.description_pc);

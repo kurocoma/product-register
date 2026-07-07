@@ -39,17 +39,19 @@ await sleep(2000);
 const g0 = await getItem(token, cfg.sellerId, NE);
 check("snapshot getItem", g0.exists, "");
 const snap = parseYahooItem(g0.raw);
-check("snapshot 価格=1500", snap.selling_price === 1500, String(snap.selling_price));
+// 仕様変更(selling_price 全モール税抜統一): Yahoo の Price(税込1500) は税抜へ変換して取り込まれる。
+check("snapshot 価格=1364(税込1500→税抜)", snap.selling_price === 1364, String(snap.selling_price));
 
-// --- 価格だけ変更（1500 → 2480）。他は不変＝送信しないが、ラウンドトリップで保持されるはず ---
+// --- 価格だけ変更（税抜1364 → 2480）。他は不変＝送信しないが、ラウンドトリップで保持されるはず ---
 const edited = makeProduct({ ne_code: NE, yahoo_path: snap.yahoo_path, display_name: snap.display_name, yahoo_category_id: snap.yahoo_category_id, selling_price: 2480, catch_copy_yahoo: snap.catch_copy_yahoo, description_pc: snap.description_pc, jan_code: snap.jan_code });
 const diff = diffProduct(snap, edited);
 check("diff は価格1件のみ", diff.length === 1 && diff[0].field === "selling_price", diff.map((x) => x.field).join(","));
 const { params, advanced, skipped } = buildYahooUpdateParams(g0.raw, diff, edited, { sellerId: cfg.sellerId });
 check("advanced設定なし", advanced.length === 0, advanced.join(","));
 check("skippedなし", skipped.length === 0, skipped.join(","));
-check("price上書き=2480", params.price === "2480", params.price);
-check("表示価格(original_price)も2480に同期", params.original_price === "2480", params.original_price);
+// 送信は税込へ変換（2480×1.1=2728）。取込の税抜変換と対称（旧仕様 1:1 の "2480" は陳腐化）。
+check("price上書き=2728(税込)", params.price === "2728", params.price);
+check("表示価格(original_price)も2728に同期", params.original_price === "2728", params.original_price);
 check("headlineを土台から復元して同梱", params.headline === "初期見出し", params.headline);
 check("captionを土台から復元して同梱", params.caption === "<p>初期キャプ</p>", params.caption);
 check("display=0を復元(非公開維持)", params.display === "0", params.display);
@@ -61,7 +63,8 @@ await sleep(2000);
 
 const g1 = await getItem(token, cfg.sellerId, NE);
 const after = parseYahooItem(g1.raw);
-check("価格が2480に変化", after.selling_price === 2480, String(after.selling_price));
+check("Yahoo側 Price=2728(税込)", /<Price>2728<\/Price>/.test(g1.raw), (g1.raw.match(/<Price>[^<]*<\/Price>/) || [])[0]);
+check("価格が2480に変化(税抜換算)", after.selling_price === 2480, String(after.selling_price));
 check("見出し(headline)が保持", after.catch_copy_yahoo === "初期見出し", `→ ${after.catch_copy_yahoo}`);
 check("キャプ(caption)が保持", after.description_pc === "<p>初期キャプ</p>", `→ ${after.description_pc}`);
 check("JAN が保持", after.jan_code === "4955028002542", `→ ${after.jan_code}`);

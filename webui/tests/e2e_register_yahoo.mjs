@@ -87,6 +87,8 @@ async function main() {
   const token = await getYahooAccessToken(cfg);
   const got = await getItem(token, cfg.sellerId, NE);
   check("getItem で登録確認", got.exists, got.exists ? "存在" : "未検出(反映待ちの可能性)");
+  // selling_price は税抜（全モール統一）。Yahoo の price は税込のため、登録時は 1000×1.1=1100 が立つ。
+  check("Yahoo側 Price=1100(税込が立つ)", /<Price>1100<\/Price>/.test(got.raw), (got.raw.match(/<Price>[^<]*<\/Price>/) || [])[0]);
 
   // 4) 後始末: deleteItem
   await sleep(1000);

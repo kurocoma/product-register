@@ -28,7 +28,8 @@ const p = parseYahooItem(g.raw);
 check("ne_code = ItemCode", p.ne_code === NE, p.ne_code);
 check("display_name = Name", p.display_name === "Yahooパース検証", p.display_name);
 check("yahoo_category_id", p.yahoo_category_id === "13457", p.yahoo_category_id);
-check("selling_price(number)", p.selling_price === 1500, String(p.selling_price));
+// 仕様変更(selling_price 全モール税抜統一): Yahoo の Price(税込1500) は税抜 1364 へ変換して取り込む。
+check("selling_price(税込1500→税抜1364)", p.selling_price === 1364, String(p.selling_price));
 check("catch_copy_yahoo = Headline", p.catch_copy_yahoo === "見出し確認", p.catch_copy_yahoo);
 check("description_pc = Caption", p.description_pc === "<p>キャプ確認</p>", p.description_pc);
 check("jan_code = Jan", p.jan_code === "4955028002542", p.jan_code);

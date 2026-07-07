@@ -1,6 +1,9 @@
 // Yahoo 既存商品編集(部分更新)のE2E。実フロー: register(作成)→fetch(取込)→価格変更→update(ラウンドトリップ反映)。
-//   画像up → register POST(editItem) → fetch POST(取込) → DBで価格1000→2480 → update GET(diff=価格のみ)
-//   → update POST(editItem) → getItem(価格2480・headline/caption/display保持) → deleteItem + 画像削除 + DB削除。
+//   画像up → register POST(editItem, Yahoo側は税込1100) → fetch POST(取込=税抜1000へ正規化)
+//   → 取込直後の update GET で changed 0件(幻差分ゼロの往復確認) → DBで価格1000→2480
+//   → update GET(diff=価格のみ・送信は税込2728) → update POST(editItem)
+//   → getItem(Yahoo価格2728=税込・アプリ換算2480・headline/caption/display保持) → deleteItem + 画像削除 + DB削除。
+// 価格の税意味: selling_price は全モール税抜統一（Yahoo の price は税込のため送信×1.1/取込÷1.1）。
 // 前提: dev server が http://localhost:3000 で起動していること。
 // 実行: npx tsx tests/e2e_update_yahoo.mjs
 import { readFileSync } from "node:fs";
@@ -64,12 +67,20 @@ async function main() {
   check("register POST 200", reg.status === 200 && regj.ok, `HTTP ${reg.status} ${JSON.stringify(regj).slice(0, 160)}`);
   await sleep(2500);
 
-  // 2) fetch POST（モール現状をアプリへ取込）
+  // 2) fetch POST（モール現状をアプリへ取込。Yahoo 税込1100 → 税抜1000 へ正規化されて保存される）
   const fe = await fetch(`${BASE}/api/fetch/yahoo/${prod.id}`, { method: "POST", headers: H, body: "{}" });
   const fej = await fe.json();
   check("fetch POST 200(取込)", fe.status === 200 && fej.ok, `HTTP ${fe.status} ${JSON.stringify(fej).slice(0, 160)}`);
+  const { data: afterFetch } = await admin.from("products").select("selling_price").eq("id", prod.id).single();
+  check("取込後も selling_price=1000(税抜へ正規化・往復安定)", afterFetch?.selling_price === 1000, String(afterFetch?.selling_price));
 
-  // 3) アプリ側で価格だけ 1000 → 2480
+  // 2.5) 取込→無変更→update GET = changed 0 件（幻差分ゼロの往復確認）
+  const dr0 = await fetch(`${BASE}/api/update/yahoo/${prod.id}`, { headers: { Cookie: cookie } });
+  const dr0j = await dr0.json();
+  check("取込直後の update GET 200", dr0.status === 200 && dr0j.ok, `HTTP ${dr0.status}`);
+  check("取込直後は changed 0 件(幻差分ゼロ)", dr0j.hasChanges === false && dr0j.changedFields.length === 0, JSON.stringify(dr0j.changedFields));
+
+  // 3) アプリ側で価格だけ 1000 → 2480（税抜）
   await admin.from("products").update({ selling_price: 2480 }).eq("id", prod.id);
 
   // 4) update GET（dry-run）= 差分は selling_price のみ・advanced なし
@@ -78,7 +89,8 @@ async function main() {
   check("update GET 200", dr.status === 200 && drj.ok, `HTTP ${dr.status}`);
   check("差分は selling_price のみ", drj.hasChanges && drj.changedFields.length === 1 && drj.changedFields[0].field === "selling_price", JSON.stringify(drj.changedFields));
   check("advanced なし", Array.isArray(drj.advanced) && drj.advanced.length === 0, JSON.stringify(drj.advanced));
-  check("送信パラメータ price=2480", drj.willSend?.price === "2480", drj.willSend?.price);
+  // 仕様変更(selling_price 全モール税抜統一): Yahoo の price は税込のため 2480×1.1=2728 を送る（旧仕様は 1:1 の 2480）。
+  check("送信パラメータ price=2728(税込)", drj.willSend?.price === "2728", drj.willSend?.price);
 
   // 5) update POST（editItem ラウンドトリップ反映）
   const up = await fetch(`${BASE}/api/update/yahoo/${prod.id}`, { method: "POST", headers: H, body: "{}" });
@@ -86,11 +98,12 @@ async function main() {
   check("update POST 200(editItem)", up.status === 200 && upj.ok, `HTTP ${up.status} ${JSON.stringify(upj).slice(0, 160)}`);
   await sleep(2500);
 
-  // 6) getItem 反映確認: 価格2480・headline/caption/display保持
+  // 6) getItem 反映確認: Yahoo側は税込2728・アプリ換算(税抜)2480・headline/caption/display保持
   const got = await getItem(token, cfg.sellerId, NE);
   check("getItem 取得", got.exists, "");
+  check("Yahoo側 Price=2728(税込が立つ)", /<Price>2728<\/Price>/.test(got.raw), (got.raw.match(/<Price>[^<]*<\/Price>/) || [])[0]);
   const after = parseYahooItem(got.raw);
-  check("価格2480に反映", after.selling_price === 2480, String(after.selling_price));
+  check("価格2480に反映(税抜換算)", after.selling_price === 2480, String(after.selling_price));
   check("見出し保持", after.catch_copy_yahoo === "初期キャッチ", `→ ${after.catch_copy_yahoo}`);
   check("キャプ保持", after.description_pc === "<p>初期キャプ</p>", `→ ${after.description_pc}`);
   check("display=0 非公開維持", /<Display>0<\/Display>/.test(got.raw), "");

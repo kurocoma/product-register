@@ -91,6 +91,8 @@ export async function POST(req: Request, { params }: { params: Promise<{ mall: s
     if (!got.exists) {
       return NextResponse.json({ ok: false, error: `Yahoo に商品コード「${code}」の商品が見つかりません` }, { status: 404 });
     }
+    // 価格は税抜へ変換して取込む（税率は XML の TaxrateType 優先・無ければ既定10%）。
+    // TaxrateType が取れた場合は parsed.tax_rate として buildImportedProduct の既定(10)を上書きする。
     parsed = parseYahooItem(got.raw);
   }
 

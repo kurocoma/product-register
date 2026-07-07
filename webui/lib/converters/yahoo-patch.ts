@@ -1,6 +1,7 @@
 import type { ProductInput } from "@/lib/product/schema";
 import { displayPrice } from "@/lib/product/schema";
 import type { ChangedField } from "@/lib/product/diff";
+import { yahooTaxInclusive } from "./yahoo-tax";
 
 /** Yahoo editItem の form パラメータ。 */
 export type YahooPatchParams = Record<string, string>;
@@ -125,11 +126,13 @@ export function xmlToEditItemParams(
   return { params, advanced: detectAdvanced(xml) };
 }
 
-/** 変更フィールド → editItem パラメータの上書きマップ。 */
+/** 変更フィールド → editItem パラメータの上書きマップ。
+ * 価格: アプリの selling_price / display_price は税抜（全モール統一）、Yahoo の price / original_price は
+ * 税込のため、送信時に税込へ変換する（取込側 parseYahooItem の税抜変換と対称。lib/converters/yahoo-tax.ts）。 */
 const OVERRIDE: Record<string, { param: string; get: (p: ProductInput) => string }> = {
   display_name: { param: "name", get: (p) => p.display_name },
-  selling_price: { param: "price", get: (p) => String(p.selling_price) },
-  display_price: { param: "original_price", get: (p) => String(displayPrice(p)) },
+  selling_price: { param: "price", get: (p) => String(yahooTaxInclusive(p.selling_price, p.tax_rate)) },
+  display_price: { param: "original_price", get: (p) => String(yahooTaxInclusive(displayPrice(p), p.tax_rate)) },
   yahoo_category_id: { param: "product_category", get: (p) => p.yahoo_category_id },
   yahoo_path: { param: "path", get: (p) => p.yahoo_path },
   catch_copy_yahoo: { param: "headline", get: (p) => p.catch_copy_yahoo },
@@ -159,7 +162,8 @@ export function buildYahooUpdateParams(
     // 商品説明(caption)は register 同様 SP用フリースペースとも同値にする（PC/SP不整合を防ぐ）。
     if (c.field === "description_pc") params.sp_additional = v;
     // 通常購入販売価格(price)を変えたら表示価格(original_price)も連動させる（display_price優先、無ければ販売価格）。
-    if (c.field === "selling_price") params.original_price = String(displayPrice(p));
+    // original_price も Yahoo は税込のため税込へ変換して送る。
+    if (c.field === "selling_price") params.original_price = String(yahooTaxInclusive(displayPrice(p), p.tax_rate));
   }
   return { params, advanced, skipped };
 }
