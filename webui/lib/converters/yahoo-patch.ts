@@ -102,13 +102,58 @@ function extractImages(xml: string): string {
   return urls.join(";");
 }
 
+/** コンテナタグ（<Spec1>..</Spec1> 等）の内側 XML を返す（無ければ ""）。
+ * tagVal は文書全体を検索するため、Variation1/Name が商品名 Name と衝突しないよう
+ * 子要素の抽出は必ずこのスコープ内で行う。 */
+function containerContent(xml: string, name: string): string {
+  const m = xml.match(new RegExp(`<${name}>([\\s\\S]*?)</${name}>`, "i"));
+  return m ? m[1] : "";
+}
+
+/** spec1-10 / grouping_id / variation1-5 を getItem XML から editItem パラメータへ転記する
+ * （260712修正依頼-3）。editItem は未送信項目を削除/既定値上書きするため、転記しないと
+ * 無関係な更新のたびにストア側設定が消える。転記フォーマットは editItem.html で確認:
+ *  - specN = "{SpecId}:{SpecValue}"（項目と値をコロン区切り）
+ *  - variationN_spec_id / variationN_name / variationN_free_title
+ *  - grouping_id */
+function extractAdvancedParams(xml: string, params: YahooPatchParams): void {
+  for (let i = 1; i <= 10; i++) {
+    const c = containerContent(xml, `Spec${i}`);
+    if (!c.trim()) continue;
+    const id = tagVal(c, "SpecId");
+    const value = tagVal(c, "SpecValue");
+    if (id && value) params[`spec${i}`] = `${id}:${value}`;
+  }
+  for (let i = 1; i <= 5; i++) {
+    const c = containerContent(xml, `Variation${i}`);
+    if (!c.trim()) continue;
+    const specId = tagVal(c, "SpecID");
+    const name = tagVal(c, "Name");
+    const freeTitle = tagVal(c, "FreeTitle");
+    if (specId) params[`variation${i}_spec_id`] = specId;
+    if (name) params[`variation${i}_name`] = name;
+    if (freeTitle) params[`variation${i}_free_title`] = freeTitle;
+  }
+  const grouping = tagVal(xml, "GroupingId");
+  if (grouping) params.grouping_id = grouping;
+}
+
 /** editItem で安全に転記できない高度な設定が「実体として存在する」かを検出する。
- * 存在する場合はラウンドトリップで失われる恐れがあるため、呼び出し側で警告/中止する。 */
-function detectAdvanced(xml: string): string[] {
+ * 存在する場合はラウンドトリップで失われる恐れがあるため、呼び出し側で警告/中止する。
+ * spec / grouping / variation は extractAdvancedParams で転記できた場合のみ検出から外す
+ * （実体があるのに転記できなかった＝想定外の形は、従来どおり安全側でブロック）。 */
+function detectAdvanced(xml: string, transcribed: YahooPatchParams): string[] {
   const adv: string[] = [];
-  for (let i = 1; i <= 10; i++) if (hasContent(xml, `Spec${i}`)) { adv.push("spec"); break; }
-  if (hasContent(xml, "GroupingId")) adv.push("grouping");
-  for (let i = 1; i <= 5; i++) if (hasContent(xml, `Variation${i}`)) { adv.push("variation"); break; }
+  for (let i = 1; i <= 10; i++) {
+    if (hasContent(xml, `Spec${i}`) && !transcribed[`spec${i}`]) { adv.push("spec"); break; }
+  }
+  if (hasContent(xml, "GroupingId") && !transcribed.grouping_id) adv.push("grouping");
+  for (let i = 1; i <= 5; i++) {
+    const done = transcribed[`variation${i}_spec_id`] || transcribed[`variation${i}_name`] || transcribed[`variation${i}_free_title`];
+    if (hasContent(xml, `Variation${i}`) && !done) { adv.push("variation"); break; }
+  }
+  // options / subcodes は editItem パラメータ自体は存在するが、getItem からの復元に未確定点が残る
+  // （Option の type 属性の意味・subcode_images の JSON 書式が別マニュアル）ため引き続きブロック。
   if (/<Options>[\s\S]*?<Option[ >]/i.test(xml)) adv.push("options");
   if (/<SubCodes>[\s\S]*?<SubCode[ >]/i.test(xml)) adv.push("subcodes");
   if (/<Inscriptions>[\s\S]*?<Inscription[ >]/i.test(xml)) adv.push("inscriptions");
@@ -143,7 +188,8 @@ export function xmlToEditItemParams(
   if ((params.subscription_type ?? "0") === "0") {
     for (const k of SUBSCRIPTION_RELATED_PARAMS) delete params[k];
   }
-  return { params, advanced: detectAdvanced(xml) };
+  extractAdvancedParams(xml, params);
+  return { params, advanced: detectAdvanced(xml, params) };
 }
 
 /** 変更フィールド → editItem パラメータの上書きマップ。
