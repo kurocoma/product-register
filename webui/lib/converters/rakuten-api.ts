@@ -105,8 +105,9 @@ export function buildRakutenManageNumber(p: ProductInput): string {
   return baseCodeOf(p);
 }
 
-/** 商品画像 images[].location（"/フォルダ/ファイル名.jpg" 形式。/cabinet/ 以降のパス）。 */
-function buildImageLocations(p: ProductInput): { type: "CABINET"; location: string }[] {
+/** 商品画像 images[].location（"/フォルダ/ファイル名.jpg" 形式。/cabinet/ 以降のパス）。
+ * upsert 本体のほか、画像並び替え後の images[] 部分更新(patch)でも使う。 */
+export function buildImageLocations(p: ProductInput): { type: "CABINET"; location: string }[] {
   const count = Math.max(1, Math.min(20, p.image_count));
   const out: { type: "CABINET"; location: string }[] = [];
   for (let i = 1; i <= count; i++) {
@@ -153,18 +154,31 @@ export function buildRakutenUpsertBody(p: ProductInput, opts: BuildUpsertOptions
       articleNumber,
       shipping: buildVariantShipping(v),
     };
+    // 定期購入価格（260711修正依頼-5）: 定期販売有効かつこのSKUに定期価格があるときだけ送る
+    // （定期価格の無いSKUは通常購入のみ、という楽天仕様の表現）。
+    if (p.subscription_enabled && (v.subscription_base_price ?? 0) > 0) {
+      variant.subscriptionPrice = {
+        basePrice: String(v.subscription_base_price),
+        ...((v.subscription_first_price ?? 0) > 0
+          ? { individualPrices: { firstPrice: String(v.subscription_first_price) } }
+          : {}),
+      };
+    }
     const attributes = buildVariantAttributes(v);
     if (attributes.length > 0) variant.attributes = attributes;
     if (multi) variant.selectorValues = { [axisKey]: labels[i] };
     variants[key] = variant;
   });
 
+  // PC用販売説明文: 任意入力(sale_description_pc)があればそれを、空なら画像から自動生成した imgList
+  // （CSV出力 rakuten.ts と同じ規則。取込した salesDescription を反映で失わない往復対称のため）。
+  const saleBlock = p.sale_description_pc.trim() ? p.sale_description_pc : imgList;
   const body: RakutenUpsertBody = {
     title: p.display_name,
     itemType: "NORMAL",
     genreId: p.mall_category_id,
-    productDescription: { pc: p.description_pc, sp: imgList + p.description_sp },
-    salesDescription: imgList,
+    productDescription: { pc: p.description_pc, sp: saleBlock + p.description_sp },
+    salesDescription: saleBlock,
     images: buildImageLocations(p),
     payment: { taxIncluded: true, taxRate: String(p.tax_rate / 100) },
     variants,
@@ -178,7 +192,58 @@ export function buildRakutenUpsertBody(p: ProductInput, opts: BuildUpsertOptions
     body.unlimitedInventoryFlag = false;
     body.features = { inventoryDisplay: "HIDDEN_STOCK" };
   }
+  // 定期購入（260711修正依頼-5）: 定期専用 itemType は無く subscription + features で表現する。
+  // 定期ボタン true のとき通常ボタンも true が必須（IE0432）。価格等の事前検証は validateSubscription。
+  if (p.subscription_enabled) {
+    body.subscription = {
+      shippingDateFlag: p.subscription_shipping_date_flag,
+      shippingIntervalFlag: p.subscription_interval_flag,
+    };
+    body.features = {
+      ...((body.features as Record<string, unknown>) ?? {}),
+      displayNormalCartButton: true,
+      displaySubscriptionCartButton: true,
+    };
+  }
   return body;
+}
+
+/** 定期購入設定の事前検証（楽天エラー IE0179/IE0430/IE0431/IE0433/IE0434 を送信前に検出する）。
+ * 資料: obsidian 50-api-manual/rakuten-subscription-product-registration.md（2026-07-11 実機確認）。 */
+export function validateSubscription(p: ProductInput): { ok: true } | { ok: false; errors: string[] } {
+  if (!p.subscription_enabled) return { ok: true };
+  const errors: string[] = [];
+  if (!p.subscription_shipping_date_flag && !p.subscription_interval_flag) {
+    errors.push("お届け日付指定・お届け間隔指定の少なくとも一方を有効にしてください（IE0179）");
+  }
+  const vlist = productVariants(p);
+  const withBase = vlist.filter((v) => (v.subscription_base_price ?? 0) > 0);
+  if (withBase.length === 0) {
+    errors.push("少なくとも1つのSKUに定期購入価格を設定してください（IE0433）");
+  }
+  for (const v of vlist) {
+    const label = v.ne_code || v.sku_manage_number;
+    const base = v.subscription_base_price ?? 0;
+    const first = v.subscription_first_price ?? 0;
+    if (first > 0 && base <= 0) {
+      errors.push(`SKU ${label}: 初回価格だけの設定はできません。定期購入価格も設定してください（IE0434）`);
+    }
+    if (base > 0) {
+      if (v.selling_price <= 0) {
+        errors.push(`SKU ${label}: 通常販売価格が0のため定期購入を設定できません（IE0431）`);
+      } else {
+        // 定期価格・初回価格とも通常価格から5%以上の割引が必要（IE0430）
+        const limit = v.selling_price * 0.95;
+        if (base > limit) {
+          errors.push(`SKU ${label}: 定期購入価格は通常価格から5%以上割引が必要です（通常${v.selling_price}円 → ${Math.floor(limit)}円以下）`);
+        }
+        if (first > 0 && first > limit) {
+          errors.push(`SKU ${label}: 初回価格は通常価格から5%以上割引が必要です（通常${v.selling_price}円 → ${Math.floor(limit)}円以下）`);
+        }
+      }
+    }
+  }
+  return errors.length === 0 ? { ok: true } : { ok: false, errors };
 }
 
 /** upsert に最低限必要な項目が揃っているか検証する。 */

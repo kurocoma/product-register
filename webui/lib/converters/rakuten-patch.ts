@@ -15,6 +15,11 @@ const RAKUTEN_PATCHABLE = new Set([
   "selling_price",
   "jan_code",
   "shipping_type",
+  "subscription_enabled",
+  "subscription_shipping_date_flag",
+  "subscription_interval_flag",
+  "subscription_base_price",
+  "subscription_first_price",
 ]);
 
 /** variant キー（SKU管理番号、無ければ NEコード）。両方空なら ""。 */
@@ -65,6 +70,17 @@ export function diffVariants(snap: Variant[] | undefined, edited: Variant[] | un
     if (!s || s.selling_price !== v.selling_price) out.push({ field: `SKU[${key}].販売価格`, before: s?.selling_price, after: v.selling_price });
     if (variantShippingChanged(s, v)) out.push({ field: `SKU[${key}].配送`, before: s?.shipping_type, after: v.shipping_type });
     if (!s || s.jan_code !== v.jan_code) out.push({ field: `SKU[${key}].JAN`, before: s?.jan_code, after: v.jan_code });
+    const subChanged = s
+      ? (s.subscription_base_price ?? 0) !== (v.subscription_base_price ?? 0) ||
+        (s.subscription_first_price ?? 0) !== (v.subscription_first_price ?? 0)
+      : (v.subscription_base_price ?? 0) > 0 || (v.subscription_first_price ?? 0) > 0;
+    if (subChanged) {
+      out.push({
+        field: `SKU[${key}].定期価格`,
+        before: s ? `${s.subscription_base_price ?? 0}/${s.subscription_first_price ?? 0}` : undefined,
+        after: `${v.subscription_base_price ?? 0}/${v.subscription_first_price ?? 0}`,
+      });
+    }
   }
   return out;
 }
@@ -103,6 +119,25 @@ export function buildRakutenPatchBody(
     };
   }
 
+  // 定期購入（260711修正依頼-5）: フラグ変更時は subscription + features を送る。
+  // 定期停止は displaySubscriptionCartButton=false のみ（subscriptionPrice の null 削除は仕様未確認のため送らない
+  // — 資料 50-api-manual/rakuten-subscription-product-registration.md §8）。
+  if (
+    fields.has("subscription_enabled") ||
+    fields.has("subscription_shipping_date_flag") ||
+    fields.has("subscription_interval_flag")
+  ) {
+    if (p.subscription_enabled) {
+      body.subscription = {
+        shippingDateFlag: p.subscription_shipping_date_flag,
+        shippingIntervalFlag: p.subscription_interval_flag,
+      };
+      body.features = { displayNormalCartButton: true, displaySubscriptionCartButton: true };
+    } else {
+      body.features = { displaySubscriptionCartButton: false };
+    }
+  }
+
   // SKU（variants）
   const variants: Record<string, unknown> = {};
   const pv = p.variants ?? [];
@@ -119,6 +154,19 @@ export function buildRakutenPatchBody(
       if (s.selling_price !== v.selling_price) vp.standardPrice = String(v.selling_price);
       if (s.jan_code !== v.jan_code) {
         vp.articleNumber = /^\d{13}$/.test(v.jan_code) ? { value: v.jan_code } : { exemptionReason: 3 };
+      }
+      // 定期価格の変更（>0 への設定・変更のみ。0 への解除は patch で表現できないため送らない）
+      if (
+        ((s.subscription_base_price ?? 0) !== (v.subscription_base_price ?? 0) ||
+          (s.subscription_first_price ?? 0) !== (v.subscription_first_price ?? 0)) &&
+        (v.subscription_base_price ?? 0) > 0
+      ) {
+        vp.subscriptionPrice = {
+          basePrice: String(v.subscription_base_price),
+          ...((v.subscription_first_price ?? 0) > 0
+            ? { individualPrices: { firstPrice: String(v.subscription_first_price) } }
+            : {}),
+        };
       }
       // patchはshipping objectをマージするため、モード切替時に旧キーが残らないようnull明示版を使う。
       if (variantShippingChanged(s, v)) vp.shipping = buildVariantShippingForPatch(v);
@@ -141,6 +189,18 @@ export function buildRakutenPatchBody(
     }
     if (fields.has("shipping_type")) {
       variant.shipping = { postageIncluded: p.shipping_type === "送料無料" };
+    }
+    // 定期価格（>0 への設定・変更のみ。0 への解除は features ボタン false で表現する）
+    if (
+      (fields.has("subscription_base_price") || fields.has("subscription_first_price")) &&
+      p.subscription_base_price > 0
+    ) {
+      variant.subscriptionPrice = {
+        basePrice: String(p.subscription_base_price),
+        ...(p.subscription_first_price > 0
+          ? { individualPrices: { firstPrice: String(p.subscription_first_price) } }
+          : {}),
+      };
     }
     if (Object.keys(variant).length > 0) {
       if (opts.includeAttributes) {

@@ -29,6 +29,10 @@ export const VariantSchema = z.object({
   individual_shipping_fee: z.string().default(""), // 個別送料(shipping.fee)
   okihai: z.boolean().default(true),               // 置き配 受付
   attributes: z.array(AttributeSchema).default([]),
+  // 定期購入価格（260711修正依頼-5。楽天 variant.subscriptionPrice）。未設定/0 = このSKUは通常購入のみ。
+  // optional = 既存variant互換（display_price と同じ理由）。
+  subscription_base_price: z.number().int().min(0).optional(),  // subscriptionPrice.basePrice（税抜）
+  subscription_first_price: z.number().int().min(0).optional(), // subscriptionPrice.individualPrices.firstPrice（税抜）
 });
 
 /** base スキーマ (派生フィールドなし、 react-hook-form の resolver 用) */
@@ -123,6 +127,27 @@ export const ProductInputBaseSchema = z.object({
   variation_name: z.string().default(""),
   variation_choices: z.string().default(""),
   choice_numbers: z.string().default(""),
+  // Yahoo へのバリエーション商品の登録方式（260711修正依頼-7）。
+  // split = SKUごとに別商品へ分割（従来既定） / unified = 1商品に統合し options+sub-code で登録
+  yahoo_variation_mode: z.enum(["split", "unified"]).default("split"),
+
+  // 定期購入（260711修正依頼-5。楽天 ItemAPI 2.0 subscription/features — 定期専用 itemType は無い）
+  subscription_enabled: z.boolean().default(false),             // features.displaySubscriptionCartButton
+  subscription_shipping_date_flag: z.boolean().default(false),  // subscription.shippingDateFlag（お届け日付指定可）
+  subscription_interval_flag: z.boolean().default(false),       // subscription.shippingIntervalFlag（お届け間隔指定可）
+  // フラット商品（variants 未設定）用の定期価格。多SKU商品は variants[].subscription_base_price を使う。
+  subscription_base_price: z.number().int().min(0).default(0),
+  subscription_first_price: z.number().int().min(0).default(0),
+
+  // 定期購入 — Yahoo!ショッピング（260711修正依頼-Task7。editItem の subscription_* 5項目）。
+  // 楽天用（上の subscription_*）とは意味が異なるため別フィールドで保持する:
+  // Yahoo には type=2「定期購入のみ」があり、group/cycle は楽天の日付/間隔フラグと非対応、
+  // 楽天はSKU別定期価格・Yahooは商品レベル1価格（資料 yahoo-subscription-product-registration.md §9）。
+  yahoo_subscription_type: z.union([z.literal(0), z.literal(1), z.literal(2)]).default(0), // 0=設定なし / 1=通常+定期 / 2=定期のみ
+  yahoo_subscription_price: z.number().int().min(0).default(0), // 定期購入価格（アプリ内は税抜。0=未設定。type1/2で必須）
+  yahoo_subscription_group_index: z.number().int().min(0).default(0), // 定期購入グループ管理番号（1〜20。0=未設定。type1/2で必須）
+  yahoo_subscription_recommended_cycle: z.string().default(""), // おすすめサイクル（"0"/"1:日数10〜90"/"2:月数1〜6"。空=未設定）
+  yahoo_subscription_point_code: z.number().int().min(0).default(0), // 定期購入ポイント倍率（1〜15。0=未設定=APIへ送らない）
 
   // 画像 URL (1〜20)
   image_url_1: z.string().default(""),
@@ -223,6 +248,8 @@ export function productVariants(p: ProductInput): Variant[] {
       variation_value: "",
       shipping_type: p.shipping_type,
       attributes: p.attributes ?? [],
+      subscription_base_price: p.subscription_base_price,
+      subscription_first_price: p.subscription_first_price,
     }),
   ];
 }

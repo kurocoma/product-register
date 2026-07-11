@@ -141,6 +141,22 @@ export class YahooConverter implements Converter {
       "variation1-name": variation1Name,
       "item-image-urls": itemImageUrls,
     });
+
+    // 定期購入（260711修正依頼-Task7。資料 yahoo-subscription-product-registration.md §5 の type 別ルール）:
+    // - type=0（設定なし）は5列とも空のまま（CSV 既存出力と同一）。editItem での明示的な無効化
+    //   （subscription_type=0 のみ送信）は buildYahooEditItemParams 側で行う。
+    // - type=1/2 は price（アプリ内税抜 → 通常価格と同じ税込変換）・group を出力。
+    //   cycle は設定時のみ、point は 1〜15 のみ（0=未設定は省略 — 送ると it-14126）。
+    if (p.yahoo_subscription_type !== 0) {
+      row["subscription-type"] = String(p.yahoo_subscription_type);
+      row["subscription-price"] =
+        p.yahoo_subscription_price > 0 ? String(yahooTaxInclusive(p.yahoo_subscription_price, v.tax_rate)) : "";
+      row["subscription-group-index"] =
+        p.yahoo_subscription_group_index > 0 ? String(p.yahoo_subscription_group_index) : "";
+      row["subscription-recommended-cycle"] = p.yahoo_subscription_recommended_cycle;
+      row["subscription-point-code"] =
+        p.yahoo_subscription_point_code > 0 ? String(p.yahoo_subscription_point_code) : "";
+    }
     return row;
   }
 }

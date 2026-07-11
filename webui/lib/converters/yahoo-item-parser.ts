@@ -57,5 +57,23 @@ export function parseYahooItem(xml: string, opts?: ParseYahooItemOptions): Parti
   // PathList > Path（CDATA）
   const path = (xml.match(/<Path[^>]*><!\[CDATA\[([\s\S]*?)\]\]><\/Path>/i) || [])[1];
   if (path) out.yahoo_path = path;
+
+  // --- 定期購入 5タグ（260711修正依頼-Task7。資料 yahoo-subscription-product-registration.md §8） ---
+  // SubscriptionType が返る場合は関連4項目も必ず埋める（欠落タグは 0/空 = 未設定）。
+  // 全5項目を snapshot に持たせないと、diff が「取得できていない項目」として比較をスキップし、
+  // 編集画面での定期購入の変更が反映対象に載らないため。
+  // SubscriptionPrice は Price と同じくストア税込設定前提 → 税抜へ変換して保持
+  // （送信側 yahooTaxInclusive と対称。Taxable=0 非課税は変換しない）。
+  const subType = tagVal(xml, "SubscriptionType").trim();
+  if (subType === "0" || subType === "1" || subType === "2") {
+    out.yahoo_subscription_type = Number(subType) as 0 | 1 | 2;
+    const subPrice = Number(tagVal(xml, "SubscriptionPrice"));
+    out.yahoo_subscription_price = Number.isFinite(subPrice) && subPrice > 0 ? toExclusive(subPrice) : 0;
+    const subGroup = Number(tagVal(xml, "SubscriptionGroupIndex"));
+    out.yahoo_subscription_group_index = Number.isInteger(subGroup) && subGroup > 0 ? subGroup : 0;
+    out.yahoo_subscription_recommended_cycle = tagVal(xml, "SubscriptionRecommendedCycle").trim();
+    const subPoint = Number(tagVal(xml, "SubscriptionPointCode"));
+    out.yahoo_subscription_point_code = Number.isInteger(subPoint) && subPoint > 0 ? subPoint : 0;
+  }
   return out;
 }

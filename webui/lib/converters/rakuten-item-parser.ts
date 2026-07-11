@@ -55,10 +55,20 @@ export function parseRakutenItem(
   if (typeof json.title === "string") out.display_name = json.title;
   if (typeof json.genreId === "string") out.mall_category_id = json.genreId;
 
+  // PC用販売説明文(salesDescription)。imgタグ含む任意HTMLを加工せずそのまま取り込む
+  // （反映側 rakuten-api.ts は sale_description_pc を salesDescription へ送るため往復対称になる）。
+  const salesDesc = typeof json.salesDescription === "string" ? json.salesDescription : "";
+  if (salesDesc) out.sale_description_pc = salesDesc;
+
   const desc = json.productDescription as { pc?: string; sp?: string } | undefined;
   if (desc) {
     if (typeof desc.pc === "string") out.description_pc = desc.pc;
-    if (typeof desc.sp === "string") out.description_sp = desc.sp;
+    if (typeof desc.sp === "string") {
+      // 反映側は sp = 販売説明文 + description_sp と前置合成して送るため、
+      // 取込時は前置分を剥がし、取込→反映の往復で販売説明文が二重化しないようにする。
+      out.description_sp =
+        salesDesc && desc.sp.startsWith(salesDesc) ? desc.sp.slice(salesDesc.length) : desc.sp;
+    }
   }
   // 楽天キャッチコピー(tagline)を PC用と Yahoo headline 用の両方へ反映する。
   // headline は全角30・HTML不可だが item-mapper の fitYahooField が整形するため超過しても安全。
@@ -83,8 +93,37 @@ export function parseRakutenItem(
         return { name, values };
       })
       .filter((o) => o.name !== "" && o.values.length > 0);
-    if (options.length > 0) out.customization_options = options;
+    if (options.length > 0) {
+      out.customization_options = options;
+      // フォーム「バリエーション」欄の項目選択肢項目名（NE の sentakusi_yoko_name 用途 = 単一名のため先頭のみ）
+      out.option_item_name = options[0].name;
+    }
   }
+
+  // バリエーション軸（variantSelectors）→ フォーム「バリエーション」欄へ（260711修正依頼-8）。
+  // 1軸目を採用（アプリのバリエーション欄・楽天反映CSVとも単軸前提）。
+  const selectors = json.variantSelectors;
+  if (Array.isArray(selectors) && selectors.length > 0) {
+    const s0 = (selectors[0] ?? {}) as { key?: unknown; displayName?: unknown; values?: unknown };
+    if (typeof s0.key === "string" && s0.key !== "") out.variation_key = s0.key;
+    if (typeof s0.displayName === "string" && s0.displayName !== "") out.variation_name = s0.displayName;
+    const choiceValues = Array.isArray(s0.values)
+      ? s0.values
+          .map((v) => (v && typeof v === "object" ? (v as { displayValue?: unknown }).displayValue : ""))
+          .filter((x): x is string => typeof x === "string" && x !== "")
+      : [];
+    if (choiceValues.length > 0) out.variation_choices = choiceValues.join("|");
+  }
+
+  // 定期購入（260711修正依頼-5）: 定期専用 itemType は無く、通常商品 + subscription/features で表現される。
+  // 有効判定は features.displaySubscriptionCartButton（公式の停止方法 = このボタンを false にする）。
+  // 3フィールドとも常に設定する（設定なし＝false）。snapshot に無いと diffProduct が比較を
+  // スキップし、「定期なし商品に定期を設定する」編集が反映対象に載らないため。
+  const feats = json.features as { displaySubscriptionCartButton?: unknown } | undefined;
+  const subs = json.subscription as { shippingDateFlag?: unknown; shippingIntervalFlag?: unknown } | undefined;
+  out.subscription_enabled = feats?.displaySubscriptionCartButton === true;
+  out.subscription_shipping_date_flag = subs?.shippingDateFlag === true;
+  out.subscription_interval_flag = subs?.shippingIntervalFlag === true;
 
   // 商品画像 images[].location → 実画像URLとして image_url_1..20 + image_count に取り込む。
   // 実画像は thum01 や JAN名フォルダ等アプリの自動生成規約(thum02/{ne_code})と一致しないため、
@@ -124,8 +163,9 @@ export function parseRakutenItem(
       const merchantSku = typeof v.merchantDefinedSkuId === "string" ? v.merchantDefinedSkuId.trim() : "";
       out.ne_code = merchantSku || targetId;
       if (typeof v.standardPrice === "string") out.selling_price = parsePrice(v.standardPrice);
-      // 消費税率は楽天の実値(taxRate)を採用（軽減8%/標準10%の混在対応）。未返却時は既定10。
-      const tr = parseTaxRate(v.taxRate);
+      // 消費税率は商品レベル payment.taxRate が正（実機レスポンスでは variant 直下に taxRate は無い）。
+      // variant 側に値が来る場合はそちらを優先し、どちらも無ければ既定10へ倒す。
+      const tr = parseTaxRate(v.taxRate) ?? paymentTaxRate(json);
       if (tr !== undefined) out.tax_rate = tr;
       const art = v.articleNumber as { value?: string } | undefined;
       if (art && typeof art.value === "string") out.jan_code = art.value;
@@ -134,6 +174,12 @@ export function parseRakutenItem(
       // 配送方法セット番号・納期管理番号は Yahoo へのマッピング解決用に保持（数値/文字列両対応）。
       out._rakutenShippingGroup = rakutenIdToString(ship?.shippingMethodGroup);
       out._rakutenDeliveryDateId = rakutenIdToString(v.normalDeliveryDateId);
+
+      // 定期購入価格（対象SKUのもの）。常に設定する（無ければ 0 = 未設定）。
+      // フラグ同様、snapshot に持たせないと「定期価格の新規設定」が差分に載らない。
+      const subPrice = parseSubscriptionPrice(v.subscriptionPrice);
+      out.subscription_base_price = subPrice.base;
+      out.subscription_first_price = subPrice.first;
 
       // 商品属性 variants.{id}.attributes[] → product.attributes。
       // これを取り込まないと、ジャンル必須属性が欠落して再登録(upsert)が IE0418 で失敗する。
@@ -151,9 +197,25 @@ function parsePrice(raw: unknown): number {
   return Number.isFinite(n) ? Math.round(n) : 0;
 }
 
-/** 楽天 variant.taxRate（小数 0.08 / 文字列 "0.1"）→ アプリ tax_rate（百分率 8 / 10）。
+/** variant.subscriptionPrice { basePrice, individualPrices.firstPrice } → { base, first }。
+ * 欠落・非数は 0（= 未設定。このSKUは通常購入のみ）。 */
+function parseSubscriptionPrice(raw: unknown): { base: number; first: number } {
+  const sp = (raw ?? {}) as { basePrice?: unknown; individualPrices?: { firstPrice?: unknown } };
+  const base = sp.basePrice != null ? parsePrice(sp.basePrice) : 0;
+  const first = sp.individualPrices?.firstPrice != null ? parsePrice(sp.individualPrices.firstPrice) : 0;
+  return { base, first };
+}
+
+/** item 直下 payment.taxRate を読む。楽天 items.get の税率は SKU ではなく商品(payment)レベルにある
+ * （実機確認: payment = { taxIncluded, taxRate: "0.08", ... }）。 */
+export function paymentTaxRate(json: Record<string, unknown>): 8 | 10 | undefined {
+  const pay = json.payment as { taxRate?: unknown } | undefined;
+  return parseTaxRate(pay?.taxRate);
+}
+
+/** 楽天 taxRate（小数 0.08 / 文字列 "0.1"）→ アプリ tax_rate（百分率 8 / 10）。
  * 食品の軽減税率(8%)と標準税率(10%)が商品ごとに混在するため楽天の実値を採用する。
- * 想定外の値・欠落（既定便等で未返却）は undefined を返し、呼び出し側で安全既定(10)へ倒す。 */
+ * 想定外の値・欠落は undefined を返し、呼び出し側で安全既定(10)へ倒す。 */
 export function parseTaxRate(raw: unknown): 8 | 10 | undefined {
   if (raw == null || raw === "") return undefined;
   const n = Number(raw);
@@ -190,6 +252,8 @@ function variationLabel(json: Record<string, unknown>, v: Record<string, unknown
 export function parseRakutenVariants(json: Record<string, unknown>): Variant[] {
   const variants = json.variants as Record<string, Record<string, unknown>> | undefined;
   if (!variants) return [];
+  // 税率は商品レベル payment.taxRate が正（variant 直下には無い）。全SKU共通のフォールバックとして1回だけ解決する。
+  const fallbackTaxRate = paymentTaxRate(json);
   return Object.entries(variants).map(([key, v]) => {
     const merchantSku = typeof v.merchantDefinedSkuId === "string" ? v.merchantDefinedSkuId.trim() : "";
     const art = v.articleNumber as { value?: unknown } | undefined;
@@ -198,12 +262,15 @@ export function parseRakutenVariants(json: Record<string, unknown>): Variant[] {
       | { postageIncluded?: boolean; fee?: unknown; postageSegment?: { local?: unknown; overseas?: unknown }; shippingMethodGroup?: unknown }
       | undefined;
     const str = (x: unknown): string => (x != null && x !== "" ? String(x) : "");
+    const subPrice = parseSubscriptionPrice(v.subscriptionPrice);
     return VariantSchema.parse({
       sku_manage_number: key,
       ne_code: merchantSku || key,
       jan_code: /^\d{13}$/.test(janRaw) ? janRaw : "",
       selling_price: parsePrice(v.standardPrice),
-      tax_rate: parseTaxRate(v.taxRate) ?? 10,
+      subscription_base_price: subPrice.base,
+      subscription_first_price: subPrice.first,
+      tax_rate: parseTaxRate(v.taxRate) ?? fallbackTaxRate ?? 10,
       quantity: 1,
       variation_value: variationLabel(json, v),
       // 配送詳細(送料無料/別・個別送料・送料区分1/2・配送方法セット)。snapshot比較と取込の両方に使う。

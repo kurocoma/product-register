@@ -13,6 +13,19 @@ export const EDITABLE_FIELDS: (keyof ProductInput)[] = [
   "yahoo_category_id",
   "jan_code",
   "shipping_type",
+  // 定期購入 — 楽天（260711修正依頼-5。楽天のみ patch 対象。他モールのビルダーでは skipped 扱い）
+  "subscription_enabled",
+  "subscription_shipping_date_flag",
+  "subscription_interval_flag",
+  "subscription_base_price",
+  "subscription_first_price",
+  // 定期購入 — Yahoo（260711修正依頼-Task7。yahoo-patch の OVERRIDE 対象。
+  // 楽天の snapshot(parseRakutenItem) はこれらを返さないため楽天経路では比較対象外＝誤検知しない）
+  "yahoo_subscription_type",
+  "yahoo_subscription_price",
+  "yahoo_subscription_group_index",
+  "yahoo_subscription_recommended_cycle",
+  "yahoo_subscription_point_code",
   // 画像(image_count)は本フローの差分対象外。画像差し替えは ImageUploadPanel + 登録で行う。
 ];
 

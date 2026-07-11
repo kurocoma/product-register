@@ -65,7 +65,22 @@ const TAG_TO_PARAM: [getTag: string, param: string][] = [
   ["CartRelatedItems", "cart_related_items"],
   ["EcoSettingId", "eco_setting_id"],
   ["EcoSettingEvidenceUrl", "eco_setting_evidence_url"],
+  // 定期購入5項目（260711修正依頼-Task7）。ここに載せないと、無関係な項目だけの更新
+  // （editItem は未送信項目を既定値で上書きする）で既存の定期購入設定が消える（資料§9）。
+  ["SubscriptionType", "subscription_type"],
+  ["SubscriptionPrice", "subscription_price"],
+  ["SubscriptionGroupIndex", "subscription_group_index"],
+  ["SubscriptionRecommendedCycle", "subscription_recommended_cycle"],
+  ["SubscriptionPointCode", "subscription_point_code"],
 ];
+
+/** 定期購入の関連4項目（subscription_type 以外）。type=0 では送ってはならない。 */
+const SUBSCRIPTION_RELATED_PARAMS = [
+  "subscription_price",
+  "subscription_group_index",
+  "subscription_recommended_cycle",
+  "subscription_point_code",
+] as const;
 
 /** PathList の Path(複数可・CDATA)を改行区切りで結合する。 */
 function extractPath(xml: string): string {
@@ -97,8 +112,8 @@ function detectAdvanced(xml: string): string[] {
   if (/<Options>[\s\S]*?<Option[ >]/i.test(xml)) adv.push("options");
   if (/<SubCodes>[\s\S]*?<SubCode[ >]/i.test(xml)) adv.push("subcodes");
   if (/<Inscriptions>[\s\S]*?<Inscription[ >]/i.test(xml)) adv.push("inscriptions");
-  const st = tagVal(xml, "SubscriptionType");
-  if (st && st !== "0") adv.push("subscription");
+  // subscription は TAG_TO_PARAM の5項目でラウンドトリップ可能になったため advanced 扱いしない
+  // （260711修正依頼-Task7。inscription 等の未対応項目は引き続き上で検出＝409中止の対象）。
   // ReservePrices コンテナ内のいずれかの予約値に実体があれば検出（空の入れ子のみは除外）。
   const rp = xml.match(/<ReservePrices>([\s\S]*?)<\/ReservePrices>/i);
   if (rp && /<(ReservePrice|ReserveSalePrice|ReserveMemberPrice|ReserveSellingPeriodStart|ReserveSellingPeriodEnd)>\s*[^<\s]/i.test(rp[1])) {
@@ -123,6 +138,11 @@ export function xmlToEditItemParams(
   if (path) params.path = path;
   const imgs = extractImages(xml);
   if (imgs) params.item_image_urls = imgs;
+  // 定期購入: getItem が type=0 なのに関連タグの残骸を返しても転記しない
+  // （type=0 で関連4項目を送ると it-14107/14110/14123。資料§5）。
+  if ((params.subscription_type ?? "0") === "0") {
+    for (const k of SUBSCRIPTION_RELATED_PARAMS) delete params[k];
+  }
   return { params, advanced: detectAdvanced(xml) };
 }
 
@@ -138,6 +158,26 @@ const OVERRIDE: Record<string, { param: string; get: (p: ProductInput) => string
   catch_copy_yahoo: { param: "headline", get: (p) => p.catch_copy_yahoo },
   description_pc: { param: "caption", get: (p) => p.description_pc },
   jan_code: { param: "jan", get: (p) => p.jan_code },
+  // 定期購入5項目（260711修正依頼-Task7）。subscription_price はアプリ内税抜 → 通常価格と同じ
+  // 税込変換で送信（取込側 parseYahooItem の税抜変換と対称）。0/空 = 未設定は空文字を返し、
+  // buildYahooUpdateParams の最終整合でパラメータごと削除する（空文字送信での既定値上書きを避ける）。
+  yahoo_subscription_type: { param: "subscription_type", get: (p) => String(p.yahoo_subscription_type) },
+  yahoo_subscription_price: {
+    param: "subscription_price",
+    get: (p) => (p.yahoo_subscription_price > 0 ? String(yahooTaxInclusive(p.yahoo_subscription_price, p.tax_rate)) : ""),
+  },
+  yahoo_subscription_group_index: {
+    param: "subscription_group_index",
+    get: (p) => (p.yahoo_subscription_group_index > 0 ? String(p.yahoo_subscription_group_index) : ""),
+  },
+  yahoo_subscription_recommended_cycle: {
+    param: "subscription_recommended_cycle",
+    get: (p) => p.yahoo_subscription_recommended_cycle,
+  },
+  yahoo_subscription_point_code: {
+    param: "subscription_point_code",
+    get: (p) => (p.yahoo_subscription_point_code > 0 ? String(p.yahoo_subscription_point_code) : ""),
+  },
 };
 
 /** 現在の getItem XML を土台に、変更フィールドだけ上書きした editItem パラメータを作る（ラウンドトリップ更新）。
@@ -164,6 +204,17 @@ export function buildYahooUpdateParams(
     // 通常購入販売価格(price)を変えたら表示価格(original_price)も連動させる（display_price優先、無ければ販売価格）。
     // original_price も Yahoo は税込のため税込へ変換して送る。
     if (c.field === "selling_price") params.original_price = String(yahooTaxInclusive(displayPrice(p), p.tax_rate));
+  }
+  // 定期購入の送信値の最終整合（260711修正依頼-Task7。資料§5）:
+  // - OVERRIDE が空文字を積んだ任意項目（cycle 未設定・point/group/price 0=未設定）は
+  //   パラメータごと削除する（空文字で送ると既定値上書き/書式エラーになる）
+  // - type を 0 へ変える更新では関連4項目を必ず削除する（土台のラウンドトリップ値が
+  //   残ると it-14107/14110/14123 になる）
+  for (const k of SUBSCRIPTION_RELATED_PARAMS) {
+    if (params[k] === "") delete params[k];
+  }
+  if (params.subscription_type === "0") {
+    for (const k of SUBSCRIPTION_RELATED_PARAMS) delete params[k];
   }
   return { params, advanced, skipped };
 }

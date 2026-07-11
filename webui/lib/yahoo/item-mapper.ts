@@ -8,6 +8,7 @@ import {
   htmlToPlainText,
 } from "@/lib/product/text-fit";
 import { sanitizeYahooHtml } from "@/lib/product/html-sanitize";
+import { validateYahooSubscription } from "@/lib/yahoo/subscription";
 
 /** editItem に存在せず CSV 専用の列（送らない）。docs/Yahoo/02 で確認済み。 */
 const CSV_ONLY = new Set(["pr-rate", "sort_priority"]);
@@ -262,6 +263,14 @@ export function buildYahooEditItemParams(
     delete params.display;
   }
 
+  // 定期購入（260711-Task7）: type=0 は subscription_type=0 のみ明示送信し、関連4項目を送らない
+  // （資料§5「定期購入を無効化するとき」。editItem は未送信項目を既定値で上書きするが、
+  //  無効化は type=0 の明示が必要。関連4項目を残すと it-14107/14110/14123）。
+  // type=1/2 の5項目は YahooConverter の CSV 列から上の共通ループで params 化済み。
+  if (p.yahoo_subscription_type === 0) {
+    params.subscription_type = "0";
+  }
+
   // Yahoo editItem の各フィールド上限へ適合整形してから返す（長い name/path/explanation の拒否を防ぐ）。
   // 上限内の値は無変更（短いフィールドは出力不変）。
   return fitYahooFieldLimits(params);
@@ -316,6 +325,13 @@ export function validateEditItemParams(
     if (!/^[0-9]{1,10}$/.test(productCategory)) {
       add("product_category の書式不正（数字 1〜10 桁）");
     }
+  }
+
+  // 定期購入（260711-Task7）: subscription_* 5項目の値域・type別必須・併用不可を dry-run で
+  // 前倒し検知する（it-14093〜14180。詳細は lib/yahoo/subscription.ts）。
+  const sub = validateYahooSubscription(params);
+  if (!sub.ok) {
+    for (const e of sub.errors) add(e);
   }
 
   return missing.length === 0 ? { ok: true } : { ok: false, missing };

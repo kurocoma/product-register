@@ -93,7 +93,7 @@ export function ProductEditView({
       {/* 本体: 左フォーム + 右プレビュー */}
       <div className="flex flex-1 overflow-hidden">
         <div className="w-2/5 overflow-y-auto p-4 border-r border-slate-200">
-          <ProductForm defaultValues={initial} onChange={setData} />
+          <ProductForm defaultValues={initial} onChange={setData} productId={currentId} />
         </div>
         <div className="flex-1 overflow-y-auto p-4 bg-slate-50 space-y-3">
           {/* 反映系（画像アップ・モール登録・取込編集・CSV）はプレビューの上に置く（プレビューが長く下まで届きにくいため） */}

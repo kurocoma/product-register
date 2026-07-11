@@ -11,6 +11,7 @@ import {
   buildRakutenManageNumber,
   buildRakutenUpsertBody,
   validateUpsertBody,
+  validateSubscription,
   type RakutenUpsertBody,
 } from "@/lib/converters/rakuten-api";
 import { upsertItem, getItem } from "@/lib/rakuten/item-client";
@@ -48,6 +49,9 @@ export async function dryRunRakutenRegister(
   const manageNumber = buildRakutenManageNumber(product);
   const body = buildRakutenUpsertBody(product);
   const valid = validateUpsertBody(manageNumber, body);
+  // 定期購入の事前検証（IE0179/IE0430系）。commit と同じ検証を dry-run でも surface する
+  // （定期購入が無効な商品は常に ok = 既存挙動不変）。
+  const sub = validateSubscription(product);
 
   let exists = false;
   try {
@@ -63,8 +67,8 @@ export async function dryRunRakutenRegister(
     manageNumber,
     exists,
     willOverwrite: exists,
-    valid: valid.ok,
-    missing: valid.ok ? [] : valid.missing,
+    valid: valid.ok && sub.ok,
+    missing: [...(valid.ok ? [] : valid.missing), ...(sub.ok ? [] : sub.errors)],
     body,
   };
 }
@@ -101,6 +105,11 @@ export async function commitRakutenRegister(
   const valid = validateUpsertBody(manageNumber, body);
   if (!valid.ok) {
     return { ok: false, kind: "invalid", error: "必須項目が不足: " + valid.missing.join(", "), missing: valid.missing };
+  }
+  // 定期購入の事前検証（5%割引・フラグ・価格ルール。楽天エラーを送信前に検出）
+  const sub = validateSubscription(product);
+  if (!sub.ok) {
+    return { ok: false, kind: "invalid", error: "定期購入設定が不正: " + sub.errors.join(" / "), missing: sub.errors };
   }
 
   const result = await deps.upsertItem(cred, manageNumber, body);

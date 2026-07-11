@@ -18,6 +18,9 @@ import type { ProductInput } from "./schema";
  * フラット商品・variants 1件の商品は展開せず [p] をそのまま返す。 */
 export function yahooItemsForProduct(p: ProductInput): ProductInput[] {
   if (!p.variants || p.variants.length < 2) return [p];
+  // Yahoo 1ページ統合モード（260711修正依頼-7）: 分割せず親1商品のまま返す。
+  // options/subcodes の付与は登録サービス側（buildYahooVariationParams）が行う。
+  if (p.yahoo_variation_mode === "unified") return [p];
   return p.variants.map((v) => ({
     ...p,
     ne_code: v.ne_code,

@@ -34,9 +34,12 @@ type FormValues = z.input<typeof ProductInputBaseSchema>;
 export function ProductForm({
   defaultValues,
   onChange,
+  productId,
 }: {
   defaultValues: ProductInput;
   onChange?: (data: ProductInput) => void;
+  /** 保存済み商品のID。画像の再アップロード等、サーバー処理を伴う操作に使う（未保存時は無効化）。 */
+  productId?: string;
 }) {
   // ProductInput には is_single/is_set 派生プロパティが含まれるので除く
   const { is_single, is_set, ...rest } = defaultValues;
@@ -73,6 +76,7 @@ export function ProductForm({
           "description",
           "yahoo",
           "variation",
+          "subscription",
           "image",
           "attribute",
         ]}
@@ -95,8 +99,11 @@ export function ProductForm({
         <AccordionItem value="variation" title="バリエーション">
           <VariationSection />
         </AccordionItem>
+        <AccordionItem value="subscription" title="定期購入 (楽天 / Yahoo!ショッピング)">
+          <SubscriptionSection />
+        </AccordionItem>
         <AccordionItem value="image" title="画像 URL (20)">
-          <ImageUrlSection />
+          <ImageUrlSection productId={productId} />
         </AccordionItem>
         <AccordionItem value="attribute" title="商品属性 (5)">
           <AttributeSection />
@@ -274,14 +281,12 @@ function ShippingSection() {
 function MallCategoryField() {
   const { register, setValue, watch, getValues } = useFormContext<FormValues>();
   const [message, setMessage] = React.useState<string | null>(null);
+  const [applying, setApplying] = React.useState(false);
   const lastMappedId = React.useRef<string | null>(null);
   const reg = register("mall_category_id");
   const yahooCategoryId = watch("yahoo_category_id");
 
-  const autofillFromCategory = async (e: React.FocusEvent<HTMLInputElement>) => {
-    const id = (e.target.value || "").trim();
-    if (!id || id === lastMappedId.current) return; // 空 or 同一IDの再blurはスキップ
-    lastMappedId.current = id;
+  const runAutofill = async (id: string) => {
     const supabase = createClient();
     const parts: string[] = [];
     let failed = false;
@@ -329,17 +334,52 @@ function MallCategoryField() {
     if (parts.length > 0) setMessage(parts.join(" / "));
   };
 
+  const autofillFromCategory = async (e: React.FocusEvent<HTMLInputElement>) => {
+    const id = (e.target.value || "").trim();
+    if (!id || id === lastMappedId.current) return; // 空 or 同一IDの再blurはスキップ
+    lastMappedId.current = id;
+    await runAutofill(id);
+  };
+
+  // 既存商品はカテゴリIDが入ったまま開かれ blur が起きないため、明示ボタンで反映できるようにする
+  // （260711修正依頼-2）。ボタンは lastMappedId ガードを通さず常に再取得・上書きする。
+  const applyFromButton = async () => {
+    const id = (getValues("mall_category_id") || "").trim();
+    if (!id) {
+      setMessage("モール基本カテゴリIDを入力してください");
+      return;
+    }
+    lastMappedId.current = id;
+    setApplying(true);
+    try {
+      await runAutofill(id);
+    } finally {
+      setApplying(false);
+    }
+  };
+
   return (
     <div className="mb-3">
       <Label htmlFor="mall_category_id">モール基本カテゴリID</Label>
-      <Input
-        id="mall_category_id"
-        {...reg}
-        onBlur={(e) => {
-          reg.onBlur(e);
-          void autofillFromCategory(e);
-        }}
-      />
+      <div className="flex items-center gap-2">
+        <Input
+          id="mall_category_id"
+          {...reg}
+          onBlur={(e) => {
+            reg.onBlur(e);
+            void autofillFromCategory(e);
+          }}
+        />
+        <Button
+          type="button"
+          onClick={applyFromButton}
+          disabled={applying}
+          variant="outline"
+          className="shrink-0 whitespace-nowrap"
+        >
+          {applying ? "反映中…" : "Yahooカテゴリへ反映"}
+        </Button>
+      </div>
       {message && <p className="mt-1 text-xs text-blue-700">{message}</p>}
       <p className="mt-0.5 text-[11px] text-slate-400">
         現在の Yahoo カテゴリID: {yahooCategoryId || "(未入力)"}
@@ -420,26 +460,347 @@ function YahooGroupingSection() {
 }
 
 function VariationSection() {
+  const { register, watch } = useFormContext<FormValues>();
+  const mode = watch("yahoo_variation_mode");
+  const variantCount = (watch("variants") ?? []).length;
   return (
-    <div className="grid grid-cols-2 gap-3">
-      <TextField name="option_item_name" label="項目選択肢項目名" />
-      <TextField name="variation_key" label="バリエーション項目キー" />
-      <TextField name="variation_name" label="バリエーション項目名" />
-      <TextField name="variation_choices" label="選択肢定義 (パイプ区切り)" />
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-3">
+        <TextField name="option_item_name" label="項目選択肢項目名" />
+        <TextField name="variation_key" label="バリエーション項目キー" />
+        <TextField name="variation_name" label="バリエーション項目名" />
+        <TextField name="variation_choices" label="選択肢定義 (パイプ区切り)" />
+      </div>
+      <div>
+        <Label htmlFor="yahoo_variation_mode">Yahoo!への登録方式（バリエーション商品）</Label>
+        <select
+          id="yahoo_variation_mode"
+          {...register("yahoo_variation_mode")}
+          className="block w-full rounded border border-slate-300 px-2 py-1.5 text-sm"
+        >
+          <option value="split">SKUごとに別商品へ分割（従来）</option>
+          <option value="unified">1商品ページに統合（オプション＋サブコードで選択・在庫管理）</option>
+        </select>
+        {mode === "unified" && (
+          <p className="mt-1 text-[11px] text-slate-500">
+            親商品コードは楽天商品管理番号、サブコードは各SKUのNEコードになります。
+            選択肢名は「バリエーション項目名」、各SKUの選択肢は SKU一覧の「バリエーション」列が使われます。
+            {variantCount < 2 && "（SKUが2件未満のため、現在は通常の単一商品として登録されます）"}
+          </p>
+        )}
+      </div>
     </div>
   );
 }
 
-function ImageUrlSection() {
+/** 定期購入セクション。楽天と Yahoo!ショッピングは項目体系が異なる（楽天=SKU別定期価格＋
+ * 日付/間隔フラグ、Yahoo=商品レベル1価格＋type/グループ/サイクル/ポイント）ため小見出しで分ける。 */
+function SubscriptionSection() {
   return (
-    <div className="grid grid-cols-2 gap-2">
-      {Array.from({ length: 20 }, (_, i) => i + 1).map((i) => (
-        <TextField
-          key={i}
-          name={`image_url_${i}` as FieldPath<FormValues>}
-          label={`画像 URL ${i}`}
-        />
-      ))}
+    <div className="space-y-5">
+      <div className="space-y-3">
+        <p className="border-b border-slate-200 pb-1 text-sm font-semibold text-slate-700">楽天</p>
+        <RakutenSubscriptionFields />
+      </div>
+      <div className="space-y-3">
+        <p className="border-b border-slate-200 pb-1 text-sm font-semibold text-slate-700">Yahoo!ショッピング</p>
+        <YahooSubscriptionFields />
+      </div>
+    </div>
+  );
+}
+
+function RakutenSubscriptionFields() {
+  const { register, watch } = useFormContext<FormValues>();
+  const enabled = watch("subscription_enabled");
+  const variants = watch("variants") ?? [];
+  return (
+    <div className="space-y-3">
+      <label className="flex items-center gap-2 text-sm font-medium">
+        <input type="checkbox" {...register("subscription_enabled")} />
+        定期購入販売を有効にする（楽天）
+      </label>
+      {enabled ? (
+        <>
+          <div className="space-y-1.5 text-sm">
+            <label className="flex items-center gap-2">
+              <input type="checkbox" {...register("subscription_shipping_date_flag")} />
+              購入者がお届け日付を指定できる
+            </label>
+            <label className="flex items-center gap-2">
+              <input type="checkbox" {...register("subscription_interval_flag")} />
+              購入者がお届け間隔（曜日）を指定できる
+            </label>
+          </div>
+          <p className="rounded border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+            日付指定・間隔指定の少なくとも一方が必要です。定期購入価格・初回価格は通常販売価格から
+            <strong>5%以上の割引</strong>が必要です（登録時に検証されます）。
+          </p>
+          {variants.length === 0 ? (
+            <div className="grid grid-cols-2 gap-3">
+              <TextField name="subscription_base_price" label="定期購入価格 (税抜・0=未設定)" type="number" />
+              <TextField name="subscription_first_price" label="初回価格 (税抜・任意・0=未設定)" type="number" />
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <p className="text-xs text-slate-500">SKUごとの定期購入価格（0 = そのSKUは通常購入のみ）</p>
+              {variants.map((v, i) => (
+                <div key={i} className="flex items-center gap-2 text-sm">
+                  <span className="w-40 shrink-0 truncate font-mono text-xs">
+                    {v?.ne_code || v?.sku_manage_number || `SKU ${i + 1}`}
+                  </span>
+                  <span className="text-xs text-slate-400">定期価格</span>
+                  <Input
+                    type="number"
+                    className="max-w-28"
+                    {...register(`variants.${i}.subscription_base_price` as FieldPath<FormValues>, { valueAsNumber: true })}
+                  />
+                  <span className="text-xs text-slate-400">初回価格</span>
+                  <Input
+                    type="number"
+                    className="max-w-28"
+                    {...register(`variants.${i}.subscription_first_price` as FieldPath<FormValues>, { valueAsNumber: true })}
+                  />
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      ) : (
+        <p className="text-xs text-slate-400">
+          楽天から取込むと定期購入設定（お届け日付/間隔・定期価格・初回価格）が自動で入ります。
+          無効にして反映すると、楽天側の定期購入ボタンが非表示になります。
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** Yahoo!ショッピングの定期購入（editItem subscription_* 5項目）。
+ * 定期購入区分（type）に応じて価格・グループ・サイクル・ポイントの入力欄を表示する。
+ * 価格はアプリ内税抜（送信時に税込へ変換）。おすすめサイクルは "1:日数"/"2:月数" の合成文字列を
+ * 種別セレクト＋数値入力に分解して編集する。 */
+function YahooSubscriptionFields() {
+  const { register, watch, setValue } = useFormContext<FormValues>();
+  const type = Number(watch("yahoo_subscription_type") ?? 0);
+  const cycle = String(watch("yahoo_subscription_recommended_cycle") ?? "");
+  const cycleMatch = /^([12]):(\d*)$/.exec(cycle);
+  const cycleKind = cycleMatch ? cycleMatch[1] : "0";
+  const cycleNum = cycleMatch ? cycleMatch[2] : "";
+  const setCycle = (kind: string, num: string) =>
+    setValue("yahoo_subscription_recommended_cycle", kind === "0" ? "" : `${kind}:${num}`, {
+      shouldDirty: true,
+      shouldValidate: true,
+    });
+  const selectCls = "w-full rounded border border-slate-300 bg-white px-3 py-2 text-sm";
+  return (
+    <div className="space-y-3">
+      <div className="mb-3">
+        <Label htmlFor="yahoo_subscription_type">定期購入区分</Label>
+        <select
+          id="yahoo_subscription_type"
+          {...register("yahoo_subscription_type", { valueAsNumber: true })}
+          className={selectCls}
+        >
+          <option value={0}>設定なし（定期購入しない）</option>
+          <option value={1}>通常購入／定期購入（併売）</option>
+          <option value={2}>定期購入のみ</option>
+        </select>
+      </div>
+      {type !== 0 ? (
+        <>
+          <div className="grid grid-cols-2 gap-3">
+            <TextField name="yahoo_subscription_price" label="定期購入価格 (税抜・必須)" type="number" />
+            <TextField
+              name="yahoo_subscription_group_index"
+              label="定期購入グループ管理番号 (1〜20・必須)"
+              type="number"
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="mb-3">
+              <Label htmlFor="yahoo_subscription_cycle_kind">おすすめサイクル</Label>
+              <div className="flex items-center gap-2">
+                <select
+                  id="yahoo_subscription_cycle_kind"
+                  className={selectCls}
+                  value={cycleKind}
+                  onChange={(e) => setCycle(e.target.value, cycleNum)}
+                >
+                  <option value="0">設定なし</option>
+                  <option value="1">日ごと (10〜90日)</option>
+                  <option value="2">月ごと (1〜6か月)</option>
+                </select>
+                {cycleKind !== "0" ? (
+                  <Input
+                    type="number"
+                    className="max-w-24"
+                    aria-label={cycleKind === "1" ? "サイクル日数" : "サイクル月数"}
+                    placeholder={cycleKind === "1" ? "日数" : "月数"}
+                    value={cycleNum}
+                    onChange={(e) => setCycle(cycleKind, e.target.value)}
+                  />
+                ) : null}
+              </div>
+            </div>
+            <TextField
+              name="yahoo_subscription_point_code"
+              label="定期購入ポイント倍率 (1〜15・0=未設定)"
+              type="number"
+            />
+          </div>
+          <p className="rounded border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+            {type === 2
+              ? "「定期購入のみ」では定期購入価格を通常販売価格と同額にしてください。セール価格・会員価格とは併用できません。"
+              : "定期購入価格は通常販売価格以下にしてください（会員価格がある場合はそれ以下）。"}
+            グループ管理番号はストアクリエイタProで作成済みの定期購入グループ番号です。反映・登録時に検証されます。
+          </p>
+        </>
+      ) : (
+        <p className="text-xs text-slate-400">
+          Yahoo!ショッピングから取込むと定期購入設定（区分・定期価格・グループ・サイクル・ポイント）が自動で入ります。
+          「設定なし」で反映すると、Yahoo側の定期購入設定が解除されます。
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ImageUrlSection({ productId }: { productId?: string }) {
+  const { register, getValues, setValue, watch } = useFormContext<FormValues>();
+  const [busy, setBusy] = React.useState(false);
+  const [message, setMessage] = React.useState<string | null>(null);
+  const dragFrom = React.useRef<number | null>(null);
+  const [dragOver, setDragOver] = React.useState<number | null>(null);
+
+  // watch で並び替え・手入力の両方に追随して再描画する
+  const urls = Array.from({ length: 20 }, (_, i) =>
+    String(watch(`image_url_${i + 1}` as FieldPath<FormValues>) ?? ""),
+  );
+
+  // from の行を抜いて to の位置へ挿入し、image_url_1..20 へ詰め直す（260711修正依頼-6: 任意の並び替え）
+  const move = (from: number, to: number) => {
+    if (from === to || from < 0 || to < 0 || from >= 20 || to >= 20) return;
+    const arr = Array.from({ length: 20 }, (_, i) =>
+      String(getValues(`image_url_${i + 1}` as FieldPath<FormValues>) ?? ""),
+    );
+    const [x] = arr.splice(from, 1);
+    arr.splice(to, 0, x);
+    arr.forEach((v, i) =>
+      setValue(`image_url_${i + 1}` as FieldPath<FormValues>, v as never, { shouldDirty: true }),
+    );
+  };
+
+  // 保存済みの並び順で画像を取得し、規約名で R-Cabinet へ上書き再アップロード + 楽天 images[] を patch 更新
+  const reupload = async () => {
+    if (!productId) return;
+    setBusy(true);
+    setMessage(null);
+    try {
+      const res = await fetch(`/api/upload/rcabinet-sync/${productId}`, { method: "POST" });
+      const json = await res.json();
+      if (json.ok) {
+        const n = Array.isArray(json.uploaded) ? json.uploaded.length : 0;
+        setMessage(
+          json.patched
+            ? `${n}枚を再アップロードし、楽天商品の画像リストを更新しました`
+            : `${n}枚を再アップロードしました（${json.patchError ?? ""}）`,
+        );
+      } else {
+        const firstFail = Array.isArray(json.failed) && json.failed[0]
+          ? `（例: ${json.failed[0].index}枚目 ${json.failed[0].error}）`
+          : "";
+        setMessage(`再アップロードに失敗しました: ${json.error ?? json.patchError ?? ""}${firstFail}`);
+      }
+    } catch (e) {
+      setMessage("再アップロードに失敗しました: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="space-y-2">
+      <p className="text-[11px] text-slate-400">
+        ⠿ をドラッグ（または ↑↓）で並び替えできます。「再アップロード」は保存済みの並びで実行されます（自動保存後に実行してください）。
+      </p>
+      <div className="grid grid-cols-2 gap-2">
+        {urls.map((url, idx) => (
+          <div
+            key={idx}
+            className={cn(
+              "rounded border p-1.5",
+              dragOver === idx ? "border-blue-400 bg-blue-50" : "border-slate-200",
+            )}
+            onDragOver={(e) => {
+              e.preventDefault();
+              if (dragOver !== idx) setDragOver(idx);
+            }}
+            onDragLeave={() => setDragOver((cur) => (cur === idx ? null : cur))}
+            onDrop={(e) => {
+              e.preventDefault();
+              setDragOver(null);
+              if (dragFrom.current != null) move(dragFrom.current, idx);
+              dragFrom.current = null;
+            }}
+          >
+            <div className="flex items-center gap-1">
+              <span
+                draggable
+                onDragStart={() => {
+                  dragFrom.current = idx;
+                }}
+                className="cursor-grab select-none px-0.5 text-slate-400"
+                title="ドラッグで並び替え"
+                aria-label={`画像 URL ${idx + 1} を並び替え`}
+              >
+                ⠿
+              </span>
+              <Label htmlFor={`image_url_${idx + 1}`} className="mb-0">
+                画像 URL {idx + 1}
+              </Label>
+              <span className="ml-auto flex gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => move(idx, idx - 1)}
+                  disabled={idx === 0}
+                  className="rounded border border-slate-200 px-1 text-xs text-slate-500 disabled:opacity-30"
+                  aria-label="上へ"
+                >
+                  ↑
+                </button>
+                <button
+                  type="button"
+                  onClick={() => move(idx, idx + 1)}
+                  disabled={idx === 19}
+                  className="rounded border border-slate-200 px-1 text-xs text-slate-500 disabled:opacity-30"
+                  aria-label="下へ"
+                >
+                  ↓
+                </button>
+              </span>
+            </div>
+            <div className="mt-1 flex items-center gap-1.5">
+              {url.trim() ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={url} alt="" className="h-9 w-9 shrink-0 rounded object-cover" />
+              ) : (
+                <div className="h-9 w-9 shrink-0 rounded bg-slate-100" />
+              )}
+              <Input id={`image_url_${idx + 1}`} {...register(`image_url_${idx + 1}` as FieldPath<FormValues>)} />
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="flex items-center gap-2">
+        <Button type="button" onClick={reupload} disabled={busy || !productId} variant="outline">
+          {busy ? "再アップロード中…" : "⟳ 並び順で画像を再アップロード（楽天）"}
+        </Button>
+        {!productId && (
+          <span className="text-xs text-slate-400">商品を保存すると実行できます</span>
+        )}
+      </div>
+      {message && <p className="text-xs text-blue-700">{message}</p>}
     </div>
   );
 }

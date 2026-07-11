@@ -14,6 +14,8 @@ import { getYahooConfig, getYahooAccessToken } from "@/lib/yahoo/auth";
 import { getItem as getYahooItem, editItem, reservePublish } from "@/lib/yahoo/item-client";
 import { parseYahooItem } from "@/lib/converters/yahoo-item-parser";
 import { buildYahooUpdateParams } from "@/lib/converters/yahoo-patch";
+import { validateYahooSubscription } from "@/lib/yahoo/subscription";
+import { validateSubscription as validateRakutenSubscription } from "@/lib/converters/rakuten-api";
 import { getShopifyConfig } from "@/lib/shopify/auth";
 import { getProduct as getShopifyProduct, updateProduct as updateShopifyProduct, bulkUpdateVariants } from "@/lib/shopify/product-client";
 import { getLocations, setAvailableQuantities } from "@/lib/shopify/inventory-client";
@@ -55,7 +57,12 @@ async function buildPlan(mall: Mall, product: ProductInput) {
     if (sc.added.length) structural.push(`SKU追加(${sc.added.join(", ")})`);
     if (sc.removed.length) structural.push(`SKU削除(${sc.removed.join(", ")})`);
     if (sc.emptyKey) structural.push("SKU管理番号/NEコード未入力のSKU");
-    return { mall, cred, key: manageNumber, changed, body, bodyWithAttributes, skipped, advanced: [] as string[], structural } as const;
+    // 定期購入の事前検証（IE0179/IE0430系。登録(upsert)と同じ検証を「反映」(patch)経路にも適用）。
+    // 定期関連の変更があるときだけ検証する（定期に触れない更新を止めない）。
+    const subChanged = changed.some((c) => c.field.startsWith("subscription_") || c.field.endsWith("定期価格"));
+    const rsub = subChanged ? validateRakutenSubscription(product) : ({ ok: true } as const);
+    const subscriptionErrors = rsub.ok ? [] : rsub.errors;
+    return { mall, cred, key: manageNumber, changed, body, bodyWithAttributes, skipped, advanced: [] as string[], structural, subscriptionErrors } as const;
   }
   if (mall === "shopify") {
     // Shopify は productUpdate(商品情報) + productVariantsBulkUpdate(SKU価格/JAN) の楽天patch型
@@ -77,6 +84,7 @@ async function buildPlan(mall: Mall, product: ProductInput) {
       mall, cfg: scfg, key: gid, changed: splan.changed,
       productUpdateInput: splan.productUpdateInput, variantsInput: splan.variantsInput,
       skipped: splan.skipped, advanced: [] as string[], structural,
+      subscriptionErrors: [] as string[], // Shopify に定期購入項目はない
       snapshot: got.product, // 在庫更新(下地)の inventoryItemId 解決に使う
     } as const;
   }
@@ -94,7 +102,10 @@ async function buildPlan(mall: Mall, product: ProductInput) {
   const mallParsed = parseYahooItem(got.raw, { fallbackTaxRate: product.tax_rate });
   const changed = diffProduct(mallParsed, product);
   const { params, advanced, skipped } = buildYahooUpdateParams(got.raw, changed, product, { sellerId: cfg.sellerId });
-  return { mall, cfg, token, key: product.ne_code, changed, params, skipped, advanced, structural: [] as string[] } as const;
+  // 定期購入パラメータの事前検証（it-14093〜14180 を送信前に日本語で検出。GET=プレビューで表示し POST で中止）。
+  const sub = validateYahooSubscription(params);
+  const subscriptionErrors = sub.ok ? [] : sub.errors;
+  return { mall, cfg, token, key: product.ne_code, changed, params, skipped, advanced, structural: [] as string[], subscriptionErrors } as const;
 }
 
 /** GET = 反映プレビュー（書き込みなし）。差分・送信予定ボディ・警告を返す。 */
@@ -118,6 +129,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ mall: st
     skipped: plan.skipped,
     advanced: plan.advanced,
     structural: plan.structural,
+    subscriptionErrors: plan.subscriptionErrors,
     willSend: mall === "rakuten"
       ? (plan as { body: unknown }).body
       : mall === "shopify"
@@ -205,6 +217,14 @@ export async function POST(req: Request, { params }: { params: Promise<{ mall: s
       error: `この商品はAPI更新で保持できない設定（${plan.advanced.join(", ")}）を含むため、安全のため反映を中止しました。ストア管理画面で更新してください。`,
       advanced: plan.advanced,
     }, { status: 409 });
+  }
+  // 定期購入の事前検証エラー（Yahoo: it-14093〜14180 / 楽天: IE0179/IE0430系）は送信前に中止する。
+  if (plan.subscriptionErrors.length > 0) {
+    return NextResponse.json({
+      ok: false,
+      error: "定期購入設定が不正: " + plan.subscriptionErrors.join(" / "),
+      subscriptionErrors: plan.subscriptionErrors,
+    }, { status: 422 });
   }
 
   const changedFields = plan.changed.map((c: ChangedField) => c.field);

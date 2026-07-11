@@ -10,7 +10,29 @@ import { yahooItemsForProduct } from "@/lib/product/yahoo-split";
 import { getYahooAccessToken, type YahooConfig } from "@/lib/yahoo/auth";
 import { buildYahooEditItemParams, validateEditItemParams } from "@/lib/yahoo/item-mapper";
 import { editItem, getItem, setStock, reservePublish } from "@/lib/yahoo/item-client";
+import { buildYahooVariationParams, type YahooVariationParams } from "@/lib/yahoo/variation-params";
 import type { RegisterServiceError } from "./types";
+
+/** Yahoo 1ページ統合モード（260711修正依頼-7）の editItem パラメータ調整。
+ * - item_code を親商品コード（楽天商品管理番号を優先。ユーザー確認済み 2026-07-12）へ差し替え
+ * - options / subcodes / subcode_param を付与（サブコード = 各SKUのNEコード）
+ * - grouping/variation1 系は統合方式と混在させない（送らない） */
+function applyUnifiedVariation(
+  params: Record<string, string>,
+  product: ProductInput,
+  variation: YahooVariationParams,
+): { params: Record<string, string>; parentCode: string } {
+  const parentCode = product.rakuten_manage_number?.trim() || product.ne_code;
+  const next = { ...params };
+  next.item_code = parentCode;
+  next.options = variation.options;
+  next.subcodes = variation.subcodes;
+  if (variation.subcode_param) next.subcode_param = variation.subcode_param;
+  delete next.grouping_id;
+  delete next.variation1_free_title;
+  delete next.variation1_name;
+  return { params: next, parentCode };
+}
 
 /** モールAPI呼び出しと保存を注入可能にする（ユニットテストで実送信しないため）。 */
 export type YahooRegisterDeps = {
@@ -74,23 +96,32 @@ export async function dryRunYahooRegister(
     token = null;
   }
 
+  // unified バリエーション（260711-7）: dry-run でも options/subcodes 付きの送信予定値を見せる
+  const variationRes = skuItems.length === 1 ? buildYahooVariationParams(product) : { ok: false as const, skip: true as const };
+  const unified = variationRes.ok ? variationRes.params : null;
+  const unifiedError = !variationRes.ok && !("skip" in variationRes) ? variationRes.error : null;
+
   const plans: YahooSkuPlan[] = [];
   for (const item of skuItems) {
+    const itemCode = unified ? item.rakuten_manage_number?.trim() || item.ne_code : item.ne_code;
     let exists = false;
     if (token) {
       try {
-        exists = (await deps.getItem(token, cfg.sellerId, item.ne_code)).exists;
+        exists = (await deps.getItem(token, cfg.sellerId, itemCode)).exists;
       } catch {
         exists = false;
       }
     }
-    const editParams = buildYahooEditItemParams(item, { sellerId: cfg.sellerId, forUpdate: exists });
+    let editParams = buildYahooEditItemParams(item, { sellerId: cfg.sellerId, forUpdate: exists });
+    if (unified) editParams = applyUnifiedVariation(editParams, item, unified).params;
     const valid = validateEditItemParams(editParams);
+    const missing = valid.ok ? [] : valid.missing;
+    if (unifiedError) missing.push(`バリエーション定義: ${unifiedError}`);
     plans.push({
-      itemCode: item.ne_code,
+      itemCode,
       exists,
-      valid: valid.ok,
-      missing: valid.ok ? [] : valid.missing,
+      valid: valid.ok && !unifiedError,
+      missing,
       params: editParams,
     });
   }
@@ -182,10 +213,26 @@ export async function commitYahooRegister(
 
   const skuItems = yahooItemsForProduct(product);
 
-  // --- フラット/1SKU 商品: 従来どおりの単一 editItem（挙動不変） ---
+  // --- フラット/1SKU 商品・1ページ統合(unified)商品: 単一 editItem ---
   if (skuItems.length === 1) {
-    const exists = (await deps.getItem(token, cfg.sellerId, product.ne_code)).exists;
-    const editParams = buildYahooEditItemParams(product, { sellerId: cfg.sellerId, forUpdate: exists, forceDisplay });
+    // unified バリエーション（260711-7）: options/subcodes を付与し、親コードで登録する
+    const variationRes = buildYahooVariationParams(product);
+    if (!variationRes.ok && !("skip" in variationRes)) {
+      return {
+        ok: false,
+        kind: "invalid",
+        error: "Yahoo統合バリエーションの定義が不正: " + variationRes.error,
+        missing: [],
+      };
+    }
+    const unified = variationRes.ok ? variationRes.params : null;
+    const itemCode = unified
+      ? product.rakuten_manage_number?.trim() || product.ne_code
+      : product.ne_code;
+
+    const exists = (await deps.getItem(token, cfg.sellerId, itemCode)).exists;
+    let editParams = buildYahooEditItemParams(product, { sellerId: cfg.sellerId, forUpdate: exists, forceDisplay });
+    if (unified) editParams = applyUnifiedVariation(editParams, product, unified).params;
     const valid = validateEditItemParams(editParams);
     if (!valid.ok) {
       return { ok: false, kind: "invalid", error: "必須項目が不足: " + valid.missing.join(", "), missing: valid.missing };
@@ -218,8 +265,16 @@ export async function commitYahooRegister(
       // 公開(display=1)かつ在庫指定があれば在庫設定（購入可能化）。
       let stockNote = "";
       if (publish && stockQuantity > 0) {
-        const st = await deps.setStock(token, cfg.sellerId, product.ne_code, stockQuantity);
-        if (!st.ok) stockNote = `在庫設定失敗: ${st.message} / `;
+        if (unified) {
+          // 統合バリエーションはサブコード単位（item_code = "{親}:{サブ}"）で在庫を設定する
+          for (const sub of unified.subCodeList) {
+            const st = await deps.setStock(token, cfg.sellerId, `${itemCode}:${sub}`, stockQuantity);
+            if (!st.ok) stockNote += `在庫設定失敗(${itemCode}:${sub}): ${st.message} / `;
+          }
+        } else {
+          const st = await deps.setStock(token, cfg.sellerId, product.ne_code, stockQuantity);
+          if (!st.ok) stockNote = `在庫設定失敗: ${st.message} / `;
+        }
       }
       // フロント反映は reservePublish（全反映予約）。submitItem は存在しない誤APIのため使わない。
       // 反映はストア全体単位（商品単位指定は不可）。
@@ -231,7 +286,7 @@ export async function commitYahooRegister(
     return {
       ok: true,
       mall: "yahoo",
-      itemCode: product.ne_code,
+      itemCode,
       wasUpdate: exists,
       warnings: result.warnings,
       submitted,
