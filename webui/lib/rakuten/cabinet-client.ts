@@ -41,6 +41,34 @@ export async function searchFile(
   return files;
 }
 
+export type CabinetFolder = { folderId: number; folderName: string; folderPath: string };
+
+/** folders/get でフォルダ一覧を取得する（アップロード先の選択UI用）。
+ * ページングを進め、1ページの件数が limit 未満になるか API がエラーを返した時点で打ち切る
+ * （実機ではページング上限で全フォルダを取り切れないことがある = 取得できた分のみ返す）。 */
+export async function listCabinetFolders(
+  cred: RakutenCredentials,
+  opts: { maxPages?: number } = {},
+): Promise<CabinetFolder[]> {
+  const maxPages = opts.maxPages ?? 5;
+  const limit = 100;
+  const out: CabinetFolder[] = [];
+  for (let page = 1; page <= maxPages; page++) {
+    const url = `${API_BASE}/folders/get?offset=${page}&limit=${limit}`;
+    const res = await fetch(url, { headers: { Authorization: esaAuthHeader(cred.serviceSecret, cred.licenseKey) } });
+    const body = await res.text();
+    if (res.status !== 200) break;
+    const folders = [...body.matchAll(/<folder>([\s\S]*?)<\/folder>/g)].map((m) => ({
+      folderId: Number(tag(m[1], "FolderId")),
+      folderName: tag(m[1], "FolderName"),
+      folderPath: tag(m[1], "FolderPath"),
+    }));
+    out.push(...folders);
+    if (folders.length < limit) break;
+  }
+  return out;
+}
+
 /** 既知フォルダパス("/thum02"等)の FolderId を、その配下の既存ファイルから解決する。
  * sampleFileName はそのフォルダに必ず存在するファイル名(拡張子除く)を渡す。 */
 export async function resolveFolderId(

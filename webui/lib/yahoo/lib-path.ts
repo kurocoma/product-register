@@ -13,9 +13,21 @@ export type YahooLibTarget = {
 };
 
 export function buildYahooLibFileName(p: ProductInput, index: number): YahooLibTarget {
-  const name = index <= 1 ? p.ne_code : `${p.ne_code}_${index}`;
+  return buildYahooLibFileNameByCode(p.ne_code, index);
+}
+
+/** 商品コード文字列から lib ファイル名を組む（DB未登録の新規商品コードへの先行アップロード用）。 */
+export function buildYahooLibFileNameByCode(code: string, index: number): YahooLibTarget {
+  const name = index <= 1 ? code : `${code}_${index}`;
   const fileName = `${name}.jpg`;
   return { name, fileName, publicUrl: `${YAHOO_IMAGE_BASE}/${fileName}` };
+}
+
+/** Yahoo 商品画像(item image)の命名規約（uploadItemImage 公式仕様）:
+ * メイン(1枚目) = {商品コード}.jpg、商品詳細画像(2枚目以降) = {商品コード}_{1..20}.jpg。
+ * 追加画像(lib)と違い2枚目のサフィックスは _1 から始まる点に注意。 */
+export function buildYahooItemImageFileName(code: string, index: number): string {
+  return index <= 1 ? `${code}.jpg` : `${code}_${index - 1}.jpg`;
 }
 
 /** Yahoo 追加画像ファイル名の制約検証（半角英数・-_.・40バイト以内）。 */
