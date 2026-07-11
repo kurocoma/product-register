@@ -17,6 +17,7 @@ import {
 } from "@/lib/product/schema";
 import { createClient } from "@/lib/supabase/client";
 import {
+  countEmptyRequiredAttributes,
   fetchGenreAttributes,
   genreAttributesToInputs,
   isRequiredAttribute,
@@ -267,33 +268,65 @@ function ShippingSection() {
 }
 
 /** モール基本カテゴリID(=楽天ジャンルID)。入力（フォーカス離脱）時に、
- * 紐付くYahooカテゴリ(yahoo_category_id / yahoo_path)を自動入力する。 */
+ * 紐付くYahooカテゴリ(yahoo_category_id / yahoo_path)と商品属性（推奨属性）を自動入力する。
+ * 両者は独立して行い、片方の失敗でもう片方を止めない。属性のマージは
+ * mergeGenreAttributes（既入力値を item 単位で保持する共有規則）を使う。 */
 function MallCategoryField() {
-  const { register, setValue, watch } = useFormContext<FormValues>();
+  const { register, setValue, watch, getValues } = useFormContext<FormValues>();
   const [message, setMessage] = React.useState<string | null>(null);
   const lastMappedId = React.useRef<string | null>(null);
   const reg = register("mall_category_id");
   const yahooCategoryId = watch("yahoo_category_id");
 
-  const autofillYahoo = async (e: React.FocusEvent<HTMLInputElement>) => {
+  const autofillFromCategory = async (e: React.FocusEvent<HTMLInputElement>) => {
     const id = (e.target.value || "").trim();
     if (!id || id === lastMappedId.current) return; // 空 or 同一IDの再blurはスキップ
     lastMappedId.current = id;
+    const supabase = createClient();
+    const parts: string[] = [];
+    let failed = false;
+
+    // 1) Yahooカテゴリの自動入力
     try {
-      const supabase = createClient();
       const mapping = await fetchYahooCategoryMapping(supabase, id);
       if (!mapping) {
-        setMessage(`カテゴリID ${id} に対応するYahooカテゴリが見つかりませんでした`);
-        return;
+        parts.push(`カテゴリID ${id} に対応するYahooカテゴリが見つかりませんでした`);
+      } else {
+        const opts = { shouldDirty: true, shouldValidate: true } as const;
+        setValue("yahoo_category_id", mapping.yahoo_category_id, opts);
+        setValue("yahoo_path", mapping.yahoo_path, opts);
+        parts.push(`Yahooカテゴリを自動入力: ${mapping.yahoo_path || mapping.yahoo_category_id}`);
       }
-      const opts = { shouldDirty: true, shouldValidate: true } as const;
-      setValue("yahoo_category_id", mapping.yahoo_category_id, opts);
-      setValue("yahoo_path", mapping.yahoo_path, opts);
-      setMessage(`Yahooカテゴリを自動入力: ${mapping.yahoo_path || mapping.yahoo_category_id}`);
     } catch (err) {
-      lastMappedId.current = null; // 失敗時は再試行できるようにする
-      setMessage("Yahooカテゴリの取得に失敗しました: " + (err instanceof Error ? err.message : String(err)));
+      failed = true;
+      parts.push(
+        "Yahooカテゴリの取得に失敗しました: " + (err instanceof Error ? err.message : String(err)),
+      );
     }
+
+    // 2) 商品属性の自動読み込み（Yahooマッピングの有無・成否に関係なく独立して行う）
+    try {
+      const attrs = await fetchGenreAttributes(supabase, id);
+      if (attrs.length > 0) {
+        const current = getValues("attributes") || [];
+        const merged = mergeGenreAttributes(current, genreAttributesToInputs(attrs));
+        setValue("attributes", merged, { shouldDirty: true });
+        const emptyRequired = countEmptyRequiredAttributes(merged);
+        parts.push(
+          emptyRequired > 0
+            ? `商品属性 ${merged.length}件を読み込みました（値が空の必須項目が${emptyRequired}件あります）`
+            : `商品属性 ${merged.length}件を読み込みました`,
+        );
+      }
+    } catch (err) {
+      failed = true;
+      parts.push(
+        "商品属性の読み込みに失敗しました: " + (err instanceof Error ? err.message : String(err)),
+      );
+    }
+
+    if (failed) lastMappedId.current = null; // 失敗時は再blurで再試行できるようにする
+    if (parts.length > 0) setMessage(parts.join(" / "));
   };
 
   return (
@@ -304,7 +337,7 @@ function MallCategoryField() {
         {...reg}
         onBlur={(e) => {
           reg.onBlur(e);
-          void autofillYahoo(e);
+          void autofillFromCategory(e);
         }}
       />
       {message && <p className="mt-1 text-xs text-blue-700">{message}</p>}
@@ -418,6 +451,9 @@ function AttributeSection() {
   const [message, setMessage] = React.useState<string | null>(null);
 
   const categoryId = watch("mall_category_id");
+  // 空の必須項目の常時通知（カテゴリblurの自動読み込み・手動読み込みのどちらでも効く）
+  const attributesValue = watch("attributes");
+  const emptyRequiredCount = countEmptyRequiredAttributes(attributesValue ?? []);
 
   const loadFromCategory = async () => {
     const id = (categoryId || "").trim();
@@ -458,6 +494,12 @@ function AttributeSection() {
         </span>
       </div>
       {message && <p className="text-xs text-blue-700">{message}</p>}
+
+      {emptyRequiredCount > 0 && (
+        <p className="rounded border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs text-amber-800">
+          ⚠ 値が空の必須項目が{emptyRequiredCount}件あります（楽天は必須属性が空だと登録に失敗します）
+        </p>
+      )}
 
       {fields.length === 0 && (
         <p className="text-sm text-slate-400">

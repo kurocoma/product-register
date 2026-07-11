@@ -38,6 +38,7 @@ import {
   type YahooCategoryMapping,
 } from "@/lib/product/category-mapping";
 import { applyCategoryAutofill } from "@/lib/product/category-autofill";
+import { HelpLink } from "@/components/help/HelpLink";
 import { Button } from "@/components/ui/button";
 
 type RowState = {
@@ -438,7 +439,10 @@ export function BulkGridEditor() {
   return (
     <div className="p-6 space-y-4">
       <div>
-        <h1 className="text-2xl font-bold">一括登録（まとめて入力）</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-2xl font-bold">一括登録（まとめて入力）</h1>
+          <HelpLink anchor="screen-bulk-register" />
+        </div>
         <p className="mt-1 text-sm text-slate-600">
           Excel のデータ入力シートと同じ列構成（基本18列）に、商品説明文・Yahooカテゴリ等の拡張列とバリエーションキーを加えた
           {BULK_GRID_ALL_COLUMNS.length}列で、複数商品をまとめて登録できます。

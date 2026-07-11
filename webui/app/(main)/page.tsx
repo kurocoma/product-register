@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { HelpLink } from "@/components/help/HelpLink";
 import { cn } from "@/lib/utils";
 
 export default async function DashboardPage() {
@@ -58,7 +59,10 @@ export default async function DashboardPage() {
 
   return (
     <div className="p-6 space-y-6">
-      <h1 className="text-2xl font-bold">ダッシュボード</h1>
+      <div className="flex items-center gap-2">
+        <h1 className="text-2xl font-bold">ダッシュボード</h1>
+        <HelpLink anchor="screen-dashboard" />
+      </div>
 
       <div className="grid grid-cols-4 gap-4">
         <StatCard title="商品数" value={totalProducts ?? 0} />

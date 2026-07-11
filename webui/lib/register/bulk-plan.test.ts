@@ -174,3 +174,48 @@ describe("summarizeBulk / selectCommitTargets", () => {
     expect(selectCommitTargets(results, true).targets.some((r) => r.id === "3")).toBe(false);
   });
 });
+
+// ---- 以下追記: 「失敗した分だけ再実行」(selectRetryTargets) のテスト ----
+// 既存テストは変更しない（import 宣言は ESM 仕様によりホイストされる）。
+import { selectRetryTargets } from "./bulk-plan";
+
+describe("selectRetryTargets（失敗した分だけ再実行の対象抽出）", () => {
+  const ok = (id: string): BulkItemResult => ({
+    id, ne_code: `n-${id}`, product_name: `商品${id}`, ok: true, valid: true, registered: true,
+  });
+  const ng = (id: string, error: string): BulkItemResult => ({
+    id, ne_code: `n-${id}`, product_name: `商品${id}`, ok: false, valid: true, error,
+  });
+
+  it("全件成功なら空配列を返す（再実行ボタンを出さない条件）", () => {
+    expect(selectRetryTargets([ok("1"), ok("2"), ok("3")])).toEqual([]);
+  });
+
+  it("成功と失敗が混在するときは失敗（ok !== true）だけを返す", () => {
+    const results = [ok("1"), ng("2", "items.upsert 失敗: IE0001"), ok("3"), ng("4", "通信エラー: fetch failed")];
+    const retry = selectRetryTargets(results);
+    expect(retry.map((r) => r.id)).toEqual(["2", "4"]);
+    // 成功済みの商品は再送対象に含めない
+    expect(retry.some((r) => r.ok)).toBe(false);
+  });
+
+  it("失敗理由・必須不足などの件別情報を保持したまま返す（再実行と表示にそのまま使える）", () => {
+    const missing: BulkItemResult = {
+      id: "5", ne_code: "n-5", product_name: "商品5", ok: false, valid: false,
+      missing: ["genreId(6桁)"], error: "必須項目が不足: genreId(6桁)",
+    };
+    const retry = selectRetryTargets([ok("1"), missing]);
+    expect(retry).toEqual([missing]);
+    expect(retry[0].missing).toContain("genreId(6桁)");
+  });
+
+  it("元の並び順を維持する", () => {
+    const results = [ng("d", "e1"), ok("x"), ng("b", "e2"), ng("a", "e3")];
+    expect(selectRetryTargets(results).map((r) => r.id)).toEqual(["d", "b", "a"]);
+  });
+
+  it("全件失敗なら全件返す / 空入力は空を返す", () => {
+    expect(selectRetryTargets([ng("1", "e"), ng("2", "e")]).length).toBe(2);
+    expect(selectRetryTargets([])).toEqual([]);
+  });
+});

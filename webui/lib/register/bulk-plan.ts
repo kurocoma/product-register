@@ -75,3 +75,9 @@ export function selectCommitTargets<T extends BulkItemResult>(
     skippedOverwrite: overwrite ? [] : validResults.filter((r) => r.willOverwrite === true),
   };
 }
+
+/** 「失敗した分だけ再実行」の対象抽出: commit 結果から失敗（ok !== true）のみを
+ * 元の並び順のまま返す（成功済みの商品は再送しない）。 */
+export function selectRetryTargets(results: BulkItemResult[]): BulkItemResult[] {
+  return results.filter((r) => r.ok !== true);
+}

@@ -14,7 +14,9 @@ import { ImageUploadPanel } from "./ImageUploadPanel";
 import { RegisterPanel } from "./RegisterPanel";
 import { MallEditPanel } from "./MallEditPanel";
 import { NewProductChecklist } from "./NewProductChecklist";
+import { TemplateSaveButton } from "./TemplateSaveButton";
 import { canAutoSaveNewProduct } from "@/lib/product/new-product-checklist";
+import { HelpLink } from "@/components/help/HelpLink";
 
 export function ProductEditView({
   initial,
@@ -54,13 +56,17 @@ export function ProductEditView({
       {/* ヘッダー */}
       <div className="flex items-center justify-between border-b border-slate-200 bg-white px-6 py-3">
         <div>
-          <div className="text-xs text-slate-500">商品編集</div>
+          <div className="flex items-center gap-1.5 text-xs text-slate-500">
+            商品編集
+            <HelpLink anchor="screen-product-edit" />
+          </div>
           <div className="font-mono text-sm">
             [{currentId ? data.ne_code : "新規商品"}]
           </div>
         </div>
         <div className="flex items-center gap-3">
           <AutoSaveIndicator status={status} savedAt={savedAt} draft={!autoSaveEnabled} />
+          <TemplateSaveButton data={data} />
           <Button onClick={manualSave} variant="outline">
             💾 保存
           </Button>
@@ -70,10 +76,17 @@ export function ProductEditView({
       {/* 新規作成時のみ: 登録ステップ + 必須項目チェック（既存商品の編集画面には出さない） */}
       {isNewEntry && <NewProductChecklist data={data} saved={!!currentId} />}
 
-      {/* 保存エラーのバナー（NEコード必須・重複など） */}
+      {/* 保存エラーのバナー（NEコード必須・重複など）。数秒おきに自動リトライしつつ手動再試行もできる */}
       {status === "error" && errorMessage && (
-        <div className="border-b border-red-200 bg-red-50 px-6 py-2 text-sm text-red-700">
-          ⚠ 保存できませんでした: {errorMessage}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-red-200 bg-red-50 px-6 py-2 text-sm text-red-700">
+          <span>⚠ 保存できませんでした: {errorMessage}（数秒おきに自動で再試行します）</span>
+          <button
+            type="button"
+            onClick={manualSave}
+            className="shrink-0 rounded border border-red-300 bg-white px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-100"
+          >
+            🔄 今すぐ保存し直す
+          </button>
         </div>
       )}
 
@@ -111,7 +124,8 @@ function AutoSaveIndicator({
     );
   }
   if (status === "saving") return <span className="text-slate-500 text-sm">保存中…</span>;
-  if (status === "error") return <span className="text-red-600 text-sm">⚠ 保存失敗</span>;
+  if (status === "error")
+    return <span className="text-red-600 text-sm">⚠ 保存失敗（自動で再試行します）</span>;
   if (savedAt) {
     return (
       <span className="text-green-700 text-sm">

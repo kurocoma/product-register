@@ -43,3 +43,14 @@ export function genreAttributesToInputs(
 export function isRequiredAttribute(requirement: string): boolean {
   return requirement === "必須" || requirement === "いずれか必須";
 }
+
+/** 値が空のままの必須系属性（必須・いずれか必須）の件数を数える。
+ * 空白のみの value も「空」とみなす。カテゴリIDからの属性自動読み込み直後や
+ * 属性セクションの常時通知に使う（楽天は必須属性が空だと登録に失敗するため）。 */
+export function countEmptyRequiredAttributes(
+  attrs: readonly { value?: string; requirement?: string }[],
+): number {
+  return attrs.filter(
+    (a) => isRequiredAttribute(a.requirement ?? "") && (a.value ?? "").trim() === "",
+  ).length;
+}

@@ -5,8 +5,11 @@ import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { deleteProduct } from "@/lib/product/repository";
 import type { ProductRow } from "@/lib/product/repository";
+import { mallPresence } from "@/lib/product/schema";
+import { matchesProductQuery, matchesListedFilter, type ListedFilter } from "@/lib/product/search";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { HelpLink } from "@/components/help/HelpLink";
 import { BulkRegisterPanel } from "./BulkRegisterPanel";
 
 type Mall = "rakuten" | "yahoo";
@@ -16,14 +19,11 @@ type StoredVariant = { sku_manage_number?: string; ne_code?: string; variation_v
 type PriceRow = { key: string; variantIndex: number | null; label: string; selling: number; display: number };
 
 const variantsOf = (p: ProductRow): StoredVariant[] => ((p.extra as { variants?: StoredVariant[] })?.variants ?? []);
-/** その商品が各モールに掲載済みか（反映ボタンの活性判定）。mall_listed優先、楽天は管理番号でフォールバック。 */
+/** その商品が各モールに掲載済みか（反映ボタンの活性判定・掲載状況の絞り込み）。
+ * 判定は共有の mallPresence()（lib/product/schema.ts）へ委譲し、情報源を一本化する。 */
 const presenceOf = (p: ProductRow): Record<Mall, boolean> => {
-  const e = p.extra as { mall_listed?: { rakuten?: boolean; yahoo?: boolean }; rakuten_manage_number?: string };
-  const ml = e?.mall_listed ?? {};
-  return {
-    rakuten: !!ml.rakuten || !!(e?.rakuten_manage_number && String(e.rakuten_manage_number).trim()),
-    yahoo: !!ml.yahoo,
-  };
+  const { rakuten, yahoo } = mallPresence((p.extra ?? {}) as Parameters<typeof mallPresence>[0]);
+  return { rakuten, yahoo };
 };
 const flatDisplay = (p: ProductRow) => {
   const dp = Number((p.extra as { display_price?: number })?.display_price);
@@ -43,6 +43,7 @@ export function ProductList({ initial }: { initial: ProductRow[] }) {
   const [products, setProducts] = useState(initial);
   const [query, setQuery] = useState("");
   const [makerFilter, setMakerFilter] = useState("");
+  const [listedFilter, setListedFilter] = useState<{ rakuten: ListedFilter; yahoo: ListedFilter }>({ rakuten: "", yahoo: "" });
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [draft, setDraft] = useState<Record<string, { selling: string; display: string }>>({});
   const [saveState, setSaveState] = useState<Record<string, "saving" | "saved" | "error">>({});
@@ -54,13 +55,17 @@ export function ProductList({ initial }: { initial: ProductRow[] }) {
   const filtered = useMemo(() => {
     return products.filter((p) => {
       if (makerFilter && p.maker_code !== makerFilter) return false;
-      if (query) {
-        const q = query.toLowerCase();
-        if (!String(p.ne_code).toLowerCase().includes(q) && !String(p.product_name).toLowerCase().includes(q)) return false;
-      }
+      const fields = {
+        ne_code: String(p.ne_code ?? ""),
+        product_name: String(p.product_name ?? ""),
+        jan_code: String(p.jan_code ?? ""),
+      };
+      if (!matchesProductQuery(fields, query)) return false;
+      // 掲載状況の絞り込みは反映ボタンの活性化と同じ情報源（mallPresence）で判定する
+      if (!matchesListedFilter(presenceOf(p), listedFilter)) return false;
       return true;
     });
-  }, [products, query, makerFilter]);
+  }, [products, query, makerFilter, listedFilter]);
 
   const toggleAll = (e: React.ChangeEvent<HTMLInputElement>) => setSelected(e.target.checked ? new Set(filtered.map((p) => p.id)) : new Set());
   const toggleOne = (id: string) =>
@@ -115,7 +120,8 @@ export function ProductList({ initial }: { initial: ProductRow[] }) {
       const res = await fetch(`/api/update/${mall}/${id}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
       const j = await res.json();
       const ok = res.ok && j.ok;
-      setReflectMsg((r) => ({ ...r, [id]: ok ? (j.noChange ? `${MALL_LABEL[mall]}: 変更なし` : `✓ ${MALL_LABEL[mall]}反映`) : `${MALL_LABEL[mall]}: ${(j.error || "失敗").slice(0, 50)}` }));
+      // 失敗理由は打ち切らず全文を保持する（行内表示側で省略＋クリックで全文展開）
+      setReflectMsg((r) => ({ ...r, [id]: ok ? (j.noChange ? `${MALL_LABEL[mall]}: 変更なし` : `✓ ${MALL_LABEL[mall]}反映`) : `${MALL_LABEL[mall]}: ${j.error || "失敗"}` }));
       return ok;
     } catch (e) {
       setReflectMsg((r) => ({ ...r, [id]: "通信エラー: " + (e instanceof Error ? e.message : String(e)) }));
@@ -129,9 +135,11 @@ export function ProductList({ initial }: { initial: ProductRow[] }) {
       return p && presenceOf(p)[mall];
     });
 
-  const reflectBulk = async (mall: Mall) => {
+  /** 選択商品（または retryIds 指定時はその商品だけ）を1件ずつ順番にモールへ反映する。
+   * 完了後に失敗があれば「失敗した分だけ再実行」ボタンから retryIds 付きで呼び直せる。 */
+  const reflectBulk = async (mall: Mall, retryIds?: string[]) => {
     if (bulk?.running) return;
-    const ids = bulkTargets(mall);
+    const ids = retryIds ?? bulkTargets(mall);
     if (ids.length === 0) {
       setBulk({ running: false, mall, done: 0, total: 0, ok: 0, ng: 0, failed: [] });
       return;
@@ -156,6 +164,20 @@ export function ProductList({ initial }: { initial: ProductRow[] }) {
     });
   };
 
+  /** 反映結果メッセージの行内表示。50文字を超える失敗理由は省略表示にし、
+   * クリック（<details> 展開）で全文が読めるようにする。短い場合はそのまま表示。 */
+  const reflectMsgView = (msg: string) =>
+    msg.length <= 50 ? (
+      <span className="text-[10px] text-slate-600">{msg}</span>
+    ) : (
+      <details className="text-[10px] text-slate-600">
+        <summary className="cursor-pointer hover:text-blue-600" title="クリックで全文を表示">
+          {msg.slice(0, 50)}…（クリックで全文）
+        </summary>
+        <div className="mt-0.5 max-w-xs whitespace-pre-wrap break-all rounded border border-slate-200 bg-slate-50 p-1">{msg}</div>
+      </details>
+    );
+
   const saveBadge = (key: string) =>
     saveState[key] ? (
       <div className={`text-right text-[10px] ${saveState[key] === "error" ? "text-red-600" : saveState[key] === "saving" ? "text-slate-400" : "text-green-700"}`}>
@@ -166,16 +188,32 @@ export function ProductList({ initial }: { initial: ProductRow[] }) {
   return (
     <div className="p-6 space-y-4">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">商品一覧</h1>
+        <div className="flex items-center gap-2">
+          <h1 className="text-2xl font-bold">商品一覧</h1>
+          <HelpLink anchor="screen-products" />
+        </div>
         <Link href="/products/new"><Button>+ 新規商品</Button></Link>
       </div>
 
-      <div className="flex gap-2">
-        <Input placeholder="🔍 NEコードまたは商品名で検索" value={query} onChange={(e) => setQuery(e.target.value)} className="max-w-sm" />
+      <div className="flex flex-wrap gap-2">
+        <Input placeholder="🔍 NEコード・商品名・JANコードで検索" value={query} onChange={(e) => setQuery(e.target.value)} className="max-w-sm" />
         <select value={makerFilter} onChange={(e) => setMakerFilter(e.target.value)} className="rounded border border-slate-300 px-3 py-2 text-sm">
           <option value="">全メーカー</option>
           {makers.map((m) => (<option key={m} value={m}>{m}</option>))}
         </select>
+        {(["rakuten", "yahoo"] as Mall[]).map((m) => (
+          <select
+            key={m}
+            value={listedFilter[m]}
+            onChange={(e) => setListedFilter((f) => ({ ...f, [m]: e.target.value as ListedFilter }))}
+            title={`${MALL_LABEL[m]}の掲載状況で絞り込み（反映ボタンの活性化と同じ判定）`}
+            className="rounded border border-slate-300 px-3 py-2 text-sm"
+          >
+            <option value="">{MALL_LABEL[m]}: 全て</option>
+            <option value="listed">{MALL_LABEL[m]}: 掲載中</option>
+            <option value="unlisted">{MALL_LABEL[m]}: 未掲載</option>
+          </select>
+        ))}
       </div>
 
       <div className="bg-white rounded border border-slate-200 overflow-x-auto">
@@ -247,7 +285,7 @@ export function ProductList({ initial }: { initial: ProductRow[] }) {
                           );
                         })}
                       </div>
-                      {reflectMsg[p.id] && <span className="text-[10px] text-slate-600">{reflectMsg[p.id]}</span>}
+                      {reflectMsg[p.id] && reflectMsgView(reflectMsg[p.id])}
                     </div>
                   </td>
                   <td className="px-3 py-2">
@@ -281,9 +319,18 @@ export function ProductList({ initial }: { initial: ProductRow[] }) {
             </span>
           )}
           {bulk && !bulk.running && bulk.failed.length > 0 && (
-            <span className="w-full text-xs text-red-600">
-              失敗: {bulk.failed.map((id) => products.find((p) => p.id === id)?.ne_code || id).join(", ")}（各行の理由を確認。ジャンル必須属性の不足は商品編集で補完→再反映）
-            </span>
+            <>
+              <button
+                onClick={() => reflectBulk(bulk.mall, bulk.failed)}
+                disabled={bulk?.running}
+                className="rounded border border-red-400 bg-white px-3 py-1.5 text-red-700 hover:bg-red-50 disabled:opacity-50"
+              >
+                失敗した{bulk.failed.length}件だけ再実行
+              </button>
+              <span className="w-full text-xs text-red-600">
+                失敗: {bulk.failed.map((id) => products.find((p) => p.id === id)?.ne_code || id).join(", ")}（各行の理由を確認。ジャンル必須属性の不足は商品編集で補完→再反映。成功済みの商品は再送しません）
+              </span>
+            </>
           )}
           <span className="text-slate-300">|</span>
           <Link href={`/csv?ids=${Array.from(selected).join(",")}`} className="text-blue-600 hover:underline">選択を一括 CSV 出力</Link>

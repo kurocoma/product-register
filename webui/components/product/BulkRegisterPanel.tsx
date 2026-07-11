@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import type { BulkItemResult, BulkResponse, Mall } from "@/lib/register/types";
-import { selectCommitTargets } from "@/lib/register/bulk-plan";
+import { selectCommitTargets, selectRetryTargets } from "@/lib/register/bulk-plan";
 import { runBulkRegisterSequential, type BulkRunProgress } from "@/lib/register/bulk-run";
 import { missingFieldLabels } from "@/lib/register/missing-labels";
 
@@ -76,13 +76,19 @@ export function BulkRegisterPanel({
     ? selectCommitTargets(checked.results, overwrite)
     : { targets: [] as BulkItemResult[], skippedOverwrite: [] as BulkItemResult[] };
 
-  const runRegister = async () => {
-    if (!checked || stale || targets.length === 0) return;
-    const overwriteCount = targets.filter((r) => r.willOverwrite).length;
+  // 「失敗した分だけ再実行」の対象（commit 結果のうち失敗のみ・成功済みは再送しない）
+  const retryTargets = selectRetryTargets(commitResults);
+
+  /** 一括登録の実行。retry を渡すと「失敗した分だけ再実行」として
+   * その対象だけを登録し直す（結果は commitResults を置き換える）。 */
+  const runRegister = async (retry?: BulkItemResult[]) => {
+    const runTargets = retry ?? targets;
+    if (busy !== null || !checked || stale || runTargets.length === 0) return;
+    const overwriteCount = runTargets.filter((r) => r.willOverwrite).length;
     if (overwriteCount > 0) {
       if (
         !confirm(
-          `${overwriteCount}件は${MALL_LABEL[mall]}の既存商品を上書き更新します。実行しますか？\n（残り${targets.length - overwriteCount}件は新規登録）`,
+          `${overwriteCount}件は${MALL_LABEL[mall]}の既存商品を上書き更新します。実行しますか？\n（残り${runTargets.length - overwriteCount}件は新規登録）`,
         )
       )
         return;
@@ -91,12 +97,12 @@ export function BulkRegisterPanel({
     setError(null);
     setCommitResults([]);
     setSubmitNote(null);
-    setProgress({ done: 0, total: targets.length, ok: 0, ng: 0 });
+    setProgress({ done: 0, total: runTargets.length, ok: 0, ng: 0 });
 
     // 1件ずつ順番に登録し、Yahooの「反映」は全件完了後に1回だけ予約する
     // （最後の1件が失敗しても、先行して成功した商品の反映が漏れないようにする）
     const { okIds, submit } = await runBulkRegisterSequential(
-      targets,
+      runTargets,
       { submit: mall === "yahoo" && submitYahoo },
       {
         registerOne: async (t) => {
@@ -252,7 +258,7 @@ export function BulkRegisterPanel({
           {busy === "check" ? "確認中…" : "① 登録内容を確認（送信しません）"}
         </button>
         <button
-          onClick={runRegister}
+          onClick={() => runRegister()}
           disabled={busy !== null || !checked || stale || targets.length === 0}
           className="rounded bg-indigo-600 px-3 py-1.5 font-medium text-white hover:bg-indigo-700 disabled:opacity-50"
         >
@@ -290,10 +296,19 @@ export function BulkRegisterPanel({
         <div className="space-y-1">
           {submitNote && <div className="text-xs text-slate-700">{submitNote}</div>}
           {resultTable(commitResults, true)}
-          {commitResults.some((r) => !r.ok) && (
-            <p className="text-xs text-red-600">
-              失敗した商品は「編集」リンクから内容を修正して、もう一度確認→登録してください
-            </p>
+          {retryTargets.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={() => runRegister(retryTargets)}
+                disabled={busy !== null || stale}
+                className="rounded border border-red-400 bg-white px-3 py-1.5 text-xs font-medium text-red-700 hover:bg-red-50 disabled:opacity-50"
+              >
+                失敗した{retryTargets.length}件だけ再実行
+              </button>
+              <p className="text-xs text-red-600">
+                失敗した商品は「編集」リンクから内容を修正して再実行してください（成功済みの商品は再送しません）
+              </p>
+            </div>
           )}
         </div>
       )}

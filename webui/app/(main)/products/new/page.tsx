@@ -1,26 +1,12 @@
-"use client";
+import { NewProductClient } from "@/components/product/NewProductClient";
 
-import { ProductInputSchema, type ProductInput } from "@/lib/product/schema";
-import { ProductEditView } from "@/components/product/ProductEditView";
-
-// 新規作成時の空デフォルト
-const empty: ProductInput = ProductInputSchema.parse({
-  ne_code: "",
-  jan_code: "0000000000000",
-  maker_code: "",
-  product_type: "単品",
-  quantity: 1,
-  product_name: "",
-  display_name: "",
-  tax_rate: 10,
-  selling_price: 0,
-  shipping_type: "送料別",
-  image_count: 1,
-  delivery_method: 4,
-  lead_time: 1,
-  mall_category_id: "",
-});
-
-export default function NewProductPage() {
-  return <ProductEditView initial={empty} />;
+/** 新規商品作成ページ。?template=<id> でテンプレートを初期選択＆自動適用する
+ * （テンプレート管理の「このテンプレートで新規作成」から遷移）。 */
+export default async function NewProductPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ template?: string }>;
+}) {
+  const { template } = await searchParams;
+  return <NewProductClient initialTemplateId={template} />;
 }
