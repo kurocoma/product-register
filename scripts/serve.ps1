@@ -64,6 +64,13 @@ if ($Mode -eq "lan") {
     Write-Host ("serve: local mode - http://{0}:{1}/" -f $urlHost, $Port)
 }
 
+# Separate distDir per non-default port so 3000 and e.g. 4000 can run together.
+# Default port keeps `.next` (existing workflows / caches unchanged).
+if ($Port -ne 3000 -and -not $env:PRODUCT_REGISTER_DIST_DIR) {
+    $env:PRODUCT_REGISTER_DIST_DIR = ".next-$Port"
+    Write-Host ("serve: using distDir {0} (parallel with port 3000 OK)" -f $env:PRODUCT_REGISTER_DIST_DIR)
+}
+
 Write-Host "serve: close this window to stop the server."
 
 & $pnpm dev -- -p $Port -H $bindHost
