@@ -31,7 +31,10 @@ type SelectedProduct = {
 
 type Item = {
   key: string;
-  file: File;
+  /** ローカルファイル（D&D・選択・差し替え）。sourceUrl とどちらか一方 */
+  file?: File;
+  /** モール現物のURL（「現在の画像を読み込む」）。アップロード時はサーバ側で取得する */
+  sourceUrl?: string;
   previewUrl: string;
 };
 
@@ -42,6 +45,8 @@ type UploadResult = {
   ok: boolean;
   fileName?: string;
   error?: string;
+  /** Shopify 未連携時: 商品メディアではなく「コンテンツ > ファイル」への単独アップロード */
+  standalone?: boolean;
 };
 
 type CabinetFolder = { folderId: number; folderName: string; folderPath: string };
@@ -140,9 +145,61 @@ export function BulkImageUploader() {
 
   const removeItem = (idx: number) => {
     setItems((cur) => {
-      URL.revokeObjectURL(cur[idx]?.previewUrl ?? "");
+      const url = cur[idx]?.previewUrl ?? "";
+      if (url.startsWith("blob:")) URL.revokeObjectURL(url);
       return cur.filter((_, i) => i !== idx);
     });
+  };
+
+  // 差し替え: 行の「差替」ボタン → 隠しファイル入力 → その行だけ新しいファイルに置き換え（並び位置は維持）
+  const replaceInputRef = React.useRef<HTMLInputElement | null>(null);
+  const replaceTarget = React.useRef<number | null>(null);
+  const replaceItem = (idx: number, f: File) => {
+    setItems((cur) =>
+      cur.map((it, i) => {
+        if (i !== idx) return it;
+        if (it.previewUrl.startsWith("blob:")) URL.revokeObjectURL(it.previewUrl);
+        return { key: it.key, file: f, previewUrl: URL.createObjectURL(f) };
+      }),
+    );
+  };
+
+  // 「現在の画像を読み込む」: 楽天(items.get)の画像を現在の並び順でリストへ入れ替える
+  const [loadingImages, setLoadingImages] = React.useState(false);
+  const loadCurrentImages = async () => {
+    const code = effectiveCode;
+    if (!code) return;
+    setLoadingImages(true);
+    setNotice(null);
+    try {
+      // DB商品を選択中は productId で引く（管理番号≠NEコードの商品でも正しい楽天商品に当たる）
+      const query = selected
+        ? `productId=${encodeURIComponent(selected.id)}`
+        : `code=${encodeURIComponent(code)}`;
+      const res = await fetch(`/api/rakuten/item-images?${query}`);
+      const json = await res.json();
+      if (!json.ok) {
+        setNotice("現在の画像の読み込みに失敗しました: " + (json.error || `HTTP ${res.status}`));
+        return;
+      }
+      const imgs: string[] = json.images || [];
+      if (imgs.length === 0) {
+        setNotice("楽天に登録済みの画像がありません");
+        return;
+      }
+      setItems((cur) => {
+        cur.forEach((it) => {
+          if (it.previewUrl.startsWith("blob:")) URL.revokeObjectURL(it.previewUrl);
+        });
+        return imgs.map((url) => ({ key: `img-${++itemSeq}`, sourceUrl: url, previewUrl: url }));
+      });
+      setResults([]);
+      setNotice(`楽天の現在の画像 ${imgs.length} 枚を読み込みました。差し替え・並べ替え・削除して再アップロードできます`);
+    } catch (e) {
+      setNotice("現在の画像の読み込みに失敗しました: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setLoadingImages(false);
+    }
   };
 
   const move = (from: number, to: number) => {
@@ -156,14 +213,12 @@ export function BulkImageUploader() {
   };
 
   const selectedMalls = (Object.keys(malls) as Mall[]).filter((m) => malls[m]);
-  const canUpload =
-    !uploading && items.length > 0 && selectedMalls.length > 0 && Boolean(effectiveCode) &&
-    // Shopify は DB 商品（shopify_product_id あり）が必要
-    (!malls.shopify || Boolean(selected?.hasShopify));
+  const canUpload = !uploading && items.length > 0 && selectedMalls.length > 0 && Boolean(effectiveCode);
 
   const uploadOne = async (item: Item, index: number, mall: Mall): Promise<UploadResult> => {
     const form = new FormData();
-    form.append("file", item.file);
+    if (item.file) form.append("file", item.file);
+    else if (item.sourceUrl) form.append("sourceUrl", item.sourceUrl);
     form.append("mall", mall);
     form.append("index", String(index));
     if (selected) form.append("productId", selected.id);
@@ -177,7 +232,15 @@ export function BulkImageUploader() {
     try {
       const res = await fetch("/api/upload/bulk-image", { method: "POST", body: form });
       const json = await res.json();
-      return { itemKey: item.key, index, mall, ok: Boolean(json.ok), fileName: json.fileName, error: json.error };
+      return {
+        itemKey: item.key,
+        index,
+        mall,
+        ok: Boolean(json.ok),
+        fileName: json.fileName,
+        error: json.error,
+        standalone: Boolean(json.standalone),
+      };
     } catch (e) {
       return { itemKey: item.key, index, mall, ok: false, error: e instanceof Error ? e.message : String(e) };
     }
@@ -284,6 +347,19 @@ export function BulkImageUploader() {
             />
           </div>
         )}
+        <div className="flex items-center gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={loadCurrentImages}
+            disabled={!effectiveCode || loadingImages || uploading}
+          >
+            {loadingImages ? "読み込み中…" : "📥 現在の画像を読み込む（楽天）"}
+          </Button>
+          <span className="text-[11px] text-slate-400">
+            楽天に登録済みの画像を現在の並び順でリストへ読み込みます（差し替え・並べ替え・削除して再アップロード）
+          </span>
+        </div>
       </section>
 
       {/* アップロード先 */}
@@ -341,12 +417,13 @@ export function BulkImageUploader() {
               type="checkbox"
               checked={malls.shopify}
               onChange={(e) => setMalls((m) => ({ ...m, shopify: e.target.checked }))}
-              disabled={!selected?.hasShopify}
             />
             {MALL_LABEL.shopify}
-            {!selected?.hasShopify && (
-              <span className="text-[11px] text-slate-400">Shopify 連携済みの商品を選択すると使えます</span>
-            )}
+            <span className="text-[11px] text-slate-400">
+              {selected?.hasShopify
+                ? "連携済み: 商品メディアへ直接追加"
+                : "未連携: コンテンツ > ファイルへアップロード（後から商品に割り当て可能）"}
+            </span>
           </label>
         </div>
         <p className="text-[11px] text-slate-400">
@@ -387,6 +464,21 @@ export function BulkImageUploader() {
               }}
             />
           </div>
+          {/* 差し替え用の隠しファイル入力（行の「差替」ボタンから開く） */}
+          <input
+            ref={replaceInputRef}
+            type="file"
+            accept="image/*"
+            className="hidden"
+            onChange={(e) => {
+              const f = e.target.files?.[0];
+              if (f && f.type.startsWith("image/") && replaceTarget.current != null) {
+                replaceItem(replaceTarget.current, f);
+              }
+              replaceTarget.current = null;
+              e.target.value = "";
+            }}
+          />
 
           {items.length > 0 && (
             <ul className="space-y-1">
@@ -422,8 +514,22 @@ export function BulkImageUploader() {
                   <span className="w-6 text-center font-semibold text-slate-500">{idx + 1}</span>
                   {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={item.previewUrl} alt="" className="h-10 w-10 shrink-0 rounded object-cover" />
-                  <span className="min-w-0 flex-1 truncate text-xs text-slate-600">{item.file.name}</span>
+                  <span className="min-w-0 flex-1 truncate text-xs text-slate-600">
+                    {item.file ? item.file.name : `楽天現物: ${(item.sourceUrl ?? "").split("/").pop()}`}
+                  </span>
                   <span className="flex gap-0.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        replaceTarget.current = idx;
+                        replaceInputRef.current?.click();
+                      }}
+                      className="rounded border border-blue-200 px-1 text-xs text-blue-600"
+                      aria-label="差し替え"
+                      title="この位置の画像を別のファイルに差し替え"
+                    >
+                      差替
+                    </button>
                     <button
                       type="button"
                       onClick={() => move(idx, idx - 1)}
@@ -472,6 +578,7 @@ export function BulkImageUploader() {
               {results.map((r, i) => (
                 <p key={i} className={r.ok ? "text-emerald-700" : "text-red-600"}>
                   {r.ok ? "✓" : "✕"} {r.index}枚目 → {MALL_LABEL[r.mall]}
+                  {r.standalone ? "（コンテンツ > ファイルへ・商品未連携）" : ""}
                   {r.fileName ? `（${r.fileName}）` : ""}
                   {r.error ? `: ${r.error}` : ""}
                 </p>
