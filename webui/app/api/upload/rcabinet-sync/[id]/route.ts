@@ -5,6 +5,7 @@ import { buildCabinetFileName, validateCabinetFileName } from "@/lib/converters/
 import { buildRakutenManageNumber, buildImageLocations } from "@/lib/converters/rakuten-api";
 import { processForCabinet } from "@/lib/image/process";
 import { insertCabinetFile } from "@/lib/rakuten/cabinet-client";
+import { createQpsPacer, isQpsLimit } from "@/lib/rakuten/qps-retry";
 import { patchItem } from "@/lib/rakuten/item-client";
 import { getRakutenCredentialsFromEnv } from "@/lib/rakuten/credentials";
 import { DEFAULT_RAKUTEN_STORE, rakutenCabinetBase } from "@/lib/rakuten/store";
@@ -61,6 +62,9 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
 
   const uploaded: { index: number; fileName: string; publicUrl: string }[] = [];
   const failed: { index: number; error: string }[] = [];
+  // R-Cabinet は秒間リクエスト制限があり、無ウェイト連続だと数枚目から QPSLimit で落ちる。
+  // アップロード間隔を空け、QPSLimit 時は待って再試行する（260712修正依頼-3）。
+  const pace = createQpsPacer();
   for (const s of sources) {
     try {
       const target = buildCabinetFileName(product, { kind: "main", index: s.index });
@@ -80,13 +84,17 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
         continue;
       }
       const jpeg = await processForCabinet(buf, { kind: "main" });
-      const up = await insertCabinetFile(cred, {
-        folderId: target.folderId,
-        filePath: target.filePath,
-        fileName: target.name,
-        jpeg,
-        overWrite: true,
-      });
+      const up = await pace(
+        () =>
+          insertCabinetFile(cred, {
+            folderId: target.folderId,
+            filePath: target.filePath,
+            fileName: target.name,
+            jpeg,
+            overWrite: true,
+          }),
+        (r) => !r.ok && isQpsLimit(r.message),
+      );
       if (up.ok) {
         const publicUrl = `${rakutenCabinetBase(DEFAULT_RAKUTEN_STORE, target.folder)}/${target.filePath}`;
         uploaded.push({ index: s.index, fileName: target.filePath, publicUrl });
