@@ -155,18 +155,22 @@ export function buildRakutenPatchBody(
       if (s.jan_code !== v.jan_code) {
         vp.articleNumber = /^\d{13}$/.test(v.jan_code) ? { value: v.jan_code } : { exemptionReason: 3 };
       }
-      // 定期価格の変更（>0 への設定・変更のみ。0 への解除は patch で表現できないため送らない）
-      if (
-        ((s.subscription_base_price ?? 0) !== (v.subscription_base_price ?? 0) ||
-          (s.subscription_first_price ?? 0) !== (v.subscription_first_price ?? 0)) &&
-        (v.subscription_base_price ?? 0) > 0
-      ) {
-        vp.subscriptionPrice = {
-          basePrice: String(v.subscription_base_price),
-          ...((v.subscription_first_price ?? 0) > 0
-            ? { individualPrices: { firstPrice: String(v.subscription_first_price) } }
-            : {}),
-        };
+      // 定期価格の変更（>0 への設定・変更のみ。0 への解除は subscriptionPrice の null 削除仕様が
+      // 未確認のため送らず（資料§8）、skipped で「未反映」を運用者に明示する）。
+      const subPriceChanged =
+        (s.subscription_base_price ?? 0) !== (v.subscription_base_price ?? 0) ||
+        (s.subscription_first_price ?? 0) !== (v.subscription_first_price ?? 0);
+      if (subPriceChanged) {
+        if ((v.subscription_base_price ?? 0) > 0) {
+          vp.subscriptionPrice = {
+            basePrice: String(v.subscription_base_price),
+            ...((v.subscription_first_price ?? 0) > 0
+              ? { individualPrices: { firstPrice: String(v.subscription_first_price) } }
+              : {}),
+          };
+        } else {
+          skipped.push(`SKU[${key}].定期価格(0円への解除はpatch未対応・RMSで解除してください)`);
+        }
       }
       // patchはshipping objectをマージするため、モード切替時に旧キーが残らないようnull明示版を使う。
       if (variantShippingChanged(s, v)) vp.shipping = buildVariantShippingForPatch(v);
@@ -190,17 +194,19 @@ export function buildRakutenPatchBody(
     if (fields.has("shipping_type")) {
       variant.shipping = { postageIncluded: p.shipping_type === "送料無料" };
     }
-    // 定期価格（>0 への設定・変更のみ。0 への解除は features ボタン false で表現する）
-    if (
-      (fields.has("subscription_base_price") || fields.has("subscription_first_price")) &&
-      p.subscription_base_price > 0
-    ) {
-      variant.subscriptionPrice = {
-        basePrice: String(p.subscription_base_price),
-        ...(p.subscription_first_price > 0
-          ? { individualPrices: { firstPrice: String(p.subscription_first_price) } }
-          : {}),
-      };
+    // 定期価格（>0 への設定・変更のみ。定期無効化を伴う 0 は features ボタン false で表現し、
+    // 定期有効のまま価格だけ 0 にする編集は patch で表現できないため skipped で明示する）
+    if (fields.has("subscription_base_price") || fields.has("subscription_first_price")) {
+      if (p.subscription_base_price > 0) {
+        variant.subscriptionPrice = {
+          basePrice: String(p.subscription_base_price),
+          ...(p.subscription_first_price > 0
+            ? { individualPrices: { firstPrice: String(p.subscription_first_price) } }
+            : {}),
+        };
+      } else if (p.subscription_enabled) {
+        skipped.push("定期価格(0円への解除はpatch未対応・RMSで解除するか定期を無効化してください)");
+      }
     }
     if (Object.keys(variant).length > 0) {
       if (opts.includeAttributes) {
