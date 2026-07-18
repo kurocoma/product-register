@@ -83,35 +83,38 @@ webui/
 
 ## 1.5 API エンドポイント（`app/api/**/route.ts` を全列挙・25本）
 
-> 各行の詳細（メソッド・呼び出す lib・外部サービス）は `02-feature-ledger.md` の機能台帳と重複調査で扱う。ここでは網羅リストと系統を示す（確認済み: `find app/api -name route.ts`）。
+> 各行の詳細（呼び出す lib・重複関係）は `02-feature-ledger.md` の機能台帳と重複調査で扱う。網羅とメソッドは実測（`find app/api -name route.ts` ＋ `grep "export (async )?function (GET|POST|…)"` 各ファイル）。
+> **GET+POST の2本立ては「GET=dry-run プレビュー / POST=本実行」の共通パターン**（fetch・update・register 単品系）。
 
-| # | ルート | 系統 | 外部サービス（推定） |
-|---|---|---|---|
-| 1 | `api/fetch/[mall]/[id]` | 取込（モール現物→アプリ） | 楽天/Yahoo/Shopify |
-| 2 | `api/import/[mall]` | 取込（コード指定インポート） | 楽天/Yahoo/Shopify |
-| 3 | `api/update/[mall]/[id]` | 反映（部分更新） | 楽天/Yahoo/Shopify |
-| 4 | `api/register/rakuten/[id]` | 反映（新規登録・楽天） | 楽天 RMS |
-| 5 | `api/register/yahoo/[id]` | 反映（新規登録・Yahoo） | Yahoo |
-| 6 | `api/register/bulk/[mall]` | 反映（一括登録） | 楽天/Yahoo |
-| 7 | `api/products/[id]/price` | 反映（価格のみ更新） | 楽天/Yahoo |
-| 8 | `api/csv/[mall]/[id]` | CSV（単品） | Supabase のみ |
-| 9 | `api/csv/bulk` | CSV（一括・5形式ZIP） | Supabase のみ |
-| 10 | `api/upload/rcabinet` | 画像（楽天R-Cabinetへ） | 楽天 R-Cabinet |
-| 11 | `api/upload/rcabinet-sync/[id]` | 画像（取込画像→R-Cabinet同期） | 楽天 R-Cabinet |
-| 12 | `api/upload/yahoo` | 画像（Yahoo lib へ） | Yahoo |
-| 13 | `api/upload/yahoo-sync/[id]` | 画像（取込画像→Yahoo lib同期） | Yahoo |
-| 14 | `api/upload/bulk-image` | 画像（一括アップロード） | 楽天/Yahoo/Shopify |
-| 15 | `api/rakuten/item-images` | 楽天 商品画像取得 | 楽天 |
-| 16 | `api/rcabinet/folders` | R-Cabinet フォルダ一覧 | 楽天 R-Cabinet |
-| 17 | `api/migrate/rakuten-to-yahoo` | 移行（楽天→Yahoo一括） | 楽天＋Yahoo |
-| 18 | `api/masters/import/[source]` | マスタ取込（NE/Excel） | Supabase（pg 直結） |
-| 19 | `api/masters/related` | 関連商品抽出クエリ | Supabase |
-| 20 | `api/rule-audit` | ルール監査スキャン ※未コミット | Supabase |
-| 21 | `api/products/[id]/codex-normalize` | Codex 正規化提案 ※未コミット | Codex CLI |
-| 22 | `api/products/research-import` | 商品リサーチ取込 ※未コミット・**UI非経由** | Supabase（外部スキル起動） |
-| 23 | `api/auth/callback`(`app/auth/callback`) | 認証 | Supabase |
-| 24 | `api/auth/signout`(`app/auth/signout`) | 認証 | Supabase |
-| 25 | `api/auth/dev-autologin`(`app/auth/dev-autologin`) | 開発用自動ログイン | Supabase |
+| # | ルート | メソッド | 系統 | 外部サービス（推定） |
+|---|---|---|---|---|
+| 1 | `api/fetch/[mall]/[id]` | GET, POST | 取込（モール現物→アプリ） | 楽天/Yahoo/Shopify |
+| 2 | `api/import/[mall]` | POST | 取込（コード指定インポート） | 楽天/Yahoo/Shopify |
+| 3 | `api/update/[mall]/[id]` | GET, POST | 反映（部分更新） | 楽天/Yahoo/Shopify |
+| 4 | `api/register/rakuten/[id]` | GET, POST | 反映（新規登録・楽天） | 楽天 RMS |
+| 5 | `api/register/yahoo/[id]` | GET, POST | 反映（新規登録・Yahoo） | Yahoo |
+| 6 | `api/register/bulk/[mall]` | POST | 反映（一括登録） | 楽天/Yahoo |
+| 7 | `api/products/[id]/price` | POST | 反映（価格のみ更新） | 楽天/Yahoo |
+| 8 | `api/csv/[mall]/[id]` | GET | CSV（単品） | Supabase のみ |
+| 9 | `api/csv/bulk` | POST | CSV（一括・5形式ZIP） | Supabase のみ |
+| 10 | `api/upload/rcabinet` | POST | 画像（楽天R-Cabinetへ） | 楽天 R-Cabinet |
+| 11 | `api/upload/rcabinet-sync/[id]` | POST | 画像（取込画像→R-Cabinet同期） | 楽天 R-Cabinet |
+| 12 | `api/upload/yahoo` | POST | 画像（Yahoo lib へ） | Yahoo |
+| 13 | `api/upload/yahoo-sync/[id]` | POST | 画像（取込画像→Yahoo lib同期） | Yahoo |
+| 14 | `api/upload/bulk-image` | POST | 画像（一括アップロード） | 楽天/Yahoo/Shopify |
+| 15 | `api/rakuten/item-images` | GET | 楽天 商品画像取得 | 楽天 |
+| 16 | `api/rcabinet/folders` | GET | R-Cabinet フォルダ一覧 | 楽天 R-Cabinet |
+| 17 | `api/migrate/rakuten-to-yahoo` | POST | 移行（楽天→Yahoo一括） | 楽天＋Yahoo |
+| 18 | `api/masters/import/[source]` | POST | マスタ取込（NE/Excel） | Supabase（pg 直結） |
+| 19 | `api/masters/related` | POST | 関連商品抽出クエリ | Supabase |
+| 20 | `api/rule-audit` | GET | ルール監査スキャン | Supabase |
+| 21 | `api/products/[id]/codex-normalize` | POST | Codex 正規化提案 | Codex CLI |
+| 22 | `api/products/research-import` | POST | 商品リサーチ取込・**UI非経由** | Supabase（外部スキル起動） |
+| 23 | `api/auth/callback`(`app/auth/callback`) | GET | 認証 | Supabase |
+| 24 | `api/auth/signout`(`app/auth/signout`) | POST | 認証 | Supabase |
+| 25 | `api/auth/dev-autologin`(`app/auth/dev-autologin`) | GET | 開発用自動ログイン | Supabase |
+
+> 20〜22 は監査時点で未コミットだったが、**M0（コミット d477062）で確定済み**。
 
 - **route.ts 総数 = 25**（実測。上表の auth 3本を含む）。
 - **`research-import` は webui UI から呼ばれていない**（確認済み: `grep -rn research-import components app | grep fetch` = 0件）。呼び出し元は外部スキル `.agents/skills/product-research-autofill/`（確認済み）。→ **「未使用」と断定してはならない**外部連携エンドポイント。

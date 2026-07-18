@@ -7,6 +7,7 @@
 ## 5.1 現状の依存構造（実測サマリ）
 
 - `lib/product/schema`（`ProductInput`）が **共有核**。`lib/converters` 内だけで 32 箇所が import（`grep` 実測）。
+  ※測定条件を明記（再現用）: `grep -rl 'product/schema' webui/lib/converters --include='*.ts'`。32 は監査時点（コミット `aeccdcd`・テスト除く母数）の値。M0 でテスト12本を確定した後の 2026-07-18 再測ではテスト込みで converters 内 38 ファイル、`webui/lib` 全体では 71 ファイル・79 行。数値はコード変更で動くため、比較時は同一条件で再測すること。
 - 層状の主な向き（非テスト・確認済み）:
   `converters → product/schema, product/diff`（一方向）、`yahoo → converters`（一方向）、`register/migrate/rule-audit/csv → converters + product`、`rakuten/shopify/ne-master/image/supabase/history/template/autosave` は **他機能へ依存しない葉モジュール**。
 - **循環依存は非テストコードでは未検出**（`converters ↔ product`、`converters ↔ yahoo` はいずれも一方向。逆向きはテストファイルのみ）。ただし barrel/境界が無いため将来の循環は起きやすい → ルールで予防。

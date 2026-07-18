@@ -27,6 +27,28 @@
 | M12 | fetch/import 整理(D3) | 構造 | 実挙動差の確認後、共通パーサ化 | M9 | 中（要確認先行） |
 | M13 | 旧Python CLI 隔離 | 廃止 | `src/product_register/` 等を `legacy/` へ or 削除 | 運用ヒアリング | 中 |
 
+### 段階の依存関係（DAG）
+
+```mermaid
+graph LR
+  M0[M0 未コミット整理] --> M1[M1 ナビ再編]
+  M1 --> M2[M2 ヘルプ整合]
+  M0 --> M3[M3 葉barrel]
+  M3 --> M4[M4 lib/shared]
+  M4 --> M5[M5 feature barrel]
+  M5 --> M6[M6 層違反是正]
+  M5 --> M7[M7 カテゴリ統合]
+  M5 --> M8[M8 反映/画像/CSV 正本化]
+  M5 --> M10[M10 ProductForm 分割]
+  M5 --> M11[M11 masters タブ統合]
+  M8 --> M9[M9 命名・mall集約]
+  M9 --> M12[M12 fetch/import 整理]
+  Q1{{要確認: 実挙動差}} -.-> M12
+  Q2{{要確認: Python 運用}} -.-> M13[M13 旧CLI隔離]
+  style Q1 stroke-dasharray: 5 5
+  style Q2 stroke-dasharray: 5 5
+```
+
 ## 6.2 各段階の詳細（目的・作業・完了条件・ロールバック）
 
 ### M0 未コミット整理

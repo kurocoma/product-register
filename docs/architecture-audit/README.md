@@ -3,6 +3,36 @@
 > 作成日: 2026-07-18 ／ 対象コミット: `aeccdcd`（master）
 > 本監査は **分析・設計ドキュメントのみ**。アプリのコード（`webui/` 配下・既存 `docs/` のアプリ資料）は一切変更していない。
 > 事実には根拠ファイルパスを付け、確認できないものは「推測」「不明」「要追加確認」と明示している。
+> 付随変更は `.gitignore` のみ（監査成果物 `docs/architecture-audit/` を追跡対象にする例外行。コード外・可逆）。
+
+## 実施状況（2026-07-18 更新）
+
+監査完了後、移行計画 05 の **M0〜M6 を実施済み**（いずれも tsc / eslint / vitest 998 / next build 緑を確認してコミット）:
+
+| 段階 | コミット | 内容 |
+|---|---|---|
+| M0 | `d477062` | 未コミット機能一式（rule-audit / codex-normalize / research-import / 税率 / proxy 改称）を確定 |
+| M1 | `fa51354` | サイドナビを目的別6グループへ再編、「商品編集」→「新規作成」 |
+| M2 | `7222cf7` | ヘルプに「ルール監査」「画像一括アップロード」を追加しナビと整合 |
+| M3 | `a5c525f` | 葉モジュール7つ（rakuten/shopify/ne-master/image/history/template/autosave）に barrel |
+| M4 | `497115c` | `lib/shared/`（schema・utils の薄い re-export）新設 |
+| M5 | `c55c2b7` `cb39c9f` | feature 6フォルダに barrel ＋ API ルート 152 import を barrel 経由へ |
+| M6 | `50d8d32` | MigratePanel の mall 直参照解消（ui→mall 直import ゼロ） |
+| ステップ8 | `4232948` | `webui/AGENTS.md`（恒久ルール）＋ `webui/CLAUDE.md`（ポインタ）を実ファイル化 |
+
+**未着手**: M7（カテゴリ統合）/ M8（反映・画像・CSV 正本化）/ M9（命名・mall 集約）/ M10（ProductForm 分割）/ M11（masters タブ統合）/ M12（fetch・import 整理）/ M13（Python CLI 隔離）。M12・M13 は下記「要追加確認」の回答が前提。
+**components/hooks の barrel 差替も未着手**（クライアントバンドル境界の検討後に段階実施。`webui/AGENTS.md` の import ルール参照）。
+
+## 要追加確認（集約 — ユーザーへの質問リスト）
+
+各ドキュメントに散在する「要追加確認」を1箇所に集約する。回答が移行の前提になるもの:
+
+1. **旧 Python CLI（`src/product_register/`）は今も使っているか？**（定常バッチ・手動運用の有無）→ M13（隔離/削除)の前提
+2. **`proxy.ts` の未ログインリダイレクトを実機確認してよいか**（E2E 実行には dev サーバ＋Supabase 環境が必要）→ M0 完了条件の残り
+3. **`api/fetch`（既存商品への取込）と `api/import`（新規作成取込）の挙動差は意図どおりか** → M12（共通パーサ化）の前提
+4. **`codex-normalize` / `research-import` の運用位置づけ**（常用機能か実験機能か）→ ナビ・ヘルプでの扱いに影響
+5. **`/settings`（空実装）をナビに残すか、「準備中」表示にするか、非表示にするか**
+6. **`.loop/archive-*` / `.agents/` / `.claude/settings.json` / `.codex/` を git 管理するか**（現在 untracked のまま保留）
 
 ## この監査の読み方
 
