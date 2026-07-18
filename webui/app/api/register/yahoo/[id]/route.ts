@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getProduct, dbRowToProductInput } from "@/lib/product/repository";
-import { getYahooConfig } from "@/lib/yahoo/auth";
+import { getProduct, dbRowToProductInput } from "@/lib/product";
+import { getYahooConfig } from "@/lib/yahoo";
 import {
   dryRunYahooRegister,
   commitYahooRegister,
-} from "@/lib/register/yahoo-register-service";
+} from "@/lib/register";
 
 export const runtime = "nodejs";
 

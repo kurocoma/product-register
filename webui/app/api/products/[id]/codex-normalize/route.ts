@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
-import type { ProductInput } from "@/lib/product/schema";
+import type { ProductInput } from "@/lib/product";
 import {
   dbRowToProductInput,
   getProduct,
-} from "@/lib/product/repository";
-import { requestCodexRuleProposal } from "@/lib/rule-audit/codex-client";
+} from "@/lib/product";
+import { requestCodexRuleProposal } from "@/lib/rule-audit";
 import { createClient } from "@/lib/supabase/server";
 
 export const runtime = "nodejs";

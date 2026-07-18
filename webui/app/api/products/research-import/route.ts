@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { dbRowToProductInput, upsertProduct, type ProductRow } from "@/lib/product/repository";
+import { dbRowToProductInput, upsertProduct, type ProductRow } from "@/lib/product";
 import {
   diffResearchProduct,
   hashResearchImportPlan,
   parseResearchImportPayload,
   type ResearchImportExistingState,
-} from "@/lib/product/research-import";
+} from "@/lib/product";
 
 export const runtime = "nodejs";
 

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { dbRowToProductInput } from "@/lib/product/repository";
-import { detectRuleViolation } from "@/lib/rule-audit/detect";
-import { fetchAllProductRows } from "@/lib/rule-audit/rule-audit-query";
+import { dbRowToProductInput } from "@/lib/product";
+import { detectRuleViolation } from "@/lib/rule-audit";
+import { fetchAllProductRows } from "@/lib/rule-audit";
 import { createClient } from "@/lib/supabase/server";
 
 export async function GET() {

@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getProduct, dbRowToProductInput } from "@/lib/product/repository";
-import { buildYahooLibFileName, validateYahooFileName } from "@/lib/yahoo/lib-path";
-import { processForCabinet } from "@/lib/image/process";
-import { getYahooConfig, getYahooAccessToken } from "@/lib/yahoo/auth";
-import { uploadLibImage } from "@/lib/yahoo/lib-image-client";
+import { getProduct, dbRowToProductInput } from "@/lib/product";
+import { buildYahooLibFileName, validateYahooFileName } from "@/lib/yahoo";
+import { processForCabinet } from "@/lib/image";
+import { getYahooConfig, getYahooAccessToken } from "@/lib/yahoo";
+import { uploadLibImage } from "@/lib/yahoo";
 
 // sharp(native) と FormData/Blob のため Node ランタイム必須
 export const runtime = "nodejs";

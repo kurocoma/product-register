@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { parseTokens, resolveTokens, assembleRelated } from "@/lib/ne-master/related";
-import type { ItemLite, CompRow, MallRow } from "@/lib/ne-master/related";
+import { parseTokens, resolveTokens, assembleRelated } from "@/lib/ne-master";
+import type { ItemLite, CompRow, MallRow } from "@/lib/ne-master";
 
 export const runtime = "nodejs";
 

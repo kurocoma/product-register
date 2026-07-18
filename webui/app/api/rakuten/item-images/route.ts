@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getProduct, dbRowToProductInput } from "@/lib/product/repository";
-import { getItem } from "@/lib/rakuten/item-client";
-import { parseRakutenItem } from "@/lib/converters/rakuten-item-parser";
-import { buildRakutenManageNumber } from "@/lib/converters/rakuten-api";
-import { getRakutenCredentialsFromEnv } from "@/lib/rakuten/credentials";
+import { getProduct, dbRowToProductInput } from "@/lib/product";
+import { getItem } from "@/lib/rakuten";
+import { parseRakutenItem } from "@/lib/converters";
+import { buildRakutenManageNumber } from "@/lib/converters";
+import { getRakutenCredentialsFromEnv } from "@/lib/rakuten";
 
 /** GET ?productId={DB商品ID} または ?code={商品管理番号} =
  * 楽天に登録済みの商品画像URLを現在の並び順で返す（読み取りのみ）。

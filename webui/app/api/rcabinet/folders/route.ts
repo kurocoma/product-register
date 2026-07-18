@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getRakutenCredentialsFromEnv } from "@/lib/rakuten/credentials";
-import { listCabinetFolders } from "@/lib/rakuten/cabinet-client";
-import { RCABINET_FOLDER } from "@/lib/rakuten/store";
+import { getRakutenCredentialsFromEnv } from "@/lib/rakuten";
+import { listCabinetFolders } from "@/lib/rakuten";
+import { RCABINET_FOLDER } from "@/lib/rakuten";
 
 export const runtime = "nodejs";
 

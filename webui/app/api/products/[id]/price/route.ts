@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getProduct, dbRowToProductInput, upsertProduct } from "@/lib/product/repository";
+import { getProduct, dbRowToProductInput, upsertProduct } from "@/lib/product";
 
 export const runtime = "nodejs";
 

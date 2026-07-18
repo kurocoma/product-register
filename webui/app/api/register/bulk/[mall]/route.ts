@@ -1,19 +1,19 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getProduct, dbRowToProductInput } from "@/lib/product/repository";
-import { getRakutenCredentialsFromEnv } from "@/lib/rakuten/credentials";
-import { getYahooConfig } from "@/lib/yahoo/auth";
+import { getProduct, dbRowToProductInput } from "@/lib/product";
+import { getRakutenCredentialsFromEnv } from "@/lib/rakuten";
+import { getYahooConfig } from "@/lib/yahoo";
 import {
   dryRunRakutenRegister,
   commitRakutenRegister,
-} from "@/lib/register/rakuten-register-service";
+} from "@/lib/register";
 import {
   dryRunYahooRegister,
   commitYahooRegister,
   reserveYahooPublish,
-} from "@/lib/register/yahoo-register-service";
-import { toDryRunItemResult, toErrorItemResult, buildBulkResponse } from "@/lib/register/bulk-plan";
-import type { BulkItemResult, Mall } from "@/lib/register/types";
+} from "@/lib/register";
+import { toDryRunItemResult, toErrorItemResult, buildBulkResponse } from "@/lib/register";
+import type { BulkItemResult, Mall } from "@/lib/register";
 
 export const runtime = "nodejs";
 

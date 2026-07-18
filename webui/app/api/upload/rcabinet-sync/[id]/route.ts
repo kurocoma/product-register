@@ -1,14 +1,14 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getProduct, dbRowToProductInput, upsertProduct } from "@/lib/product/repository";
-import { buildCabinetFileName, validateCabinetFileName } from "@/lib/converters/cabinet-path";
-import { buildRakutenManageNumber, buildImageLocations } from "@/lib/converters/rakuten-api";
-import { processForCabinet } from "@/lib/image/process";
-import { insertCabinetFile } from "@/lib/rakuten/cabinet-client";
-import { createQpsPacer, isQpsLimit } from "@/lib/rakuten/qps-retry";
-import { patchItem } from "@/lib/rakuten/item-client";
-import { getRakutenCredentialsFromEnv } from "@/lib/rakuten/credentials";
-import { DEFAULT_RAKUTEN_STORE, rakutenCabinetBase } from "@/lib/rakuten/store";
+import { getProduct, dbRowToProductInput, upsertProduct } from "@/lib/product";
+import { buildCabinetFileName, validateCabinetFileName } from "@/lib/converters";
+import { buildRakutenManageNumber, buildImageLocations } from "@/lib/converters";
+import { processForCabinet } from "@/lib/image";
+import { insertCabinetFile } from "@/lib/rakuten";
+import { createQpsPacer, isQpsLimit } from "@/lib/rakuten";
+import { patchItem } from "@/lib/rakuten";
+import { getRakutenCredentialsFromEnv } from "@/lib/rakuten";
+import { DEFAULT_RAKUTEN_STORE, rakutenCabinetBase } from "@/lib/rakuten";
 
 // sharp(native) と URL fetch のため Node ランタイム必須
 export const runtime = "nodejs";

@@ -1,23 +1,23 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getProduct, dbRowToProductInput } from "@/lib/product/repository";
-import type { ProductInput } from "@/lib/product/schema";
-import { buildCabinetFileName, validateCabinetFileName } from "@/lib/converters/cabinet-path";
-import { processForCabinet } from "@/lib/image/process";
-import { insertCabinetFile } from "@/lib/rakuten/cabinet-client";
-import { createQpsPacer, isQpsLimit } from "@/lib/rakuten/qps-retry";
-import { getRakutenCredentialsFromEnv } from "@/lib/rakuten/credentials";
-import { DEFAULT_RAKUTEN_STORE, RCABINET_FOLDER, rakutenCabinetBase } from "@/lib/rakuten/store";
-import { getYahooConfig, getYahooAccessToken } from "@/lib/yahoo/auth";
-import { uploadLibImage } from "@/lib/yahoo/lib-image-client";
-import { uploadItemImage } from "@/lib/yahoo/item-image-client";
+import { getProduct, dbRowToProductInput } from "@/lib/product";
+import type { ProductInput } from "@/lib/product";
+import { buildCabinetFileName, validateCabinetFileName } from "@/lib/converters";
+import { processForCabinet } from "@/lib/image";
+import { insertCabinetFile } from "@/lib/rakuten";
+import { createQpsPacer, isQpsLimit } from "@/lib/rakuten";
+import { getRakutenCredentialsFromEnv } from "@/lib/rakuten";
+import { DEFAULT_RAKUTEN_STORE, RCABINET_FOLDER, rakutenCabinetBase } from "@/lib/rakuten";
+import { getYahooConfig, getYahooAccessToken } from "@/lib/yahoo";
+import { uploadLibImage } from "@/lib/yahoo";
+import { uploadItemImage } from "@/lib/yahoo";
 import {
   buildYahooLibFileNameByCode,
   buildYahooItemImageFileName,
   validateYahooFileName,
-} from "@/lib/yahoo/lib-path";
-import { getShopifyConfig } from "@/lib/shopify/auth";
-import { uploadProductImage, uploadStoreFile } from "@/lib/shopify/media-client";
+} from "@/lib/yahoo";
+import { getShopifyConfig } from "@/lib/shopify";
+import { uploadProductImage, uploadStoreFile } from "@/lib/shopify";
 
 // sharp(native) と FormData/Blob を使うため Node ランタイム必須
 export const runtime = "nodejs";

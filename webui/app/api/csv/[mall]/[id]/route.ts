@@ -4,13 +4,13 @@ import {
   dbRowToProductInput,
   getProduct,
   listProducts,
-} from "@/lib/product/repository";
-import { yahooItemsForProduct } from "@/lib/product/yahoo-split";
-import { RakutenConverter, manageNumberOf } from "@/lib/converters/rakuten";
-import { NEConverter } from "@/lib/converters/ne";
-import { YahooConverter } from "@/lib/converters/yahoo";
-import { ShopifyConverter } from "@/lib/converters/shopify";
-import { writeCsv } from "@/lib/csv/writer";
+} from "@/lib/product";
+import { yahooItemsForProduct } from "@/lib/product";
+import { RakutenConverter, manageNumberOf } from "@/lib/converters";
+import { NEConverter } from "@/lib/converters";
+import { YahooConverter } from "@/lib/converters";
+import { ShopifyConverter } from "@/lib/converters";
+import { writeCsv } from "@/lib/csv";
 
 const FILENAMES: Record<string, string> = {
   rakuten: "rakuten_normal_item.csv",

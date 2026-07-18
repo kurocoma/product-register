@@ -1,25 +1,25 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { upsertProduct } from "@/lib/product/repository";
-import { recordHistory } from "@/lib/history/recorder";
-import { getRakutenCredentialsFromEnv } from "@/lib/rakuten/credentials";
-import { getItem as getRakutenItem, searchManageNumberBySku } from "@/lib/rakuten/item-client";
-import { parseRakutenItem, parseRakutenVariants } from "@/lib/converters/rakuten-item-parser";
-import { buildImportedProduct } from "@/lib/converters/mall-import";
-import { fetchYahooCategoryMapping } from "@/lib/product/category-mapping";
-import { fetchYahooPostageSet, fetchYahooLeadTime } from "@/lib/product/shipping-mapping";
-import { getYahooConfig, getYahooAccessToken } from "@/lib/yahoo/auth";
+import { upsertProduct } from "@/lib/product";
+import { recordHistory } from "@/lib/history";
+import { getRakutenCredentialsFromEnv } from "@/lib/rakuten";
+import { getItem as getRakutenItem, searchManageNumberBySku } from "@/lib/rakuten";
+import { parseRakutenItem, parseRakutenVariants } from "@/lib/converters";
+import { buildImportedProduct } from "@/lib/converters";
+import { fetchYahooCategoryMapping } from "@/lib/product";
+import { fetchYahooPostageSet, fetchYahooLeadTime } from "@/lib/product";
+import { getYahooConfig, getYahooAccessToken } from "@/lib/yahoo";
 import {
   buildYahooEditItemParams,
   validateEditItemParams,
   detectYahooTruncations,
-} from "@/lib/yahoo/item-mapper";
-import { editItem, setStock, reservePublish } from "@/lib/yahoo/item-client";
-import { buildYahooItemImageUrls } from "@/lib/converters/image-url";
-import { buildYahooLibFileName, validateYahooFileName } from "@/lib/yahoo/lib-path";
-import { processForCabinet } from "@/lib/image/process";
-import { uploadLibImage } from "@/lib/yahoo/lib-image-client";
-import type { ProductInput } from "@/lib/product/schema";
+} from "@/lib/yahoo";
+import { editItem, setStock, reservePublish } from "@/lib/yahoo";
+import { buildYahooItemImageUrls } from "@/lib/converters";
+import { buildYahooLibFileName, validateYahooFileName } from "@/lib/yahoo";
+import { processForCabinet } from "@/lib/image";
+import { uploadLibImage } from "@/lib/yahoo";
+import type { ProductInput } from "@/lib/product";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { parseManageNumbers, runItems, aggregate } from "@/lib/migrate";
 import { makePerItemExecutor, type ExecutorDeps, type MigrateRewrites } from "@/lib/migrate/executor";

@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getProduct, dbRowToProductInput } from "@/lib/product/repository";
-import { getRakutenCredentialsFromEnv } from "@/lib/rakuten/credentials";
+import { getProduct, dbRowToProductInput } from "@/lib/product";
+import { getRakutenCredentialsFromEnv } from "@/lib/rakuten";
 import {
   dryRunRakutenRegister,
   commitRakutenRegister,
-} from "@/lib/register/rakuten-register-service";
+} from "@/lib/register";
 
 export const runtime = "nodejs";
 

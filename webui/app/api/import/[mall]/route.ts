@@ -1,17 +1,17 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { upsertProduct } from "@/lib/product/repository";
-import type { ProductInput } from "@/lib/product/schema";
-import { getRakutenCredentialsFromEnv } from "@/lib/rakuten/credentials";
-import { getItem as getRakutenItem, searchManageNumberBySku } from "@/lib/rakuten/item-client";
-import { parseRakutenItem, parseRakutenVariants } from "@/lib/converters/rakuten-item-parser";
-import { getYahooConfig, getYahooAccessToken } from "@/lib/yahoo/auth";
-import { getItem as getYahooItem } from "@/lib/yahoo/item-client";
-import { parseYahooItem } from "@/lib/converters/yahoo-item-parser";
-import { getShopifyConfig } from "@/lib/shopify/auth";
-import { getProduct as getShopifyProduct, toProductGid } from "@/lib/shopify/product-client";
-import { parseShopifyItem } from "@/lib/converters/shopify-item-parser";
-import { buildImportedProduct } from "@/lib/converters/mall-import";
+import { upsertProduct } from "@/lib/product";
+import type { ProductInput } from "@/lib/product";
+import { getRakutenCredentialsFromEnv } from "@/lib/rakuten";
+import { getItem as getRakutenItem, searchManageNumberBySku } from "@/lib/rakuten";
+import { parseRakutenItem, parseRakutenVariants } from "@/lib/converters";
+import { getYahooConfig, getYahooAccessToken } from "@/lib/yahoo";
+import { getItem as getYahooItem } from "@/lib/yahoo";
+import { parseYahooItem } from "@/lib/converters";
+import { getShopifyConfig } from "@/lib/shopify";
+import { getProduct as getShopifyProduct, toProductGid } from "@/lib/shopify";
+import { parseShopifyItem } from "@/lib/converters";
+import { buildImportedProduct } from "@/lib/converters";
 
 export const runtime = "nodejs";
 

@@ -1,11 +1,11 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getProduct, dbRowToProductInput } from "@/lib/product/repository";
-import { buildCabinetFileName, validateCabinetFileName } from "@/lib/converters/cabinet-path";
-import { processForCabinet } from "@/lib/image/process";
-import { insertCabinetFile } from "@/lib/rakuten/cabinet-client";
-import { getRakutenCredentialsFromEnv } from "@/lib/rakuten/credentials";
-import { DEFAULT_RAKUTEN_STORE, rakutenCabinetBase } from "@/lib/rakuten/store";
+import { getProduct, dbRowToProductInput } from "@/lib/product";
+import { buildCabinetFileName, validateCabinetFileName } from "@/lib/converters";
+import { processForCabinet } from "@/lib/image";
+import { insertCabinetFile } from "@/lib/rakuten";
+import { getRakutenCredentialsFromEnv } from "@/lib/rakuten";
+import { DEFAULT_RAKUTEN_STORE, rakutenCabinetBase } from "@/lib/rakuten";
 
 // sharp(native) と FormData/Blob を使うため Node ランタイム必須（Edge不可）
 export const runtime = "nodejs";
