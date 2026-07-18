@@ -41,12 +41,14 @@ const SCREEN_TOC = [
   { id: "screen-products", label: "商品一覧" },
   { id: "screen-product-edit", label: "商品編集" },
   { id: "screen-bulk-register", label: "一括登録" },
+  { id: "screen-bulk-images", label: "画像一括アップロード" },
   { id: "screen-migrate", label: "楽天→Yahoo 一括移行" },
   { id: "screen-related-import", label: "関連商品（セット）取込" },
   { id: "screen-csv", label: "CSV ダウンロード" },
   { id: "screen-templates", label: "テンプレート管理" },
   { id: "screen-masters", label: "マスタ取込" },
   { id: "screen-masters-related", label: "関連商品抽出" },
+  { id: "screen-rule-audit", label: "ルール監査" },
   { id: "screen-history", label: "作業履歴" },
   { id: "screen-settings", label: "設定" },
 ];
@@ -145,6 +147,16 @@ export default function HelpPage() {
         <p className="text-slate-500">💡 失敗した行があっても途中で止まらず、失敗した分だけ後から再実行できます。</p>
       </HelpSection>
 
+      <HelpSection id="screen-bulk-images" title="🖼 画像一括アップロード">
+        <p>複数の商品画像をまとめてモール（楽天 R-Cabinet / Yahoo / Shopify）へアップロードする画面です。</p>
+        <ol className="list-decimal list-inside space-y-1">
+          <li>画像ファイルをドラッグ＆ドロップで取り込む（ファイル名から商品を自動判定）</li>
+          <li>商品ごとに並び順を確認・入れ替えする</li>
+          <li>アップロード先のモールを選んで実行する</li>
+        </ol>
+        <p className="text-slate-500">💡 楽天に登録済みの商品は、現在の画像を読み込んでから並び替え・差し替えできます。1商品だけなら商品編集画面の画像パネルでも同じことができます。</p>
+      </HelpSection>
+
       <HelpSection id="screen-migrate" title="🚚 楽天→Yahoo 一括移行">
         <p>楽天に登録済みの商品を取り込んで Yahoo 向けに変換し、まとめて Yahoo へ登録する画面です。</p>
         <ol className="list-decimal list-inside space-y-1">
@@ -193,6 +205,15 @@ export default function HelpPage() {
       <HelpSection id="screen-masters-related" title="🔎 関連商品抽出">
         <p>取り込んだマスタから「一緒に見直すべき関連商品」を探す画面です。</p>
         <p>例えば単品を値上げするとき、その単品を含むセット商品を漏れなく洗い出せます。値上げ・価格改定の下調べに使ってください。</p>
+      </HelpSection>
+
+      <HelpSection id="screen-rule-audit" title="🧭 ルール監査">
+        <p>登録済みの商品が命名・説明文などの社内ルールに合っているかを一括チェックする画面です。出品前の点検に使ってください。</p>
+        <ol className="list-decimal list-inside space-y-1">
+          <li>画面を開くと全商品がスキャンされ、ルール違反のある商品が理由付きで一覧表示される</li>
+          <li>行のリンクから商品編集画面を開いて修正する</li>
+          <li>商品編集のモール別パネルでは、AI（Codex）による修正案の提案も使える</li>
+        </ol>
       </HelpSection>
 
       <HelpSection id="screen-history" title="🕒 作業履歴">
