@@ -13,11 +13,11 @@
 | # | 段階 | 種別 | 主対象 | 依存/前提 | リスク |
 |---|---|---|---|---|---|
 | M0 | 未コミット整理 | 衛生 | `proxy.ts` コミット、`middleware.ts` 削除確定、未コミット新機能の確定 | なし | 低 |
-| M1 | ナビ再グルーピング | UX | `SideNav.tsx`（6グループ化）、ラベル修正 | なし | 低 |
+| M1 | ナビ再グルーピング | UX | `SideNav.tsx`（6グループ化）、ラベル修正 | M0（作業ツリー確定後） | 低 |
 | M2 | ヘルプ整合 | UX | `help/page.tsx` に rule-audit/bulk-images 追加、settings 明記 | M1 | 低 |
-| M3 | 葉モジュール barrel | 構造 | `rakuten/ shopify/ ne-master/ image/ supabase/ history/ template/ autosave/` に `index.ts` | なし | 低 |
+| M3 | 葉モジュール barrel | 構造 | `rakuten/ shopify/ ne-master/ image/ history/ template/ autosave/` に `index.ts`（`supabase/` は server/client 境界混在のため対象外 — `webui/AGENTS.md` の例外規定） | M0（作業ツリー確定後） | 低 |
 | M4 | `lib/shared/` 新設 | 構造 | `schema.ts`・`utils.ts` を re-export 昇格 | M3 | 中 |
-| M5 | feature barrel | 構造 | `product/ converters/ register/ migrate/ rule-audit/ csv/ preview/` に `index.ts`＋import差替 | M4 | 中 |
+| M5 | feature barrel | 構造 | `product/ converters/ register/ rule-audit/ csv/ yahoo/` に `index.ts`＋API ルート import 差替（`migrate/` は既存 barrel を尊重。`preview/`＝components 側と components/hooks の差替は未実施・M8 以降で検討） | M4 | 中 |
 | M6 | 層違反是正 | 構造 | `MigratePanel` の mall 直import を barrel 経由へ | M5 | 低 |
 | M7 | カテゴリ支援統合(D1) | 構造 | `category-assist/autofill/mapping` → `lib/product/category/` | M5 | 中 |
 | M8 | 反映/画像/CSV ロジック正本化(D2) | 構造 | `lib/register`・`lib/image`・`lib/csv` を単品/一括の唯一の正本に | M5 | 中〜高 |

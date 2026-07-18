@@ -8,7 +8,7 @@
 | 追加するもの | 置き場所 | 禁止 |
 |---|---|---|
 | 画面（ルート） | `app/(main)/<route>/page.tsx`（認証必須）。UI 本体は `components/<feature>/` | `app/` に業務ロジック本体 |
-| API | `app/api/<系統>/…/route.ts`。系統は `fetch`/`import`/`update`/`register`/`upload`/`csv`/`migrate`/`masters` を踏襲 | 新系統名を独断で増やす |
+| API | `app/api/<系統>/…/route.ts`。系統は既存12系統（`fetch`/`import`/`update`/`register`/`upload`/`csv`/`migrate`/`masters`/`products`/`rakuten`/`rcabinet`/`rule-audit`。全ルートは `../docs/architecture-audit/01` §1.5）を踏襲 | 新系統名を独断で増やす |
 | ドメインロジック | `lib/<feature>/`（`product`/`converters`/`register`/`migrate`/`rule-audit`/`csv`/`ne-master` 等） | `components/`・`app/` にロジック本体 |
 | モール外部API呼び出し | `lib/rakuten/`・`lib/yahoo/`・`lib/shopify/` のクライアント層のみ | components/route から直接 fetch |
 | DB アクセス | `lib/product/repository.ts` 等の repository、または `lib/supabase/` 経由 | コンポーネントから任意テーブル直クエリ（読取専用の Server Component を除く） |

@@ -148,13 +148,13 @@ export default function HelpPage() {
       </HelpSection>
 
       <HelpSection id="screen-bulk-images" title="🖼 画像一括アップロード">
-        <p>複数の商品画像をまとめてモール（楽天 R-Cabinet / Yahoo / Shopify）へアップロードする画面です。</p>
+        <p>1つの商品の画像をまとめてモール（楽天 R-Cabinet / Yahoo / Shopify）へアップロードする画面です。1回の実行で扱えるのは1商品です。</p>
         <ol className="list-decimal list-inside space-y-1">
-          <li>画像ファイルをドラッグ＆ドロップで取り込む（ファイル名から商品を自動判定）</li>
-          <li>商品ごとに並び順を確認・入れ替えする</li>
-          <li>アップロード先のモールを選んで実行する</li>
+          <li>対象の商品を検索で選ぶ（または商品コードを直接入力する）</li>
+          <li>画像ファイルをドラッグ＆ドロップで取り込み、並び順を確認・入れ替えする</li>
+          <li>アップロード先のモールを選んで実行する（アップロード後の画像名は商品コードから自動で決まる）</li>
         </ol>
-        <p className="text-slate-500">💡 楽天に登録済みの商品は、現在の画像を読み込んでから並び替え・差し替えできます。1商品だけなら商品編集画面の画像パネルでも同じことができます。</p>
+        <p className="text-slate-500">💡 楽天に登録済みの商品は、現在の画像を読み込んでから並び替え・差し替えできます。商品編集画面の画像パネルでも同じことができます。</p>
       </HelpSection>
 
       <HelpSection id="screen-migrate" title="🚚 楽天→Yahoo 一括移行">

@@ -8,12 +8,14 @@ import { cn } from "@/lib/utils";
  * - screen-products       … 商品一覧
  * - screen-product-edit   … 商品編集
  * - screen-bulk-register  … 一括登録
+ * - screen-bulk-images    … 画像一括アップロード
  * - screen-migrate        … 楽天→Yahoo 一括移行
  * - screen-related-import … 関連商品（セット）取込
  * - screen-csv            … CSV ダウンロード
  * - screen-templates      … テンプレート管理
  * - screen-masters        … マスタ取込
  * - screen-masters-related … 関連商品抽出
+ * - screen-rule-audit     … ルール監査
  * - screen-history        … 作業履歴
  * - screen-settings       … 設定
  * よくある失敗: fail-required（必須項目不足）/ fail-yahoo-image（it-14091 画像エラー）/

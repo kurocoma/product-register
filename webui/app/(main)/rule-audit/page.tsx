@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import { HelpLink } from "@/components/help/HelpLink";
 import type { RuleViolationReason } from "@/lib/rule-audit/detect";
 
 type AuditedProduct = {
@@ -58,7 +59,10 @@ export default function RuleAuditPage() {
     <main className="space-y-6 p-6">
       <div className="flex flex-wrap items-end justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">ルール監査</h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold text-slate-900">ルール監査</h1>
+            <HelpLink anchor="screen-rule-audit" />
+          </div>
           <p className="mt-1 text-sm text-slate-500">
             PC用販売説明文と楽天基準の画像ファイル名を商品ごとに確認します。
           </p>

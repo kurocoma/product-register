@@ -13,7 +13,7 @@ AI コーディングエージェント（Claude Code / Codex 等）が本リポ
 | 追加するもの | 置き場所 | 禁止 |
 |---|---|---|
 | 画面（ルート） | `app/(main)/<route>/page.tsx`（認証必須）。UI は `components/<feature>/` へ | `app/` に業務ロジックを書く |
-| API | `app/api/<系統>/…/route.ts`。系統は `fetch`/`import`/`update`/`register`/`upload`/`csv`/`migrate`/`masters` を踏襲 | 新しい系統名を独断で増やす |
+| API | `app/api/<系統>/…/route.ts`。系統は既存12系統（`fetch`/`import`/`update`/`register`/`upload`/`csv`/`migrate`/`masters`/`products`/`rakuten`/`rcabinet`/`rule-audit`。01 §1.5 に全列挙）を踏襲 | 新しい系統名を独断で増やす |
 | ドメインロジック | `lib/<feature>/`（`converters`/`register`/`migrate`/`product`/`rakuten`/`yahoo`/`shopify`/`ne-master` 等） | `components/` や `app/` にロジック本体を書く |
 | 外部API呼び出し | `lib/<mall>/`（`rakuten`/`yahoo`/`shopify`）のクライアント層のみ | `components`/`app`/`converters` から直接 fetch する |
 | DB アクセス | `lib/product/repository.ts` 等の repository、または `lib/supabase/` 経由 | コンポーネントから任意テーブルを直接クエリ（読取の Server Component 除く） |
