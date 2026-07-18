@@ -11,6 +11,9 @@ logs/*.txt
 docs/*
 !docs/superpowers/
 !docs/superpowers/**
+# アーキテクチャ監査（分析・設計ドキュメント）は追跡対象
+!docs/architecture-audit/
+!docs/architecture-audit/**
 
 # 旧 plans/plan.md (Phase 1 全体計画書) は git 管理外
 # docs/superpowers/plans/ は追跡対象 (上のルールで !docs/superpowers/** 済み)
@@ -21,3 +24,13 @@ docs/*
 validation/runs/*
 !validation/runs/.gitkeep
 validation/archive/
+
+# ハーネス実行時の生成物（セッション状態・一時ファイル・HTMLレポート）は管理外
+# ※ .agents/ .claude/ .codex/ .loop/archive-* は意図確認まで untracked のまま残す（M0 参照）
+.mso/
+webui/.mso/
+.tmp/
+/outputs/
+/eval-loop-report.html
+/loop-progress.html
+/question-dashboard.html
