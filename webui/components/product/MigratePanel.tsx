@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { countYahooField } from "@/lib/yahoo/item-mapper";
+import { countYahooField } from "@/lib/migrate";
 
 /** 文字数オーバーで切り詰められる項目（route の FieldTruncation と同形）。 */
 type Truncation = {
