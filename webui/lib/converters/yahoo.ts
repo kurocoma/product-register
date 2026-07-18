@@ -99,9 +99,10 @@ export class YahooConverter implements Converter {
     const v = productVariants(p)[0];
     // selling_price / display_price は税抜（全モール統一）。Yahoo の price / original-price は税込のため
     // 送信時に税込へ変換する（取込側 parseYahooItem と対称。lib/converters/yahoo-tax.ts）。
-    const taxInclusive = String(yahooTaxInclusive(v.selling_price, v.tax_rate));
-    const displayInclusive = String(yahooTaxInclusive(variantDisplayPrice(p, v), v.tax_rate));
-    const taxrateType = String(v.tax_rate / 100);
+    // 税率は商品レベル(p.tax_rate)が正（variant側は古い値が残ることがある。260715修正）。
+    const taxInclusive = String(yahooTaxInclusive(v.selling_price, p.tax_rate));
+    const displayInclusive = String(yahooTaxInclusive(variantDisplayPrice(p, v), p.tax_rate));
+    const taxrateType = String(p.tax_rate / 100);
     const caption = buildCaption(v.ne_code, p.image_count, p.description_pc);
     const explanation = buildExplanation(p.free1, p.description_pc);
     const groupingId = resolveGroupingId(v.ne_code, p.yahoo_grouping_enabled);
@@ -150,7 +151,7 @@ export class YahooConverter implements Converter {
     if (p.yahoo_subscription_type !== 0) {
       row["subscription-type"] = String(p.yahoo_subscription_type);
       row["subscription-price"] =
-        p.yahoo_subscription_price > 0 ? String(yahooTaxInclusive(p.yahoo_subscription_price, v.tax_rate)) : "";
+        p.yahoo_subscription_price > 0 ? String(yahooTaxInclusive(p.yahoo_subscription_price, p.tax_rate)) : "";
       row["subscription-group-index"] =
         p.yahoo_subscription_group_index > 0 ? String(p.yahoo_subscription_group_index) : "";
       row["subscription-recommended-cycle"] = p.yahoo_subscription_recommended_cycle;

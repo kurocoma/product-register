@@ -28,7 +28,8 @@ export function yahooItemsForProduct(p: ProductInput): ProductInput[] {
     selling_price: v.selling_price,
     // SKU別の表示価格（二重価格）。未設定なら 0 = 販売価格連動（フラット商品と同じ規則）
     display_price: v.display_price && v.display_price > 0 ? v.display_price : 0,
-    tax_rate: v.tax_rate,
+    // 税率は商品レベルが正（variant側は古い値が残ることがある。260715修正）。
+    tax_rate: p.tax_rate,
     quantity: v.quantity,
     shipping_type: v.shipping_type,
     product_type: v.quantity === 1 ? ("単品" as const) : ("セット商品" as const),

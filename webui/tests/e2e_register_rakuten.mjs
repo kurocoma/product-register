@@ -20,7 +20,7 @@ let fail = 0;
 const check = (l, c, d) => { if (!c) fail++; console.log(`${c ? "✅" : "❌"} ${l}${d ? "  " + d : ""}`); };
 
 // テスト用: maker=zzz, jan末尾4桁=9996 → manageNumber=zzz-9996
-const MAKER = "zzz", JAN = "4955028009996"; // 末尾4桁9996。チェックディジット不問(exemptionReasonになる)
+const MAKER = "zzz";
 const NE = "zzz-9996-1";
 
 // --- 0) マッパー ユニット検証 ---

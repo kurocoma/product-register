@@ -1,11 +1,24 @@
 "use client";
 
 import { useState } from "react";
+import type { CodexRuleProposal } from "@/lib/rule-audit/codex-client";
+import type { ProductFormApi } from "./ProductForm";
+import {
+  CodexProposalDiff,
+  type CodexProposalCurrent,
+} from "./CodexProposalDiff";
 
 type Mall = "rakuten" | "yahoo" | "shopify";
 const MALL_LABEL: Record<Mall, string> = { rakuten: "楽天", yahoo: "Yahoo", shopify: "Shopify" };
 type Changed = { field: string; before: unknown; after: unknown };
 type DiffPreview = { changedFields: Changed[]; skipped: string[]; advanced: string[]; hasChanges: boolean; key: string };
+type CodexNormalizeResponse =
+  | {
+      ok: true;
+      proposal: CodexRuleProposal;
+      reference_product_id: string;
+    }
+  | { ok: false; error: string };
 
 /** 編集対象フィールドの日本語ラベル。 */
 const FIELD_LABEL: Record<string, string> = {
@@ -32,13 +45,24 @@ const FIELD_LABEL: Record<string, string> = {
 const label = (f: string) => FIELD_LABEL[f] ?? f;
 
 /** 既存のモール商品をAPIで取込→差分確認→部分反映するパネル。
+ * ProductForm と同じ商品編集画面内で使い、onFormApiReady から受け取った formApi を通じて
+ * react-hook-form の登録値を読み書きすることを前提とする。
  * 取込(fetch): モール現状をアプリ商品へ取り込む。差分(update GET): 変更点を確認。反映(update POST): 変更分のみ送信。 */
-export function MallEditPanel({ productId }: { productId?: string }) {
+export function MallEditPanel({
+  productId,
+  formApi,
+}: {
+  productId?: string;
+  formApi: ProductFormApi | null;
+}) {
   const [mall, setMall] = useState<Mall>("rakuten");
   const [diff, setDiff] = useState<DiffPreview | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [codexBusy, setCodexBusy] = useState(false);
+  const [codexProposal, setCodexProposal] = useState<CodexRuleProposal | null>(null);
+  const [codexCurrent, setCodexCurrent] = useState<CodexProposalCurrent | null>(null);
 
   if (!productId) {
     return (
@@ -94,6 +118,68 @@ export function MallEditPanel({ productId }: { productId?: string }) {
     finally { setBusy(false); }
   };
 
+  const generateCodexProposal = async () => {
+    if (!formApi) {
+      reset();
+      setErr("フォームの準備が完了していません。少し待ってから再実行してください。");
+      return;
+    }
+
+    setCodexBusy(true);
+    reset();
+    setDiff(null);
+    setCodexProposal(null);
+    setCodexCurrent(null);
+    try {
+      const res = await fetch(`/api/products/${productId}/codex-normalize`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ productId }),
+      });
+      const json = (await res.json()) as CodexNormalizeResponse;
+      if (!res.ok || !json.ok) {
+        setErr("error" in json ? json.error : `提案生成失敗 (HTTP ${res.status})`);
+        return;
+      }
+
+      setCodexCurrent(readCodexProposalCurrent(formApi));
+      setCodexProposal(json.proposal);
+      setMsg("✓ Codex提案を生成しました。差分を確認して承認してください。");
+    } catch (e) {
+      setErr("通信エラー: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setCodexBusy(false);
+    }
+  };
+
+  const applyCodexProposal = (approved: CodexRuleProposal) => {
+    reset();
+    if (!formApi) {
+      setErr("フォームの準備が完了していないため反映できませんでした。");
+      return;
+    }
+
+    const current = readCodexProposalCurrent(formApi);
+    if (!sameImagePool(current.image_order, approved.image_order)) {
+      setErr("提案の画像URL集合が現在のフォームと一致しないため反映しませんでした。提案を生成し直してください。");
+      return;
+    }
+
+    formApi.setValue("sale_description_pc", approved.sale_description_pc);
+    formApi.setValue("description_pc", approved.description_pc);
+    formApi.setValue("description_sp", approved.description_sp);
+    for (let index = 0; index < 20; index += 1) {
+      formApi.setValue(
+        `image_url_${index + 1}`,
+        approved.image_order[index] ?? "",
+      );
+    }
+
+    setCodexProposal(null);
+    setCodexCurrent(null);
+    setMsg("✓ Codex提案をフォームへ反映しました。内容を確認して保存してください。");
+  };
+
   return (
     <div className="bg-white border border-slate-200 rounded p-4 space-y-3">
       <div className="font-semibold">✏️ モール既存商品の編集（取込→差分→反映）</div>
@@ -112,17 +198,25 @@ export function MallEditPanel({ productId }: { productId?: string }) {
       </div>
 
       <div className="flex flex-wrap gap-2">
-        <button onClick={importFromMall} disabled={busy} className="rounded border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50 disabled:opacity-50">
+        <button onClick={importFromMall} disabled={busy || codexBusy} className="rounded border border-slate-300 px-3 py-2 text-sm hover:bg-slate-50 disabled:opacity-50">
           {busy ? "..." : "⬇ モールから取込"}
         </button>
-        <button onClick={checkDiff} disabled={busy} className="rounded border border-blue-300 text-blue-700 px-3 py-2 text-sm hover:bg-blue-50 disabled:opacity-50">
+        <button onClick={checkDiff} disabled={busy || codexBusy} className="rounded border border-blue-300 text-blue-700 px-3 py-2 text-sm hover:bg-blue-50 disabled:opacity-50">
           差分を確認
         </button>
-        <button onClick={() => applyUpdate(false)} disabled={busy || !diff || !diff.hasChanges} className="rounded bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
+        <button
+          type="button"
+          onClick={generateCodexProposal}
+          disabled={busy || codexBusy || !formApi}
+          className="rounded border border-violet-300 px-3 py-2 text-sm font-medium text-violet-700 hover:bg-violet-50 disabled:opacity-50"
+        >
+          {codexBusy ? "Codex提案を生成中…" : "🤖 Codexでルール適用"}
+        </button>
+        <button onClick={() => applyUpdate(false)} disabled={busy || codexBusy || !diff || !diff.hasChanges} className="rounded bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50">
           {`${MALL_LABEL[mall]}へ反映`}
         </button>
         {mall === "yahoo" && (
-          <button onClick={() => applyUpdate(true)} disabled={busy || !diff || !diff.hasChanges} className="rounded border border-blue-400 text-blue-700 px-3 py-2 text-sm hover:bg-blue-50 disabled:opacity-50">
+          <button onClick={() => applyUpdate(true)} disabled={busy || codexBusy || !diff || !diff.hasChanges} className="rounded border border-blue-400 text-blue-700 px-3 py-2 text-sm hover:bg-blue-50 disabled:opacity-50">
             反映して公開(submit)
           </button>
         )}
@@ -153,6 +247,19 @@ export function MallEditPanel({ productId }: { productId?: string }) {
         </div>
       )}
 
+      {codexProposal && codexCurrent && (
+        <CodexProposalDiff
+          current={codexCurrent}
+          proposal={codexProposal}
+          onApprove={(approved) => void applyCodexProposal(approved)}
+          onCancel={() => {
+            setCodexProposal(null);
+            setCodexCurrent(null);
+            reset();
+          }}
+        />
+      )}
+
       <p className="text-xs text-slate-500">
         差分・反映は「保存済みの内容」とモール現状を比較します（自動保存後に実行してください）。
         変更された項目だけを送信し、それ以外は維持します。
@@ -162,4 +269,25 @@ export function MallEditPanel({ productId }: { productId?: string }) {
       {msg && <p className="text-sm text-green-700">{msg}</p>}
     </div>
   );
+}
+
+function readCodexProposalCurrent(
+  formApi: ProductFormApi,
+): CodexProposalCurrent {
+  return {
+    sale_description_pc: formApi.getValue("sale_description_pc"),
+    description_pc: formApi.getValue("description_pc"),
+    description_sp: formApi.getValue("description_sp"),
+    image_order: Array.from(
+      { length: 20 },
+      (_, index) => formApi.getValue(`image_url_${index + 1}`).trim(),
+    ).filter(Boolean),
+  };
+}
+
+function sameImagePool(current: string[], proposed: string[]): boolean {
+  if (current.length !== proposed.length) return false;
+  const currentSorted = [...current].sort();
+  const proposedSorted = [...proposed].sort();
+  return currentSorted.every((url, index) => url === proposedSorted[index]);
 }

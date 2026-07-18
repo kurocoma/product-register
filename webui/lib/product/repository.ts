@@ -98,8 +98,12 @@ export async function upsertProduct(
   supabase: SupabaseClient,
   product: ProductInput,
   id?: string,
+  options?: { expectedUpdatedAt?: string; authenticatedUserId?: string },
 ): Promise<ProductRow> {
-  const { data: { user } } = await supabase.auth.getUser();
+  const authenticatedUserId = options?.authenticatedUserId;
+  const user = authenticatedUserId
+    ? { id: authenticatedUserId }
+    : (await supabase.auth.getUser()).data.user;
   if (!user) throw new Error("Not authenticated");
 
   const valid = validateForSave(product);
@@ -110,14 +114,17 @@ export async function upsertProduct(
   dbRow.updated_at = new Date().toISOString();
 
   if (id) {
-    const { data, error } = await supabase
+    let query = supabase
       .from("products")
       .update(dbRow)
-      .eq("id", id)
+      .eq("id", id);
+    if (options?.expectedUpdatedAt) query = query.eq("updated_at", options.expectedUpdatedAt);
+    const { data, error } = await query
       .select()
-      .single();
+      .maybeSingle();
     if (error) throw new Error(humanizeSaveError(error));
-    await recordHistory(supabase, "edit", id, { ne_code: product.ne_code });
+    if (!data) throw new Error("商品がdry-run後に更新されたため保存を中止しました。もう一度dry-runしてください");
+    await recordHistory(supabase, "edit", id, { ne_code: product.ne_code }, user.id);
     return data as ProductRow;
   }
   const { data, error } = await supabase
@@ -127,7 +134,7 @@ export async function upsertProduct(
     .single();
   if (error) throw new Error(humanizeSaveError(error));
   const newRow = data as ProductRow;
-  await recordHistory(supabase, "create", newRow.id, { ne_code: product.ne_code });
+  await recordHistory(supabase, "create", newRow.id, { ne_code: product.ne_code }, user.id);
   return newRow;
 }
 

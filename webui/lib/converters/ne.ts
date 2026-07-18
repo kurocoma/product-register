@@ -71,7 +71,8 @@ function variantAsProduct(p: ProductInput, v: Variant): ProductInput {
     product_type: isSingle ? "単品" : "セット商品",
     quantity: v.quantity,
     selling_price: v.selling_price,
-    tax_rate: v.tax_rate,
+    // 税率は商品レベルが正（楽天 payment.taxRate も商品レベルのみ。variant側は古い値が残ることがある）。
+    tax_rate: p.tax_rate,
     shipping_type: v.shipping_type,
     is_single: isSingle,
     is_set: !isSingle,

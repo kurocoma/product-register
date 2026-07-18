@@ -7,11 +7,12 @@ export async function recordHistory(
   action: HistoryAction,
   productId: string | null,
   detail: Record<string, unknown> = {},
+  authenticatedUserId?: string,
 ): Promise<void> {
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return;
+  const userId = authenticatedUserId ?? (await supabase.auth.getUser()).data.user?.id;
+  if (!userId) return;
   await supabase.from("history").insert({
-    user_id: user.id,
+    user_id: userId,
     action,
     product_id: productId,
     detail,

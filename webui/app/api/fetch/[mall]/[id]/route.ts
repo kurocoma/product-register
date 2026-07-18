@@ -45,7 +45,11 @@ async function fetchMallSnapshot(
     // fetch(取込)はフラット項目のみマージする（楽天と同じ流儀）。variants[] まで上書きすると
     // 楽天管理の配送詳細・属性が Shopify 由来の空値で消えるため除外する。
     // _shopifyMeta（対応列が無い項目の構造化保持）は DB マージ対象から分離し、プレビュー参照用に返す。
-    const { variants: _variants, _shopifyMeta, ...flat } = parseShopifyItem(got.product, { taxRate: product.tax_rate });
+    const parsed = parseShopifyItem(got.product, { taxRate: product.tax_rate });
+    const { _shopifyMeta } = parsed;
+    const flat = { ...parsed };
+    delete flat.variants;
+    delete flat._shopifyMeta;
     return { ok: true, exists: true, parsed: flat, key: gid, shopifyMeta: _shopifyMeta };
   }
   const cfg = getYahooConfig();

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import type { ProductInput } from "@/lib/product/schema";
 import { RAKUTEN_IMAGE_BASE, buildRakutenImgList } from "@/lib/converters/image-url";
+import { rakutenTaxInclusive } from "@/lib/converters/rakuten-tax";
 import { buildSkuEntries } from "@/lib/preview/sku-entries";
 import { HtmlPreviewFrame } from "./HtmlPreviewFrame";
 import { ImageCarousel, ImageWithFallback, QuantityRow } from "./parts";
@@ -68,11 +69,14 @@ export function RakutenPreview({
   const pcDescHtml = page.description_pc;
   const spDescHtml = autoImgList + page.description_sp;
 
-  // 価格: 楽天は taxIncluded:true で登録するため、実ページ表示（N円）と同じ税込価格。
+  // 価格: selling_price は税抜（全モール統一）。楽天は税別登録のため、実ページと同じ
+  // 税込（店舗税設定=切り捨て）へ換算して表示する（YahooPreview の priceInclusive と同趣旨）。
+  // 税率は variant でなく商品レベル(page.tax_rate)を使う: 楽天の実計算は payment.taxRate
+  // （商品レベル）で、「モール取込」が更新するのも商品レベル税率のため。
   const priceBlock = (
     <div className="flex flex-wrap items-baseline gap-2">
       <span className="text-3xl font-bold text-red-600">
-        {sku.selling_price.toLocaleString()}
+        {rakutenTaxInclusive(sku.selling_price, page.tax_rate).toLocaleString()}
         <span className="text-lg">円</span>
       </span>
       {sku.shipping_type === "送料無料" && (
@@ -96,7 +100,9 @@ export function RakutenPreview({
               onChange={() => setSelectedNe(e.v.ne_code)}
             />
             <span>{e.v.variation_value || `${e.v.quantity}本`}</span>
-            <span className="text-slate-500">{e.v.selling_price.toLocaleString()}円</span>
+            <span className="text-slate-500">
+              {rakutenTaxInclusive(e.v.selling_price, e.p.tax_rate).toLocaleString()}円
+            </span>
           </label>
         ))}
       </div>

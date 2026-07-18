@@ -141,6 +141,12 @@ export function parseRakutenItem(
     }
   }
 
+  // 白背景画像 whiteBgImage → white_bg_image_url（images[] と同じ CABINET/GOLD location 形式）。
+  // 常に設定する（無ければ ""）。取込はモール現状を正とし、楽天側で解除された白背景を
+  // 反映(upsert=全置換)で復活させないため（subscription フラグと同じ理由）。
+  const wb = json.whiteBgImage as { type?: unknown; location?: unknown } | undefined;
+  out.white_bg_image_url = wb ? toRakutenImageUrl(wb) : "";
+
   // 対象 variant から SKU管理番号・価格・JAN を取り出す。
   // 多SKU商品(1商品ページに複数SKU)を merchantDefinedSkuId(=NEコード)指定で取込む場合は、
   // 先頭でなく一致する variant を選ぶ（SKU検索取込で別SKUを誤取込しないため）。
@@ -263,9 +269,21 @@ export function parseRakutenVariants(json: Record<string, unknown>): Variant[] {
       | undefined;
     const str = (x: unknown): string => (x != null && x !== "" ? String(x) : "");
     const subPrice = parseSubscriptionPrice(v.subscriptionPrice);
+    // SKU画像 images[0]（SKUごとに0..1枚）→ image_url。反映側 rakuten-api.ts と往復対称。
+    const img0 = Array.isArray(v.images)
+      ? ((v.images[0] ?? undefined) as { type?: unknown; location?: unknown } | undefined)
+      : undefined;
+    // 表示価格（二重価格）referencePrice.value → display_price。実機は文字列/数値の両表記。
+    // value 無し（SHOP_SETTING 等）は未設定のまま（0=連動と区別しない。楽天は「無し」=非表示）。
+    const refPrice = (v.referencePrice ?? {}) as { value?: unknown };
+    const refValue = refPrice.value != null ? parsePrice(refPrice.value) : 0;
     return VariantSchema.parse({
       sku_manage_number: key,
       ne_code: merchantSku || key,
+      image_url: img0 ? toRakutenImageUrl(img0) || undefined : undefined,
+      display_price: refValue > 0 ? refValue : undefined,
+      // お届けの目安 = 在庫あり時納期管理番号（SKU単位。数値/文字列両対応で正規化）。
+      normal_delivery_date_id: rakutenIdToString(v.normalDeliveryDateId),
       jan_code: /^\d{13}$/.test(janRaw) ? janRaw : "",
       selling_price: parsePrice(v.standardPrice),
       subscription_base_price: subPrice.base,

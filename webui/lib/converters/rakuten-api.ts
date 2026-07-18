@@ -1,4 +1,4 @@
-import { productVariants, type ProductInput, type Variant } from "@/lib/product/schema";
+import { productVariants, resolveAttributes, type ProductInput, type Variant } from "@/lib/product/schema";
 import { baseCodeOf } from "./rakuten";
 import { buildCabinetFileName } from "./cabinet-path";
 import { buildRakutenImgList } from "./image-url";
@@ -83,8 +83,17 @@ export function buildRakutenAttributes(
     .map((a) => (a.unit ? { name: a.item, values: [a.value], unit: a.unit } : { name: a.item, values: [a.value] }));
 }
 
-function buildVariantAttributes(v: Variant): { name: string; values: string[]; unit?: string }[] {
-  return buildRakutenAttributes(v.attributes);
+/** SKU(variant)の属性を楽天 variants.{}.attributes[] へ。variant固有の属性(item+value)が
+ * あればそれを優先し、無ければ商品共通の属性(p.attributes / 旧attribute_1..5)へフォールバックする。
+ * 多SKU商品で各variantに必須属性(ブランド名・総入数等)を確実に同梱し、
+ * items.upsert 時の IE0418(必須属性欠落)を防ぐ。CSV経路(rakuten.ts の buildChildRow)と同じ規則。 */
+function buildVariantAttributes(
+  v: Variant,
+  p: ProductInput,
+): { name: string; values: string[]; unit?: string }[] {
+  const own = buildRakutenAttributes(v.attributes);
+  if (own.length > 0) return own;
+  return buildRakutenAttributes(resolveAttributes(p, { onlyWithValue: true }));
 }
 
 /** 楽天 variant キー(SKU管理番号 = variants.{key})。取込商品は実キー(rakuten_variant_id)を保持しており、
@@ -115,6 +124,21 @@ export function buildImageLocations(p: ProductInput): { type: "CABINET"; locatio
     out.push({ type: "CABINET", location: `/${t.folder}/${t.filePath}` });
   }
   return out;
+}
+
+/** 画像URL → images[].location（"/フォルダ/ファイル名.jpg"）。
+ * buildImageLocations と同じ location 形式（items.upsert の location は
+ * `https://image.rakuten.co.jp/[SHOP_URL]/cabinet/画像パス` の "/画像パス" 部分のみ）。
+ * 白背景画像(whiteBgImage)・SKU画像(variants.{}.images)の組み立てに使う。
+ * - 既に "/..." パス形式ならそのまま採用
+ * - R-Cabinet 公開URLなら /cabinet 以降を抽出（クエリ・フラグメントは除去）
+ * - それ以外（GOLD・外部URL・空）は null = キー自体を送らない（不正 location の送信防止） */
+export function cabinetLocationFromUrl(url: string | undefined): string | null {
+  const u = (url ?? "").trim().split(/[?#]/)[0];
+  if (!u) return null;
+  if (u.startsWith("/")) return u;
+  const m = /^https?:\/\/image\.rakuten\.co\.jp\/[^/]+\/cabinet(\/.+)$/i.exec(u);
+  return m ? m[1] : null;
 }
 
 export type RakutenUpsertBody = Record<string, unknown>;
@@ -164,9 +188,32 @@ export function buildRakutenUpsertBody(p: ProductInput, opts: BuildUpsertOptions
           : {}),
       };
     }
-    const attributes = buildVariantAttributes(v);
+    // 表示価格（二重価格）。display_price>0 のときだけ referencePrice を送る（税別のため値は税抜のまま）。
+    // 文言 type は 1:当店通常価格 固定（取込側も value のみ保持。docs/楽天/04 #97-99）。
+    if ((v.display_price ?? 0) > 0) {
+      variant.referencePrice = { displayType: "REFERENCE_PRICE", type: 1, value: String(v.display_price) };
+    }
+    // お届けの目安 = 在庫あり時納期管理番号（SKU単位）。空 = 未設定 = 送らない。
+    const ndd = Number(v.normal_delivery_date_id);
+    if (v.normal_delivery_date_id?.trim() && Number.isFinite(ndd)) {
+      variant.normalDeliveryDateId = ndd;
+    }
+    const attributes = buildVariantAttributes(v, p);
     if (attributes.length > 0) variant.attributes = attributes;
     if (multi) variant.selectorValues = { [axisKey]: labels[i] };
+    // SKU管理画像（variants.{}.images、SKUごとに0..1枚）。商品レベル images と同じ
+    // { type: "CABINET", location: "/画像パス" } 形式（cabinetLocationFromUrl で変換）。
+    // CSV経路(rakuten.ts)と同様、バリエーションなし（単一SKU）に SKU画像を入れると
+    // 楽天側でエラーになるため多SKU時のみ送る。URLが空・cabinet外はキー自体を付けない。
+    if (multi) {
+      const skuImageLocation = cabinetLocationFromUrl(v.image_url);
+      if (skuImageLocation) {
+        const alt = p.display_name?.trim();
+        variant.images = [
+          { type: "CABINET", location: skuImageLocation, ...(alt ? { alt } : {}) },
+        ];
+      }
+    }
     variants[key] = variant;
   });
 
@@ -180,12 +227,19 @@ export function buildRakutenUpsertBody(p: ProductInput, opts: BuildUpsertOptions
     productDescription: { pc: p.description_pc, sp: saleBlock + p.description_sp },
     salesDescription: saleBlock,
     images: buildImageLocations(p),
-    payment: { taxIncluded: true, taxRate: String(p.tax_rate / 100) },
+    // 税別登録（taxIncluded: false）。当店の楽天商品は税別で登録されており（items.get の
+    // standardPrice = 税抜値・実ページの税込表示は楽天側が計算）、アプリの selling_price も
+    // 全モール税抜統一のため。true で送ると税抜額が税込価格として登録され実売価格が下がる（260715修正）。
+    payment: { taxIncluded: false, taxRate: String(p.tax_rate / 100) },
     variants,
   };
   if (multi) {
     body.variantSelectors = [{ key: axisKey, displayName: axisName, values: labels.map((l) => ({ displayValue: l })) }];
   }
+  // 白背景画像（whiteBgImage、商品レベルで0..1枚）。location は images[] と同じ "/画像パス" 形式。
+  // 未設定・cabinet 公開URLでない値はキー自体を送らない（不正 location での upsert 失敗防止）。
+  const wbLocation = cabinetLocationFromUrl(p.white_bg_image_url);
+  if (wbLocation) body.whiteBgImage = { type: "CABINET", location: wbLocation };
   if (p.catch_copy_pc) body.tagline = p.catch_copy_pc;
   if (opts.hideItem) body.hideItem = true;
   if (opts.hideStock) {

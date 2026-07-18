@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 import { upsertProduct } from "@/lib/product/repository";
 import type { ProductInput } from "@/lib/product/schema";
-import { ProductForm } from "./ProductForm";
+import { ProductForm, type ProductFormApi } from "./ProductForm";
 import { useAutoSave } from "@/hooks/useAutoSave";
 import { Button } from "@/components/ui/button";
 import { PreviewTabs } from "@/components/preview/PreviewTabs";
@@ -30,6 +30,7 @@ export function ProductEditView({
   const router = useRouter();
   const [currentId, setCurrentId] = useState(productId);
   const [data, setData] = useState<ProductInput>(initial);
+  const [formApi, setFormApi] = useState<ProductFormApi | null>(null);
 
   const save = useCallback(
     async (v: ProductInput) => {
@@ -93,13 +94,18 @@ export function ProductEditView({
       {/* 本体: 左フォーム + 右プレビュー */}
       <div className="flex flex-1 overflow-hidden">
         <div className="w-2/5 overflow-y-auto p-4 border-r border-slate-200">
-          <ProductForm defaultValues={initial} onChange={setData} productId={currentId} />
+          <ProductForm
+            defaultValues={initial}
+            onChange={setData}
+            productId={currentId}
+            onFormApiReady={setFormApi}
+          />
         </div>
         <div className="flex-1 overflow-y-auto p-4 bg-slate-50 space-y-3">
           {/* 反映系（画像アップ・モール登録・取込編集・CSV）はプレビューの上に置く（プレビューが長く下まで届きにくいため） */}
           <ImageUploadPanel productId={currentId} />
           <RegisterPanel productId={currentId} />
-          <MallEditPanel productId={currentId} />
+          <MallEditPanel productId={currentId} formApi={formApi} />
           <CsvDownloadPanel productId={currentId} />
           <PreviewTabs product={data} peers={peers ?? []} />
         </div>

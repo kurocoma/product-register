@@ -2,6 +2,7 @@
 
 import { useRef, useState } from "react";
 import { MAX_IMAGE_SLOTS, planUploadIndices } from "@/lib/image/upload-plan";
+import { notifyWhiteBgImageUploaded } from "./ProductForm";
 
 type UploadResult = { label: string; publicUrl: string; key: string };
 type Mall = "rakuten" | "yahoo";
@@ -20,7 +21,9 @@ type SelectedItem = {
 /** 商品画像を 楽天R-Cabinet / Yahoo追加画像(lib) へアップロードするパネル。
  * 複数ファイルの一括アップロード対応: 「何枚目」の開始番号から各ファイルへ番号を自動割当し
  * （楽天wbは番号なし）、既存の1枚用アップロードAPIを1件ずつ順番に呼ぶ。
- * 保存済み(productId あり)のときのみ有効。ファイル名はサーバー側が商品コードから確定する。 */
+ * 保存済み(productId あり)のときのみ有効。ファイル名はサーバー側が商品コードから確定する。
+ * 楽天 白背景(wb01)のアップロード成功時は、notifyWhiteBgImageUploaded 経由でフォームの
+ * 「白背景画像」欄(white_bg_image_url) へ自動反映する（楽天 whiteBgImage の反映元。商品につき1枚）。 */
 export function ImageUploadPanel({ productId }: { productId?: string }) {
   const [mall, setMall] = useState<Mall>("rakuten");
   const [kind, setKind] = useState<RakutenKind>("main"); // 楽天のみ
@@ -110,6 +113,7 @@ export function ImageUploadPanel({ productId }: { productId?: string }) {
     let okCount = 0;
     let ngCount = 0;
     let lastAssigned: number | null = null;
+    let lastWbUrl: string | null = null; // 楽天wb成功分の公開URL（白背景画像欄への自動反映用）
 
     // 既存の1枚用アップロード経路を1件ずつ順番に呼ぶ（並列にしない）
     for (const { it, num } of uploadTargets) {
@@ -129,6 +133,7 @@ export function ImageUploadPanel({ productId }: { productId?: string }) {
         ]);
         setItems((prev) => prev.map((x) => (x.id === it.id ? { ...x, status: "ok" } : x)));
         okCount += 1;
+        if (mall === "rakuten" && kind === "wb") lastWbUrl = json.publicUrl;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         setItems((prev) =>
@@ -139,9 +144,19 @@ export function ImageUploadPanel({ productId }: { productId?: string }) {
     }
 
     if (indexed && lastAssigned !== null) setIndex(lastAssigned + 1); // 次の開始番号を進める
+
+    // 白背景(wb)成功時はフォームの「白背景画像」欄へ自動反映する（複数成功時は最後の1枚。
+    // 白背景は商品につき1枚のため）。フォーム未マウント時は手動貼り付けの案内を出す。
+    let wbNote = "";
+    if (lastWbUrl) {
+      wbNote = notifyWhiteBgImageUploaded(lastWbUrl)
+        ? "。白背景画像URLをフォームの「白背景画像」欄へ自動反映しました"
+        : "。白背景画像URLの自動反映ができませんでした（下のURLをフォームの「白背景画像」欄へ貼り付けてください）";
+    }
     setSummary(
       `成功 ${okCount}枚 / 失敗 ${ngCount}枚` +
-        (ngCount > 0 ? "（失敗分はリストに残っています。原因を直して再アップロードできます）" : ""),
+        (ngCount > 0 ? "（失敗分はリストに残っています。原因を直して再アップロードできます）" : "") +
+        wbNote,
     );
     if (fileRef.current) fileRef.current.value = "";
     setUploading(false);
@@ -336,7 +351,7 @@ export function ImageUploadPanel({ productId }: { productId?: string }) {
       <p className="text-xs text-slate-500">
         {mall === "yahoo"
           ? "Yahoo追加画像(lib)へアップロードします。ファイル名=商品コード(1枚目=NEコード、2枚目以降=NEコード_n)。公開URL: lib/okimarumarket/…"
-          : "楽天R-Cabinetへアップロードします。1枚目=NEコード、2枚目以降=base_n、白背景=wb-base。"}
+          : "楽天R-Cabinetへアップロードします。1枚目=NEコード、2枚目以降=base_n、白背景=wb-base。白背景はアップロード成功時にフォームの「白背景画像」欄へ自動反映されます。"}
         大きい画像は自動で 2MB 以内・JPEG に変換されます。
       </p>
 

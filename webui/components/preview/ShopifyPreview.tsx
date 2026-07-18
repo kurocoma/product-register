@@ -95,9 +95,10 @@ export function ShopifyPreview({
         {cur.p.display_name || <span className="text-slate-400">(商品名未入力)</span>}
       </h2>
 
-      {/* 価格: 実ページは赤字「¥N,NNN（税込）」。登録時と同じ税込換算（Variant Price = priceWithTax） */}
+      {/* 価格: 実ページは赤字「¥N,NNN（税込）」。登録時と同じ税込換算（Variant Price = priceWithTax）。
+          税率は商品レベル(cur.p.tax_rate)が正（variant側は古い値が残ることがある。260715修正） */}
       <div className="text-2xl font-bold text-red-600">
-        ¥{priceWithTax(cur.v).toLocaleString()}
+        ¥{priceWithTax({ selling_price: cur.v.selling_price, tax_rate: cur.p.tax_rate }).toLocaleString()}
         <span className="text-sm ml-1">（税込）</span>
       </div>
 

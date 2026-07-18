@@ -186,7 +186,8 @@ export function buildShopifyPatchPlan(product: ProductInput, snap: ShopifyProduc
     if (!sv) continue; // snapshot に無い = 新規SKUは部分更新不可（structural ガード対象）
     const input: Record<string, unknown> = {};
 
-    const expectedPrice = priceWithTax(v);
+    // 税率は商品レベル(product.tax_rate)が正（variant側は古い値が残ることがある。260715修正）。
+    const expectedPrice = priceWithTax({ selling_price: v.selling_price, tax_rate: product.tax_rate });
     const snapPrice = Number(sv.price);
     if (!Number.isFinite(snapPrice) || snapPrice !== expectedPrice) {
       changed.push({ field: `SKU[${key}].販売価格(税込)`, before: sv.price, after: String(expectedPrice) });
@@ -202,7 +203,7 @@ export function buildShopifyPatchPlan(product: ProductInput, snap: ShopifyProduc
         ? product.display_price
         : 0;
     if (rawDisplay > 0) {
-      const expectedCompareAt = priceWithTax({ selling_price: rawDisplay, tax_rate: v.tax_rate });
+      const expectedCompareAt = priceWithTax({ selling_price: rawDisplay, tax_rate: product.tax_rate });
       const snapCompareAt = sv.compareAtPrice == null ? NaN : Number(sv.compareAtPrice);
       if (!Number.isFinite(snapCompareAt) || snapCompareAt !== expectedCompareAt) {
         changed.push({ field: `SKU[${key}].表示価格(税込)`, before: sv.compareAtPrice ?? "", after: String(expectedCompareAt) });

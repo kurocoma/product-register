@@ -147,7 +147,8 @@ export class ShopifyConverter implements Converter {
     row["Variant Inventory Qty"] = "0";
     row["Variant Inventory Policy"] = "deny";
     row["Variant Fulfillment Service"] = "manual";
-    row["Variant Price"] = String(priceWithTax(v));
+    // 税率は商品レベル(p.tax_rate)が正（variant側は古い値が残ることがある。260715修正）。
+    row["Variant Price"] = String(priceWithTax({ selling_price: v.selling_price, tax_rate: p.tax_rate }));
     row["Variant Requires Shipping"] = "true";
     row["Variant Taxable"] = "true";
     row["Variant Barcode"] = v.jan_code;

@@ -50,9 +50,9 @@ describe("YahooConverter multi-SKU (variants[0] 代表・設計書どおり従�
     expect(rows[0]["delivery"]).toBe("0");
   });
 
-  it("taxrate-type は variants[0] の tax_rate 由来", () => {
-    const p = makeMultiSku();
-    p.variants[0].tax_rate = 8;
+  it("taxrate-type は商品レベルの tax_rate 由来（variant側の古い値は使わない・260715修正）", () => {
+    const p = makeMultiSku({ tax_rate: 8 });
+    p.variants[0].tax_rate = 10; // variant 側が古いままでも
     const rows = conv.convert([p]);
     expect(rows[0]["taxrate-type"]).toBe("0.08");
     expect(rows[0]["price"]).toBe("1080"); // 1000 * 1.08

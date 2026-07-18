@@ -30,7 +30,7 @@ async function main() {
     auth: { persistSession: false },
     cookies: undefined,
   });
-  const { data: v } = await userClient.auth.verifyOtp({ type: "magiclink", token_hash: link.properties.hashed_token });
+  await userClient.auth.verifyOtp({ type: "magiclink", token_hash: link.properties.hashed_token });
   // cookie はSSR用ではなくここではAPI用にアクセストークンをcookie化
   const { createServerClient } = await import("@supabase/ssr");
   const ssr = createServerClient(URL_, ANON, {

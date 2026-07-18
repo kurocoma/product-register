@@ -81,7 +81,7 @@ describe("dbRowToProductInput", () => {
       created_at: "2026-05-27T00:00:00Z",
       updated_at: "2026-05-27T00:00:00Z",
       extra: dbRow.extra as Record<string, unknown>,
-      ...(dbRow as Record<typeof MAIN_KEYS[number], unknown>),
+      ...(dbRow as Record<"ne_code", unknown>),
     } as ProductRow;
     const restored = dbRowToProductInput(fakeRow);
     expect(restored.ne_code).toBe("t002-2542-3");
@@ -93,6 +93,3 @@ describe("dbRowToProductInput", () => {
     expect(restored.is_set).toBe(true);
   });
 });
-
-// 型保守用のキー
-const MAIN_KEYS = ["ne_code"] as const;

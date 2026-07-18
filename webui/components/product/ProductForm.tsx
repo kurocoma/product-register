@@ -7,6 +7,7 @@ import {
   useFormContext,
   useFieldArray,
   type FieldPath,
+  type FieldArrayPath,
 } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
@@ -31,15 +32,49 @@ import { cn } from "@/lib/utils";
 
 type FormValues = z.input<typeof ProductInputBaseSchema>;
 
+export type CodexEditableProductField =
+  | "sale_description_pc"
+  | "description_pc"
+  | "description_sp"
+  | `image_url_${number}`;
+
+/** フォーム外（MallEditPanel の formApi / 白背景アップロードのブリッジ）から
+ * 読み書きできる項目。white_bg_image_url は白背景(wb01)アップロード結果の
+ * 自動反映先（楽天 whiteBgImage）。 */
+export type ProductFormEditableField = CodexEditableProductField | "white_bg_image_url";
+
+export type ProductFormApi = {
+  getValue: (name: ProductFormEditableField) => string;
+  setValue: (name: ProductFormEditableField, value: string) => void;
+};
+
+/** 白背景(wb01)アップロード結果をフォームへ届けるモジュール内ブリッジ。
+ * ImageUploadPanel は ProductForm と親(ProductEditView)を介さず横並びに置かれるため、
+ * マウント中の ProductForm がここに listener を登録し、white_bg_image_url へ反映する。
+ * （商品編集画面には ProductForm は同時に1つしか無い前提。） */
+const whiteBgUploadListeners = new Set<(url: string) => void>();
+
+/** 白背景(wb01)画像のアップロード成功を商品編集フォームへ通知する。
+ * フォームが開いていれば「白背景画像」欄(white_bg_image_url)へ自動反映して true を返す。
+ * 開いていなければ false（呼び出し側は手動貼り付けの案内を出す）。 */
+export function notifyWhiteBgImageUploaded(url: string): boolean {
+  if (whiteBgUploadListeners.size === 0) return false;
+  whiteBgUploadListeners.forEach((listener) => listener(url));
+  return true;
+}
+
 export function ProductForm({
   defaultValues,
   onChange,
   productId,
+  onFormApiReady,
 }: {
   defaultValues: ProductInput;
   onChange?: (data: ProductInput) => void;
   /** 保存済み商品のID。画像の再アップロード等、サーバー処理を伴う操作に使う（未保存時は無効化）。 */
   productId?: string;
+  /** 兄弟コンポーネントからもRHFの登録値を安全に取得・更新するためのAPI。 */
+  onFormApiReady?: (api: ProductFormApi | null) => void;
 }) {
   // ProductInput には is_single/is_set 派生プロパティが含まれるので除く
   const { is_single, is_set, ...rest } = defaultValues;
@@ -53,16 +88,47 @@ export function ProductForm({
     mode: "onChange",
   });
 
+  const formApi = React.useMemo<ProductFormApi>(
+    () => ({
+      getValue: (name) =>
+        String(methods.getValues(name as FieldPath<FormValues>) ?? ""),
+      setValue: (name, value) =>
+        methods.setValue(name as FieldPath<FormValues>, value as never, {
+          shouldDirty: true,
+          shouldTouch: true,
+          shouldValidate: true,
+        }),
+    }),
+    [methods],
+  );
+
   React.useEffect(() => {
-    const sub = methods.watch((value) => {
-      try {
-        const parsed = ProductInputSchema.parse(value);
-        onChange?.(parsed);
-      } catch {
-        // バリデーションエラー時はスキップ
-      }
+    onFormApiReady?.(formApi);
+    return () => onFormApiReady?.(null);
+  }, [formApi, onFormApiReady]);
+
+  // 白背景(wb01)アップロード成功（ImageUploadPanel → notifyWhiteBgImageUploaded）を
+  // 「白背景画像」欄へ自動反映する（楽天 whiteBgImage の反映元。白背景は商品につき1枚）。
+  React.useEffect(() => {
+    const listener = (url: string) => formApi.setValue("white_bg_image_url", url);
+    whiteBgUploadListeners.add(listener);
+    return () => {
+      whiteBgUploadListeners.delete(listener);
+    };
+  }, [formApi]);
+
+  React.useEffect(() => {
+    return methods.subscribe({
+      formState: { values: true },
+      callback: ({ values }) => {
+        try {
+          const parsed = ProductInputSchema.parse(values);
+          onChange?.(parsed);
+        } catch {
+          // バリデーションエラー時はスキップ
+        }
+      },
     });
-    return () => sub.unsubscribe();
   }, [methods, onChange]);
 
   return (
@@ -78,6 +144,7 @@ export function ProductForm({
           "variation",
           "subscription",
           "image",
+          "white_bg",
           "attribute",
         ]}
       >
@@ -104,6 +171,9 @@ export function ProductForm({
         </AccordionItem>
         <AccordionItem value="image" title="画像 URL (20)">
           <ImageUrlSection productId={productId} />
+        </AccordionItem>
+        <AccordionItem value="white_bg" title="白背景画像 (楽天)">
+          <WhiteBgImageSection />
         </AccordionItem>
         <AccordionItem value="attribute" title="商品属性 (5)">
           <AttributeSection />
@@ -177,22 +247,24 @@ function BasicInfoSection() {
 
 /** SKU一覧: 1商品ページ(楽天 商品管理番号)配下の複数SKUを、価格・配送ごとに編集する表。
  * variants[] を react-hook-form の field array で編集。空のときは単品(上の販売価格/送料)扱い。
- * 配送詳細(送料区分/配送方法セット/個別送料/置き配)はSKUごとに楽天 variant.shipping へ反映する(#3)。 */
+ * 配送詳細(送料区分/配送方法セット/個別送料/置き配)はSKUごとに楽天 variant.shipping へ反映する(#3)。
+ * SKU画像URL列はSKU管理画像（楽天 variants.{}.images、各SKUに1枚）として反映される。 */
 function VariantsSection() {
-  const { control, register } = useFormContext<FormValues>();
+  const { control, register, watch } = useFormContext<FormValues>();
   const { fields, append, remove } = useFieldArray({ control, name: "variants" });
   const reg = (idx: number, field: string, opts?: Parameters<typeof register>[1]) =>
     register(`variants.${idx}.${field}` as FieldPath<FormValues>, opts);
   const cell = "rounded border border-slate-300 px-1 py-1";
   const headers = [
-    "ラベル", "SKU管理番号", "NEコード", "JAN", "販売価格", "税率", "数量",
-    "送料", "送料区分1", "送料区分2", "配送方法セット", "個別送料", "置き配", "",
+    "ラベル", "SKU管理番号", "NEコード", "JAN", "販売価格", "表示価格", "税率", "数量",
+    "送料", "送料区分1", "送料区分2", "配送方法セット", "納期ID", "個別送料", "置き配", "SKU画像URL", "",
   ];
   return (
     <div className="space-y-2">
       <p className="text-xs text-slate-500">
         1商品ページ(楽天 商品管理番号)配下の複数SKUを、SKUごとに価格・配送設定します（単品・セット・本数違い等）。
         空のときは上の「販売価格」「送料区分」を使う単品扱いです。楽天から多SKU商品を取込むと自動で入ります。
+        「SKU画像URL」はSKUごとの管理画像（各SKUに1枚・R-CabinetのURL）として楽天へ反映されます。
       </p>
       {fields.length === 0 ? (
         <p className="text-sm text-slate-400">SKUなし（単品）。「+ SKU追加」または楽天取込で追加できます。</p>
@@ -203,13 +275,19 @@ function VariantsSection() {
               <tr>{headers.map((h, i) => <th key={i} className="px-1.5 py-1.5 font-medium">{h}</th>)}</tr>
             </thead>
             <tbody>
-              {fields.map((f, idx) => (
+              {fields.map((f, idx) => {
+                const skuImageUrl = String(
+                  watch(`variants.${idx}.image_url` as FieldPath<FormValues>) ?? "",
+                );
+                return (
                 <tr key={f.id} className="border-t border-slate-100">
                   <td className="px-1"><input {...reg(idx, "variation_value")} className={`${cell} w-20`} /></td>
                   <td className="px-1"><input {...reg(idx, "sku_manage_number")} className={`${cell} w-28 font-mono`} /></td>
                   <td className="px-1"><input {...reg(idx, "ne_code")} className={`${cell} w-28 font-mono`} /></td>
                   <td className="px-1"><input {...reg(idx, "jan_code")} className={`${cell} w-32 font-mono`} /></td>
                   <td className="px-1"><input type="number" {...reg(idx, "selling_price", { valueAsNumber: true })} className={`${cell} w-20 text-right`} /></td>
+                  {/* 表示価格（二重価格）。楽天 referencePrice / Yahoo original-price / Shopify compareAt。空 = 販売価格に連動 */}
+                  <td className="px-1"><input type="number" {...reg(idx, "display_price", { setValueAs: (x) => (x === "" || x == null || Number.isNaN(Number(x)) ? undefined : Number(x)) })} className={`${cell} w-20 text-right`} /></td>
                   <td className="px-1">
                     <select {...reg(idx, "tax_rate", { valueAsNumber: true })} className={`${cell} bg-white`}>
                       <option value={8}>8%</option><option value={10}>10%</option>
@@ -224,11 +302,29 @@ function VariantsSection() {
                   <td className="px-1"><input {...reg(idx, "postage_segment_1")} className={`${cell} w-14`} /></td>
                   <td className="px-1"><input {...reg(idx, "postage_segment_2")} className={`${cell} w-14`} /></td>
                   <td className="px-1"><input {...reg(idx, "shipping_method_group")} className={`${cell} w-24`} /></td>
+                  {/* お届けの目安 = 在庫あり時納期管理番号（楽天 normalDeliveryDateId、SKU単位） */}
+                  <td className="px-1"><input {...reg(idx, "normal_delivery_date_id")} className={`${cell} w-14`} /></td>
                   <td className="px-1"><input {...reg(idx, "individual_shipping_fee")} className={`${cell} w-16`} /></td>
                   <td className="px-1 text-center"><input type="checkbox" {...reg(idx, "okihai")} /></td>
+                  <td className="px-1">
+                    <div className="flex items-center gap-1">
+                      {skuImageUrl.trim() ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img src={skuImageUrl} alt="" className="h-7 w-7 shrink-0 rounded object-cover" />
+                      ) : (
+                        <div className="h-7 w-7 shrink-0 rounded bg-slate-100" />
+                      )}
+                      <input
+                        {...reg(idx, "image_url")}
+                        placeholder="https://image.rakuten.co.jp/…"
+                        className={`${cell} w-52`}
+                      />
+                    </div>
+                  </td>
                   <td className="px-1"><button type="button" onClick={() => remove(idx)} className="text-red-600 hover:underline">削除</button></td>
                 </tr>
-              ))}
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -239,8 +335,8 @@ function VariantsSection() {
         onClick={() =>
           append({
             sku_manage_number: "", ne_code: "", jan_code: "", selling_price: 0, tax_rate: 10, quantity: 1,
-            variation_value: "", shipping_type: "送料別", postage_segment_1: "", postage_segment_2: "",
-            shipping_method_group: "", individual_shipping_fee: "", okihai: true, attributes: [],
+            variation_value: "", image_url: "", shipping_type: "送料別", postage_segment_1: "", postage_segment_2: "",
+            shipping_method_group: "", normal_delivery_date_id: "", individual_shipping_fee: "", okihai: true, attributes: [],
           })
         }
       >
@@ -805,15 +901,63 @@ function ImageUrlSection({ productId }: { productId?: string }) {
   );
 }
 
-function AttributeSection() {
+/** 白背景画像（楽天 whiteBgImage、商品全体で1枚）。プレビュー＋URL入力欄
+ * （楽天RMS商品編集画面の「白背景画像」セクションと同じ構成）。
+ * 「画像アップロード」パネルで種別「白背景 (wb01)」をアップロードすると、
+ * このURLへ自動反映される（ImageUploadPanel → notifyWhiteBgImageUploaded）。 */
+function WhiteBgImageSection() {
+  const { register, watch } = useFormContext<FormValues>();
+  const url = String(watch("white_bg_image_url") ?? "");
+  return (
+    <div className="space-y-2">
+      <p className="text-xs text-slate-500">
+        楽天の白背景画像（商品全体で1枚）です。R-Cabinet の公開画像URLを入力してください。
+        右の「画像アップロード」パネルで種別「白背景 (wb01)」をアップロードすると自動で入ります。
+      </p>
+      <div className="flex items-start gap-3">
+        {url.trim() ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={url}
+            alt="白背景画像プレビュー"
+            className="h-24 w-24 shrink-0 rounded border border-slate-200 bg-white object-contain"
+          />
+        ) : (
+          <div className="flex h-24 w-24 shrink-0 items-center justify-center rounded border border-dashed border-slate-300 text-[11px] text-slate-400">
+            未設定
+          </div>
+        )}
+        <div className="min-w-0 flex-1">
+          <Label htmlFor="white_bg_image_url">画像URL</Label>
+          <Input
+            id="white_bg_image_url"
+            placeholder="https://image.rakuten.co.jp/…/cabinet/wb01/wb-xxxx.jpg"
+            {...register("white_bg_image_url")}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+type AttrRow = { item: string; value: string; unit: string; requirement: string };
+
+/** 属性(item/value/unit)の編集リスト本体。編集対象（商品共通 or 各SKU）ごとに
+ * name（"attributes" または "variants.{idx}.attributes"）を切り替えて使う。
+ * react-hook-form の useFieldArray は name を動的に切り替えられないため、
+ * 呼び出し側で name を key に付けて再マウントする（AttributeSection 参照）。 */
+function AttributeEditor({ name }: { name: string }) {
   const { control, register, watch } = useFormContext<FormValues>();
-  const { fields, append, remove, replace } = useFieldArray({ control, name: "attributes" });
+  const { fields, append, remove, replace } = useFieldArray({
+    control,
+    name: name as FieldArrayPath<FormValues>,
+  });
   const [loading, setLoading] = React.useState(false);
   const [message, setMessage] = React.useState<string | null>(null);
 
   const categoryId = watch("mall_category_id");
   // 空の必須項目の常時通知（カテゴリblurの自動読み込み・手動読み込みのどちらでも効く）
-  const attributesValue = watch("attributes");
+  const attributesValue = watch(name as FieldPath<FormValues>) as AttrRow[] | undefined;
   const emptyRequiredCount = countEmptyRequiredAttributes(attributesValue ?? []);
 
   const loadFromCategory = async () => {
@@ -833,9 +977,9 @@ function AttributeSection() {
       }
       // 既存の入力値（item→value/unit）を保持しつつ、推奨項目で置き換える
       // （マージ規則は一括登録の自動補完と共有の mergeGenreAttributes を使う = 単一実装）
-      const current = watch("attributes") || [];
+      const current = (watch(name as FieldPath<FormValues>) as AttrRow[] | undefined) || [];
       const next = mergeGenreAttributes(current, genreAttributesToInputs(attrs));
-      replace(next);
+      replace(next as never);
       setMessage(`カテゴリID ${id} の推奨属性 ${next.length} 件を読み込みました`);
     } catch (e) {
       setMessage("属性の読み込みに失敗しました: " + (e instanceof Error ? e.message : String(e)));
@@ -877,7 +1021,9 @@ function AttributeSection() {
 
       <div className="space-y-2">
         {fields.map((field, idx) => {
-          const requirement = watch(`attributes.${idx}.requirement`) as string | undefined;
+          const requirement = watch(`${name}.${idx}.requirement` as FieldPath<FormValues>) as
+            | string
+            | undefined;
           const required = isRequiredAttribute(requirement || "");
           return (
             <div
@@ -890,7 +1036,10 @@ function AttributeSection() {
               <div>
                 {idx === 0 && <Label>項目</Label>}
                 <div className="flex items-center gap-1">
-                  <Input {...register(`attributes.${idx}.item` as FieldPath<FormValues>)} />
+                  <Input
+                    aria-label={`属性${idx + 1} 項目`}
+                    {...register(`${name}.${idx}.item` as FieldPath<FormValues>)}
+                  />
                   {required && (
                     <span className="shrink-0 text-[10px] font-bold text-rose-700 bg-rose-200 rounded px-1 py-0.5">
                       必須
@@ -900,11 +1049,17 @@ function AttributeSection() {
               </div>
               <div>
                 {idx === 0 && <Label>値</Label>}
-                <Input {...register(`attributes.${idx}.value` as FieldPath<FormValues>)} />
+                <Input
+                  aria-label={`属性${idx + 1} 値`}
+                  {...register(`${name}.${idx}.value` as FieldPath<FormValues>)}
+                />
               </div>
               <div>
                 {idx === 0 && <Label>単位</Label>}
-                <Input {...register(`attributes.${idx}.unit` as FieldPath<FormValues>)} />
+                <Input
+                  aria-label={`属性${idx + 1} 単位`}
+                  {...register(`${name}.${idx}.unit` as FieldPath<FormValues>)}
+                />
               </div>
               <button
                 type="button"
@@ -921,10 +1076,148 @@ function AttributeSection() {
       <Button
         type="button"
         variant="outline"
-        onClick={() => append({ item: "", value: "", unit: "", requirement: "" })}
+        onClick={() => append({ item: "", value: "", unit: "", requirement: "" } as never)}
       >
         + 項目を追加
       </Button>
+    </div>
+  );
+}
+
+/** 商品属性セクション。単品(variants未設定)は従来どおり商品共通の属性のみを編集する。
+ * 複数SKU(variants.length > 0)のときは「商品共通」と各SKUを切り替えて属性(item/value/unit)を
+ * 編集でき、「次へ →」で対象を移動、「📋 コピー」「📥 貼り付け」で対象間の属性値を複製できる。
+ * （多くの属性はSKU間で共通で、総入数など一部だけ違う運用のため。楽天は各SKUに必須属性が
+ * 無いと登録に失敗するため、空のSKUは反映時に商品共通の属性へフォールバックする。） */
+export function AttributeSection() {
+  const { watch, getValues, setValue } = useFormContext<FormValues>();
+  const variants = (watch("variants") ?? []) as {
+    ne_code?: string;
+    sku_manage_number?: string;
+    variation_value?: string;
+  }[];
+  const count = variants.length;
+  const hasVariants = count > 0;
+
+  const [target, setTarget] = React.useState<"product" | number>("product");
+  const [clipboard, setClipboard] = React.useState<AttrRow[] | null>(null);
+  const [pasteNonce, setPasteNonce] = React.useState(0);
+
+  // SKU削除等で選択中のインデックスが範囲外になった場合は、商品共通として扱う。
+  const activeTarget = typeof target === "number" && target >= count ? "product" : target;
+
+  // 単品(variants未設定)は従来どおり商品共通のみ。切り替え/コピー貼り付けUIは出さない。
+  if (!hasVariants) {
+    return <AttributeEditor name="attributes" />;
+  }
+
+  const name =
+    activeTarget === "product" ? "attributes" : `variants.${activeTarget}.attributes`;
+  const skuLabel = (i: number) => {
+    const v = variants[i];
+    return (
+      v?.variation_value?.trim() ||
+      v?.ne_code?.trim() ||
+      v?.sku_manage_number?.trim() ||
+      `SKU ${i + 1}`
+    );
+  };
+  const currentLabel =
+    activeTarget === "product" ? "商品共通" : skuLabel(activeTarget);
+
+  const goPrev = () =>
+    setTarget(
+      activeTarget === "product"
+        ? count - 1
+        : activeTarget === 0
+          ? "product"
+          : activeTarget - 1,
+    );
+  const goNext = () =>
+    setTarget(
+      activeTarget === "product"
+        ? 0
+        : activeTarget >= count - 1
+          ? "product"
+          : activeTarget + 1,
+    );
+
+  const cloneRows = (rows: AttrRow[] | undefined): AttrRow[] =>
+    (rows ?? []).map((a) => ({
+      item: a.item ?? "",
+      value: a.value ?? "",
+      unit: a.unit ?? "",
+      requirement: a.requirement ?? "",
+    }));
+
+  const copyCurrent = () =>
+    setClipboard(cloneRows(getValues(name as FieldPath<FormValues>) as AttrRow[] | undefined));
+  const pasteHere = () => {
+    if (!clipboard) return;
+    setValue(name as FieldPath<FormValues>, cloneRows(clipboard) as never, { shouldDirty: true });
+    setPasteNonce((n) => n + 1); // 貼り付け後の値で現在の対象を再マウントして反映する
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-2 rounded border border-slate-200 bg-slate-50 p-2">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-xs font-medium text-slate-600">編集対象:</span>
+          <button
+            type="button"
+            onClick={() => setTarget("product")}
+            className={cn(
+              "rounded border px-2 py-1 text-xs",
+              activeTarget === "product"
+                ? "border-blue-600 bg-blue-600 text-white"
+                : "border-slate-300 bg-white text-slate-600",
+            )}
+          >
+            商品共通
+          </button>
+          {variants.map((_, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => setTarget(i)}
+              className={cn(
+                "rounded border px-2 py-1 text-xs",
+                activeTarget === i
+                  ? "border-blue-600 bg-blue-600 text-white"
+                  : "border-slate-300 bg-white text-slate-600",
+              )}
+            >
+              {skuLabel(i)}
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="button" variant="outline" onClick={goPrev}>
+            ← 前へ
+          </Button>
+          <span className="text-xs text-slate-700">{`編集中: ${currentLabel}`}</span>
+          <Button type="button" variant="outline" onClick={goNext}>
+            次へ →
+          </Button>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="button" variant="outline" onClick={copyCurrent}>
+            📋 コピー
+          </Button>
+          <Button type="button" variant="outline" onClick={pasteHere} disabled={!clipboard}>
+            📥 貼り付け
+          </Button>
+          {clipboard && (
+            <span className="text-xs text-slate-500">
+              コピー済み {clipboard.length}件（対象を切り替えて貼り付けできます）
+            </span>
+          )}
+        </div>
+        <p className="text-[11px] text-slate-400">
+          総入数など一部だけ違う場合は、共通の属性をコピーして各SKUに貼り付け、違う項目だけ直してください。
+        </p>
+      </div>
+      <AttributeEditor key={`${name}:${pasteNonce}`} name={name} />
     </div>
   );
 }

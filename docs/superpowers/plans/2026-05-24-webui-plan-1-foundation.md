@@ -30,7 +30,7 @@ webui/
 ├── postcss.config.mjs
 ├── .env.local                # SUPABASE_URL / SUPABASE_ANON_KEY
 ├── .env.local.example
-├── middleware.ts             # 認証ガード
+├── proxy.ts                  # 認証ガード
 ├── app/
 │   ├── layout.tsx            # ルートレイアウト
 │   ├── globals.css
@@ -379,16 +379,16 @@ git commit -m "feat(webui): add Supabase client modules (browser/server/middlewa
 
 ## Task 6: 認証ミドルウェア + 認証ガード
 
-**Files:** webui/middleware.ts, webui/app/auth/callback/route.ts
+**Files:** webui/proxy.ts, webui/app/auth/callback/route.ts
 
 - [ ] **Step 1: ミドルウェア作成**
 
-`webui/middleware.ts`:
+`webui/proxy.ts`:
 ```typescript
 import { type NextRequest, NextResponse } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const { supabaseResponse, user } = await updateSession(request);
   const { pathname } = request.nextUrl;
 
@@ -434,8 +434,8 @@ export async function GET(request: Request) {
 - [ ] **Step 3: コミット**
 
 ```bash
-git add webui/middleware.ts webui/app/auth/
-git commit -m "feat(webui): add auth middleware and OAuth callback route"
+git add webui/proxy.ts webui/app/auth/
+git commit -m "feat(webui): add auth proxy and OAuth callback route"
 ```
 
 ---

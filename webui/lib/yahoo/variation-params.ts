@@ -81,7 +81,8 @@ export function buildYahooVariationParams(p: ProductInput): YahooVariationResult
 
   // subcode_param: SKU 間で税込価格が異なる場合のみ、全SKUへ price を付ける
   // （Yahoo 仕様: 個別価格の最高値が通常販売価格を上書きするため、付けるなら全SKU一律に付けて明示する）
-  const prices = p.variants.map((v) => yahooTaxInclusive(v.selling_price, v.tax_rate));
+  // 税率は商品レベル(p.tax_rate)が正（variant側は古い値が残ることがある。260715修正）。
+  const prices = p.variants.map((v) => yahooTaxInclusive(v.selling_price, p.tax_rate));
   const allSame = prices.every((x) => x === prices[0]);
   const subcodeParam = allSame
     ? undefined

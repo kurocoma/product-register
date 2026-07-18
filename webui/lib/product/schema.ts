@@ -21,6 +21,14 @@ export const VariantSchema = z.object({
   tax_rate: z.union([z.literal(8), z.literal(10)]).default(10),
   quantity: z.number().int().default(1),
   variation_value: z.string().default(""),   // バリエーション項目選択肢ラベル(例 "1本"/"詰替セット")
+  // SKU管理画像（楽天 variants.{}.images、SKUごとに0〜1枚）。R-Cabinet の公開画像URLを保持し、
+  // 反映時に rakuten-api.ts が "/画像パス"(location) へ変換して同梱する。
+  // 未設定/空 = SKU画像なし。optional = 既存variant互換（display_price と同じ理由）。
+  image_url: z.string().optional(),
+  // お届けの目安 = 在庫あり時納期管理番号（楽天 variant.normalDeliveryDateId、SKU単位）。
+  // 楽天の納期マスタID を文字列で保持（空/未設定 = 送らない）。260715: SKU項目整合。
+  // optional = 既存variant互換（display_price / image_url と同じ理由）。
+  normal_delivery_date_id: z.string().optional(),
   // 配送(SKU別、#3)。楽天 variant.shipping へマッピングする。
   shipping_type: z.string().default("送料別"),     // 送料無料/別 → postageIncluded
   postage_segment_1: z.string().default(""),       // 送料区分1(postageSegment.local)
@@ -149,6 +157,11 @@ export const ProductInputBaseSchema = z.object({
   yahoo_subscription_recommended_cycle: z.string().default(""), // おすすめサイクル（"0"/"1:日数10〜90"/"2:月数1〜6"。空=未設定）
   yahoo_subscription_point_code: z.number().int().min(0).default(0), // 定期購入ポイント倍率（1〜15。0=未設定=APIへ送らない）
 
+  // 白背景画像URL（楽天 whiteBgImage、商品全体で1枚。SKU単位ではない）。
+  // 「画像アップロード」パネルの白背景(wb01)アップロード結果（公開URL）を保持し、
+  // 反映時に rakuten-api.ts が "/画像パス"(location) へ変換して whiteBgImage に載せる。空 = 未設定。
+  white_bg_image_url: z.string().default(""),
+
   // 画像 URL (1〜20)
   image_url_1: z.string().default(""),
   image_url_2: z.string().default(""),
@@ -243,6 +256,8 @@ export function productVariants(p: ProductInput): Variant[] {
       ne_code: p.ne_code,
       jan_code: p.jan_code,
       selling_price: p.selling_price,
+      // 表示価格（二重価格）。単品は商品レベルの display_price を引き継ぐ（0=未設定は送信側で除外）。
+      display_price: p.display_price,
       tax_rate: p.tax_rate,
       quantity: p.quantity,
       variation_value: "",

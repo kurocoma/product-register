@@ -9,9 +9,10 @@ import { ImageCarousel, ImageWithFallback, QuantityRow } from "./parts";
 import type { PreviewDevice } from "./PreviewTabs";
 
 /** 実ページの価格表示は税込。selling_price は全モール税抜統一（Yahoo 取込時も税抜へ変換して保存）のため、
- * 新規登録・取込・編集のどの経路の商品でもこの税込換算が正しい（登録 API 送信値とも一致する）。 */
-function priceInclusive(v: { selling_price: number; tax_rate: number }): number {
-  return Math.floor(v.selling_price * (1 + v.tax_rate / 100) + 0.5);
+ * 新規登録・取込・編集のどの経路の商品でもこの税込換算が正しい（登録 API 送信値とも一致する）。
+ * 税率は SKU の各エントリが属する商品レベル(e.p.tax_rate)を使う（variant側は古い値が残ることがある。260715修正）。 */
+function priceInclusive(e: SkuEntry): number {
+  return Math.floor(e.v.selling_price * (1 + e.p.tax_rate / 100) + 0.5);
 }
 
 function variationName(e: SkuEntry): string {
@@ -54,7 +55,7 @@ export function YahooPreview({
     (cur.p.description_pc ||
       (captionImgList ? "" : '<p style="color:#94a3b8">(画像・説明文 未入力)</p>'));
 
-  const prices = entries.map((e) => priceInclusive(e.v));
+  const prices = entries.map((e) => priceInclusive(e));
   const minPrice = Math.min(...prices);
   const maxPrice = Math.max(...prices);
 
@@ -111,7 +112,7 @@ export function YahooPreview({
               }`}
             >
               <div className="font-semibold">{variationName(e)}</div>
-              <div className="text-xs">{priceInclusive(e.v).toLocaleString()}円</div>
+              <div className="text-xs">{priceInclusive(e).toLocaleString()}円</div>
             </button>
           );
         })}

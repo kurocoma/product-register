@@ -13,6 +13,7 @@ const RAKUTEN_PATCHABLE = new Set([
   "description_pc",
   "description_sp",
   "selling_price",
+  "display_price",
   "jan_code",
   "shipping_type",
   "subscription_enabled",
@@ -68,6 +69,13 @@ export function diffVariants(snap: Variant[] | undefined, edited: Variant[] | un
     const key = variantKey(v);
     const s = snapByKey.get(key);
     if (!s || s.selling_price !== v.selling_price) out.push({ field: `SKU[${key}].販売価格`, before: s?.selling_price, after: v.selling_price });
+    // 表示価格（二重価格）・お届け目安の納期ID（260715: SKU項目整合）。未設定は 0 / "" に正規化して比較。
+    if ((s?.display_price ?? 0) !== (v.display_price ?? 0)) {
+      out.push({ field: `SKU[${key}].表示価格`, before: s?.display_price ?? 0, after: v.display_price ?? 0 });
+    }
+    if ((s?.normal_delivery_date_id ?? "") !== (v.normal_delivery_date_id ?? "")) {
+      out.push({ field: `SKU[${key}].納期ID`, before: s?.normal_delivery_date_id ?? "", after: v.normal_delivery_date_id ?? "" });
+    }
     if (variantShippingChanged(s, v)) out.push({ field: `SKU[${key}].配送`, before: s?.shipping_type, after: v.shipping_type });
     if (!s || s.jan_code !== v.jan_code) out.push({ field: `SKU[${key}].JAN`, before: s?.jan_code, after: v.jan_code });
     const subChanged = s
@@ -152,6 +160,23 @@ export function buildRakutenPatchBody(
       if (!s) continue; // snapshotに無い=新規SKUはpatch不可（再登録upsertへ）
       const vp: Record<string, unknown> = {};
       if (s.selling_price !== v.selling_price) vp.standardPrice = String(v.selling_price);
+      // 表示価格（二重価格）。>0 への設定・変更のみ patch（null 解除は仕様未確認のため送らず skipped で明示）。
+      if ((s.display_price ?? 0) !== (v.display_price ?? 0)) {
+        if ((v.display_price ?? 0) > 0) {
+          vp.referencePrice = { displayType: "REFERENCE_PRICE", type: 1, value: String(v.display_price) };
+        } else {
+          skipped.push(`SKU[${key}].表示価格(解除はpatch未対応・再登録(反映し直し)で解除されます)`);
+        }
+      }
+      // お届けの目安（在庫あり時納期管理番号）。設定・変更のみ patch（解除は同上）。
+      if ((s.normal_delivery_date_id ?? "") !== (v.normal_delivery_date_id ?? "")) {
+        const ndd = Number(v.normal_delivery_date_id);
+        if (v.normal_delivery_date_id?.trim() && Number.isFinite(ndd)) {
+          vp.normalDeliveryDateId = ndd;
+        } else {
+          skipped.push(`SKU[${key}].納期ID(解除はpatch未対応・再登録(反映し直し)で解除されます)`);
+        }
+      }
       if (s.jan_code !== v.jan_code) {
         vp.articleNumber = /^\d{13}$/.test(v.jan_code) ? { value: v.jan_code } : { exemptionReason: 3 };
       }
@@ -188,6 +213,14 @@ export function buildRakutenPatchBody(
     const variantId = rakutenVariantId(p);
     const variant: Record<string, unknown> = {};
     if (fields.has("selling_price")) variant.standardPrice = String(p.selling_price);
+    // 表示価格（二重価格・単品）。>0 への設定・変更のみ patch（解除は多SKU側と同じく skipped で明示）。
+    if (fields.has("display_price")) {
+      if (p.display_price > 0) {
+        variant.referencePrice = { displayType: "REFERENCE_PRICE", type: 1, value: String(p.display_price) };
+      } else {
+        skipped.push("表示価格(解除はpatch未対応・再登録(反映し直し)で解除されます)");
+      }
+    }
     if (fields.has("jan_code")) {
       variant.articleNumber = /^\d{13}$/.test(p.jan_code) ? { value: p.jan_code } : { exemptionReason: 3 };
     }
