@@ -208,7 +208,8 @@ export function buildRakutenUpsertBody(p: ProductInput, opts: BuildUpsertOptions
     if (multi) {
       const skuImageLocation = cabinetLocationFromUrl(v.image_url);
       if (skuImageLocation) {
-        const alt = p.display_name?.trim();
+        // alt は HTML 不可（IE0218）。display_name の <br> 等を平文化してから使う。
+        const alt = plainTextAlt(p.display_name);
         variant.images = [
           { type: "CABINET", location: skuImageLocation, ...(alt ? { alt } : {}) },
         ];
@@ -262,6 +263,18 @@ export function buildRakutenUpsertBody(p: ProductInput, opts: BuildUpsertOptions
   return body;
 }
 
+/** 画像 alt 用の平文化。楽天は images[].alt に HTML を許可しない（IE0218）ため、
+ * タグ（<br> 等・山括弧で囲まれた区間）をスペースに置き換え、残る半角山括弧も除去する。
+ * 全角の＜＞は HTML ではないので残す。display_name には楽天の商品名運用で <br> が
+ * 普通に入るため（r3001-1 実件）、alt に使う前に必ずこれを通す。 */
+export function plainTextAlt(s: string | undefined): string {
+  return String(s ?? "")
+    .replace(/<[^>]*>/g, " ") // タグ（山括弧で囲まれた区間）→スペース
+    .replace(/[<>]/g, "")     // 対にならない山括弧も除去
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 /** 定期購入設定の事前検証（楽天エラー IE0179/IE0430/IE0431/IE0433/IE0434 を送信前に検出する）。
  * 資料: obsidian 50-api-manual/rakuten-subscription-product-registration.md（2026-07-11 実機確認）。 */
 export function validateSubscription(p: ProductInput): { ok: true } | { ok: false; errors: string[] } {
@@ -310,8 +323,18 @@ export function validateUpsertBody(
   if (!body.title) missing.push("title");
   if (!body.itemType) missing.push("itemType");
   if (!body.genreId || !/^\d{6}$/.test(String(body.genreId))) missing.push("genreId(6桁)");
-  const variants = body.variants as Record<string, { standardPrice?: string }> | undefined;
+  const variants = body.variants as
+    | Record<string, { standardPrice?: string; images?: { alt?: string }[] }>
+    | undefined;
   if (!variants || Object.keys(variants).length === 0) missing.push("variants");
   else if (!Object.values(variants)[0]?.standardPrice) missing.push("variants.standardPrice");
+  // SKU画像 alt の HTML 混入を送信前に検出（IE0218 の防御。通常は plainTextAlt 済みで通らない）
+  for (const [key, v] of Object.entries(variants ?? {})) {
+    (v.images ?? []).forEach((img, i) => {
+      if (/[<>]/.test(img?.alt ?? "")) {
+        missing.push(`variants.${key}.images[${i}].alt にHTML不可（IE0218。タグ・山括弧を除去）`);
+      }
+    });
+  }
   return missing.length === 0 ? { ok: true } : { ok: false, missing };
 }
