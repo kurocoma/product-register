@@ -7,6 +7,8 @@ type Preview = {
   valid: boolean; missing: string[]; willOverwrite: boolean; key: string; body?: unknown; params?: unknown;
   /** Yahoo: 統合商品（多SKU）は SKU ごとに分けて登録するため、その件数（単一商品は 1）。 */
   skuCount?: number;
+  /** 楽天: 在庫送信の予定（quantity=null は「変更しない」）。260720仕様変更。 */
+  inventoryPlan?: { variantId: string; quantity: number | null }[];
 };
 
 /** 商品をモールAPIで直接登録するパネル。CSVダウンロードと並走（置換しない）。
@@ -17,6 +19,8 @@ export function RegisterPanel({ productId }: { productId?: string }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // 楽天: 倉庫に入れるか（安全登録）。既定: 新規=ON／既存上書き=OFF（現状の公開/倉庫を維持）
+  const [warehouse, setWarehouse] = useState(true);
 
   if (!productId) {
     return (
@@ -44,7 +48,9 @@ export function RegisterPanel({ productId }: { productId?: string }) {
         key: mall === "rakuten" ? j.manageNumber : j.itemCode,
         body: j.body, params: j.params,
         skuCount: typeof j.skuCount === "number" ? j.skuCount : 1,
+        inventoryPlan: Array.isArray(j.inventoryPlan) ? j.inventoryPlan : undefined,
       });
+      setWarehouse(!j.willOverwrite); // 新規=倉庫（安全）／既存上書き=現状維持が既定
     } catch (e) { setErr("通信エラー: " + (e instanceof Error ? e.message : String(e))); }
     finally { setBusy(false); }
   };
@@ -54,7 +60,7 @@ export function RegisterPanel({ productId }: { productId?: string }) {
     if (preview.willOverwrite && !confirm(`「${preview.key}」は既にモールに存在します。上書き登録しますか？`)) return;
     setBusy(true); reset();
     try {
-      const body = mall === "rakuten" ? {} : { submit: false };
+      const body = mall === "rakuten" ? { warehouse } : { submit: false };
       const res = await fetch(`/api/register/${mall}/${productId}`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
@@ -126,6 +132,26 @@ export function RegisterPanel({ productId }: { productId?: string }) {
               </div>
             ) : null;
           })()}
+          {/* 楽天: 在庫送信の予定と倉庫の選択（260720仕様変更） */}
+          {mall === "rakuten" && (preview.inventoryPlan?.length ?? 0) > 0 && (
+            <div className="mt-0.5 text-slate-500">
+              在庫送信: <span className="font-mono">{preview.inventoryPlan!.map((x) => `${x.variantId}=${x.quantity === null ? "変更なし" : x.quantity}`).join(" / ")}</span>
+              （SKU一覧の「在庫数」で入力。空欄={preview.willOverwrite ? "変更しない" : "0"}）
+            </div>
+          )}
+          {mall === "rakuten" && (
+            <label className="mt-1 flex items-center gap-1.5">
+              <input type="checkbox" checked={warehouse} onChange={(e) => setWarehouse(e.target.checked)} />
+              倉庫に入れる（安全登録・非公開）
+              <span className="text-slate-400">
+                {warehouse
+                  ? ""
+                  : preview.willOverwrite
+                    ? "→ 現在の公開/倉庫状態を維持します"
+                    : "→ 新規は維持対象が無いため倉庫で登録されます"}
+              </span>
+            </label>
+          )}
           {(preview.skuCount ?? 1) > 1 && (
             <div>Yahooは{preview.skuCount}SKUに分けて登録します（item_code=各SKUのNEコード）</div>
           )}

@@ -38,7 +38,23 @@ export type RakutenDryRunResult = {
   valid: boolean;
   missing: string[];
   body: RakutenUpsertBody;
+  /** 在庫送信の予定（260720仕様変更）。quantity=null は「変更しない」（既存商品の未入力SKU）。 */
+  inventoryPlan: { variantId: string; quantity: number | null }[];
 };
+
+/** 在庫送信の決定（純関数・260720仕様変更）。
+ * SKU の stock_quantity 入力済み → その値を送る（0 の明示入力は意図的なゼロ化）。
+ * 未入力: 既存商品 → 送らない（在庫を変更しない＝上書き登録で0に潰さない）／新規 → 従来どおり0。 */
+export function buildInventoryPlan(
+  product: ProductInput,
+  exists: boolean,
+): { variantId: string; quantity: number }[] {
+  return productVariants(product).flatMap((v) => {
+    const variantId = v.sku_manage_number?.trim() || v.ne_code;
+    if (typeof v.stock_quantity === "number") return [{ variantId, quantity: v.stock_quantity }];
+    return exists ? [] : [{ variantId, quantity: 0 }];
+  });
+}
 
 /** dry-run: 送信予定の upsert body の検証と既存有無の確認（書き込みなし）。 */
 export async function dryRunRakutenRegister(
@@ -70,6 +86,10 @@ export async function dryRunRakutenRegister(
     valid: valid.ok && sub.ok,
     missing: [...(valid.ok ? [] : valid.missing), ...(sub.ok ? [] : sub.errors)],
     body,
+    inventoryPlan: productVariants(product).map((v) => ({
+      variantId: v.sku_manage_number?.trim() || v.ne_code,
+      quantity: typeof v.stock_quantity === "number" ? v.stock_quantity : exists ? null : 0,
+    })),
   };
 }
 
@@ -93,14 +113,37 @@ export async function commitRakutenRegister(
   cred: RakutenCredentials,
   product: ProductInput,
   productId: string,
-  opts: { publish?: boolean } = {},
+  opts: { publish?: boolean; keepExistingState?: boolean } = {},
   deps: RakutenRegisterDeps = defaultDeps,
 ): Promise<RakutenCommitOk | RegisterServiceError> {
   const publish = opts.publish === true;
-  const hideItem = !publish;
-  const hideStock = !publish;
-
   const manageNumber = buildRakutenManageNumber(product);
+
+  // 既存商品の現状（存在・倉庫/公開状態）。倉庫の現状維持と在庫スキップ判定に使う（260720仕様変更）。
+  let existing: Awaited<ReturnType<RakutenRegisterDeps["getItem"]>> | null = null;
+  try {
+    existing = await deps.getItem(cred, manageNumber);
+  } catch {
+    /* 取得失敗時は安全側（下の else = 倉庫）へ */
+  }
+  const exists = existing?.exists === true;
+
+  let hideItem: boolean;
+  let hideStock: boolean;
+  if (publish) {
+    hideItem = false;
+    hideStock = false;
+  } else if (opts.keepExistingState && exists && existing?.json) {
+    // 現状維持: 楽天の現在の倉庫/サーチ非表示状態を踏襲（公開中の商品を倉庫に落とさない）
+    hideItem = existing.json.hideItem === true;
+    const feats = existing.json.features as { inventoryDisplay?: unknown } | undefined;
+    hideStock = feats?.inventoryDisplay === "HIDDEN_STOCK";
+  } else {
+    // 従来の安全登録（新規・倉庫指定・現状取得失敗時）
+    hideItem = true;
+    hideStock = true;
+  }
+
   const body = buildRakutenUpsertBody(product, { hideItem, hideStock });
   const valid = validateUpsertBody(manageNumber, body);
   if (!valid.ok) {
@@ -134,17 +177,25 @@ export async function commitRakutenRegister(
     }
   }
 
-  // 在庫数を設定（安全登録は 0）。商品登録成功後に InventoryAPI で別送。
-  // 多SKU: 全SKU分を upsert の variant キー(sku_manage_number||ne_code)で送る（在庫variantIdとupsert keyを一致させる）。
-  const quantity = 0; // 当面は常に0（在庫連携は別トラック）
-  const inv = await deps.bulkUpsertInventory(
-    cred,
-    productVariants(product).map((v) => ({
-      manageNumber,
-      variantId: v.sku_manage_number?.trim() || v.ne_code,
-      quantity,
-    })),
-  );
+  // 在庫の送信（260720仕様変更）: SKU の stock_quantity 入力済み → その値。
+  // 未入力: 既存商品 → 送らない（在庫を変更しない）／新規 → 従来どおり0（安全登録）。
+  // 多SKU: upsert の variant キー(sku_manage_number||ne_code)で送る（在庫variantIdとupsert keyを一致させる）。
+  const plan = buildInventoryPlan(product, exists);
+  let inventorySet = true;
+  let inventoryMessage = "在庫変更なし（未入力のため送信せず）";
+  if (plan.length > 0) {
+    const inv = await deps.bulkUpsertInventory(
+      cred,
+      plan.map((x) => ({ manageNumber, variantId: x.variantId, quantity: x.quantity })),
+    );
+    inventorySet = inv.ok;
+    // 全SKU同一なら従来どおり「在庫N」、SKUごとに異なるときだけ明細（variantId=数量）を列挙
+    inventoryMessage = inv.ok
+      ? plan.every((x) => x.quantity === plan[0].quantity)
+        ? `在庫${plan[0].quantity}`
+        : plan.map((x) => `${x.variantId}=${x.quantity}`).join(" / ")
+      : inv.message;
+  }
 
   return {
     ok: true,
@@ -152,8 +203,8 @@ export async function commitRakutenRegister(
     manageNumber,
     created: result.created,
     status: result.status,
-    safeState: !publish,
-    inventorySet: inv.ok,
-    inventoryMessage: inv.ok ? `在庫${quantity}` : inv.message,
+    safeState: hideItem,
+    inventorySet,
+    inventoryMessage,
   };
 }

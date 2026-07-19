@@ -242,6 +242,8 @@ function BasicInfoSection() {
       </div>
       <TextField name="cost_price" label="原価" type="number" />
       <TextField name="selling_price" label="販売価格" type="number" />
+      {/* 楽天在庫数（単品用・260720仕様変更）。多SKU商品は SKU一覧の在庫数列を使う */}
+      <TextField name="stock_quantity" label="在庫数 (楽天・空欄=変更しない)" type="number" />
     </div>
   );
 }
@@ -257,7 +259,7 @@ function VariantsSection() {
     register(`variants.${idx}.${field}` as FieldPath<FormValues>, opts);
   const cell = "rounded border border-slate-300 px-1 py-1";
   const headers = [
-    "ラベル", "SKU管理番号", "NEコード", "JAN", "販売価格", "表示価格", "税率", "数量",
+    "ラベル", "SKU管理番号", "NEコード", "JAN", "販売価格", "表示価格", "税率", "数量", "在庫数",
     "送料", "送料区分1", "送料区分2", "配送方法セット", "納期ID", "個別送料", "置き配", "SKU画像URL", "",
   ];
   return (
@@ -295,6 +297,8 @@ function VariantsSection() {
                     </select>
                   </td>
                   <td className="px-1"><input type="number" {...reg(idx, "quantity", { setValueAs: emptySafeNumber })} className={`${cell} w-14 text-right`} /></td>
+                  {/* 楽天在庫数（260720仕様変更）。空欄=未入力: 既存商品は在庫を変更しない／新規は0 */}
+                  <td className="px-1"><input type="number" {...reg(idx, "stock_quantity", { setValueAs: emptySafeNumber })} placeholder="—" title="楽天の在庫数。空欄=既存商品は変更しない/新規は0" className={`${cell} w-14 text-right`} /></td>
                   <td className="px-1">
                     <select {...reg(idx, "shipping_type")} className={`${cell} bg-white`}>
                       <option value="送料別">送料別</option><option value="送料無料">送料無料</option>

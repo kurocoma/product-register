@@ -21,6 +21,9 @@ export const VariantSchema = z.object({
   tax_rate: z.union([z.literal(8), z.literal(10)]).default(10),
   quantity: z.number().int().default(1),
   variation_value: z.string().default(""),   // バリエーション項目選択肢ラベル(例 "1本"/"詰替セット")
+  // 楽天在庫数（InventoryAPI で登録時に送る値。260720仕様変更）。
+  // undefined=未入力: 既存商品は在庫を変更しない／新規は安全登録の0。0 は「意図的なゼロ」。
+  stock_quantity: z.number().int().min(0).optional(),
   // SKU管理画像（楽天 variants.{}.images、SKUごとに0〜1枚）。R-Cabinet の公開画像URLを保持し、
   // 反映時に rakuten-api.ts が "/画像パス"(location) へ変換して同梱する。
   // 未設定/空 = SKU画像なし。optional = 既存variant互換（display_price と同じ理由）。
@@ -147,6 +150,10 @@ export const ProductInputBaseSchema = z.object({
   subscription_base_price: z.number().int().min(0).default(0),
   subscription_first_price: z.number().int().min(0).default(0),
 
+  // フラット商品（variants 未設定）用の楽天在庫数。多SKU商品は variants[].stock_quantity を使う。
+  // undefined=未入力（既存商品の在庫を変更しない）。260720仕様変更。
+  stock_quantity: z.number().int().min(0).optional(),
+
   // 定期購入 — Yahoo!ショッピング（260711修正依頼-Task7。editItem の subscription_* 5項目）。
   // 楽天用（上の subscription_*）とは意味が異なるため別フィールドで保持する:
   // Yahoo には type=2「定期購入のみ」があり、group/cycle は楽天の日付/間隔フラグと非対応、
@@ -259,7 +266,7 @@ export function isEmptyVariant(v: Variant): boolean {
     v.normal_delivery_date_id, v.individual_shipping_fee,
   ];
   if (texts.some((s) => String(s ?? "").trim() !== "")) return false;
-  const nums = [v.selling_price, v.display_price, v.subscription_base_price, v.subscription_first_price];
+  const nums = [v.selling_price, v.display_price, v.subscription_base_price, v.subscription_first_price, v.stock_quantity];
   if (nums.some((n) => (n ?? 0) > 0)) return false;
   if ((v.attributes ?? []).length > 0) return false;
   return true;
@@ -289,6 +296,7 @@ export function productVariants(p: ProductInput): Variant[] {
       attributes: p.attributes ?? [],
       subscription_base_price: p.subscription_base_price,
       subscription_first_price: p.subscription_first_price,
+      stock_quantity: p.stock_quantity,
     }),
   ];
 }
