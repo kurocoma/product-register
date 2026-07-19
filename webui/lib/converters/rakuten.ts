@@ -13,7 +13,13 @@ function soryo(shippingType: string): number {
 }
 
 export function baseCodeOf(p: ProductInput): string {
-  return `${p.maker_code}-${p.jan_code.slice(-4)}`;
+  const maker = p.maker_code?.trim();
+  const jan4 = p.jan_code.slice(-4);
+  if (maker) return `${maker}-${jan4}`;
+  // maker_code 空のフォールバック（r2201-1 実件）: "-1149" のような先頭ハイフン名が
+  // 画像ファイル名・管理番号に使われるのを防ぐ。ne_code → item-{JAN下4桁} の順で代用。
+  const ne = p.ne_code?.trim();
+  return ne || `item-${jan4}`;
 }
 
 /** CSV の商品管理番号 = ページのグループキー。取込商品は実際の管理番号(rakuten_manage_number)を

@@ -115,6 +115,17 @@ export function RegisterPanel({ productId }: { productId?: string }) {
       {preview && (
         <div className={`text-xs rounded p-2 ${preview.valid ? "bg-slate-50 text-slate-700" : "bg-amber-50 text-amber-800"}`}>
           <div>対象: <span className="font-mono">{preview.key}</span> / {preview.willOverwrite ? "⚠ 既存を上書き" : "新規登録"}</div>
+          {/* 楽天: 送信する画像パス一覧（実在しないパスへの差し替え事故に事前に気付くための表示） */}
+          {mall === "rakuten" && (() => {
+            const locs = ((preview.body as { images?: { location?: string }[] } | undefined)?.images ?? [])
+              .map((im) => im?.location)
+              .filter((s): s is string => !!s);
+            return locs.length > 0 ? (
+              <div className="mt-0.5 text-slate-500">
+                送信画像（{locs.length}枚）: <span className="font-mono break-all">{locs.join(" ")}</span>
+              </div>
+            ) : null;
+          })()}
           {(preview.skuCount ?? 1) > 1 && (
             <div>Yahooは{preview.skuCount}SKUに分けて登録します（item_code=各SKUのNEコード）</div>
           )}

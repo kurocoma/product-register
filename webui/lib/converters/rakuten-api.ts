@@ -114,14 +114,36 @@ export function buildRakutenManageNumber(p: ProductInput): string {
   return baseCodeOf(p);
 }
 
-/** 商品画像 images[].location（"/フォルダ/ファイル名.jpg" 形式。/cabinet/ 以降のパス）。
- * upsert 本体のほか、画像並び替え後の images[] 部分更新(patch)でも使う。 */
+/** 商品画像 images[].location（"/フォルダ/ファイル名.jpg" 形式。/cabinet/ 以降のパス）を
+ * 命名規約から算出する。**規約名で実際にアップロードした直後にだけ使ってよい**
+ * （rcabinet-sync: アップロード→この規約パスで patch→ローカル書換、で自己完結）。
+ * upsert には使わない（未アップロードの机上パスで RMS を上書きし画像リンク切れになる）。 */
 export function buildImageLocations(p: ProductInput): { type: "CABINET"; location: string }[] {
   const count = Math.max(1, Math.min(20, p.image_count));
   const out: { type: "CABINET"; location: string }[] = [];
   for (let i = 1; i <= count; i++) {
     const t = buildCabinetFileName(p, { kind: "main", index: i });
     out.push({ type: "CABINET", location: `/${t.folder}/${t.filePath}` });
+  }
+  return out;
+}
+
+/** upsert 用の商品画像 images[]。保存済みの実URL（image_url_1..image_count。取込が保持した
+ * モール現物のパス）を最優先し、未設定・変換不能な index のみ命名規約で補完する。
+ * 取込→登録の往復対称を守る（r2201-1 実件: 規約算出で送ると実在しないパスに差し替わる）。 */
+export function buildUpsertImages(p: ProductInput): { type: "CABINET"; location: string }[] {
+  const count = Math.max(1, Math.min(20, p.image_count));
+  const rec = p as unknown as Record<string, unknown>;
+  const out: { type: "CABINET"; location: string }[] = [];
+  for (let i = 1; i <= count; i++) {
+    const stored = rec[`image_url_${i}`];
+    const loc = cabinetLocationFromUrl(typeof stored === "string" ? stored : undefined);
+    if (loc) {
+      out.push({ type: "CABINET", location: loc });
+    } else {
+      const t = buildCabinetFileName(p, { kind: "main", index: i });
+      out.push({ type: "CABINET", location: `/${t.folder}/${t.filePath}` });
+    }
   }
   return out;
 }
@@ -227,7 +249,7 @@ export function buildRakutenUpsertBody(p: ProductInput, opts: BuildUpsertOptions
     genreId: p.mall_category_id,
     productDescription: { pc: p.description_pc, sp: saleBlock + p.description_sp },
     salesDescription: saleBlock,
-    images: buildImageLocations(p),
+    images: buildUpsertImages(p),
     // 税別登録（taxIncluded: false）。当店の楽天商品は税別で登録されており（items.get の
     // standardPrice = 税抜値・実ページの税込表示は楽天側が計算）、アプリの selling_price も
     // 全モール税抜統一のため。true で送ると税抜額が税込価格として登録され実売価格が下がる（260715修正）。
