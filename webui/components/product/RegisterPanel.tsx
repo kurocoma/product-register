@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { defaultRegisterState, type RegisterState } from "@/lib/register/register-state";
 
 type Mall = "rakuten" | "yahoo";
 type Preview = {
@@ -19,8 +20,8 @@ export function RegisterPanel({ productId }: { productId?: string }) {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
-  // 楽天: 倉庫に入れるか（安全登録）。既定: 新規=ON／既存上書き=OFF（現状の公開/倉庫を維持）
-  const [warehouse, setWarehouse] = useState(true);
+  // 楽天: 登録後の状態（公開/現状維持/倉庫）。既定: 新規=倉庫（安全）／既存上書き=現状維持
+  const [regState, setRegState] = useState<RegisterState>("warehouse");
 
   if (!productId) {
     return (
@@ -50,7 +51,7 @@ export function RegisterPanel({ productId }: { productId?: string }) {
         skuCount: typeof j.skuCount === "number" ? j.skuCount : 1,
         inventoryPlan: Array.isArray(j.inventoryPlan) ? j.inventoryPlan : undefined,
       });
-      setWarehouse(!j.willOverwrite); // 新規=倉庫（安全）／既存上書き=現状維持が既定
+      setRegState(defaultRegisterState(j.willOverwrite === true));
     } catch (e) { setErr("通信エラー: " + (e instanceof Error ? e.message : String(e))); }
     finally { setBusy(false); }
   };
@@ -60,7 +61,7 @@ export function RegisterPanel({ productId }: { productId?: string }) {
     if (preview.willOverwrite && !confirm(`「${preview.key}」は既にモールに存在します。上書き登録しますか？`)) return;
     setBusy(true); reset();
     try {
-      const body = mall === "rakuten" ? { warehouse } : { submit: false };
+      const body = mall === "rakuten" ? { state: regState } : { submit: false };
       const res = await fetch(`/api/register/${mall}/${productId}`, {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
@@ -140,17 +141,22 @@ export function RegisterPanel({ productId }: { productId?: string }) {
             </div>
           )}
           {mall === "rakuten" && (
-            <label className="mt-1 flex items-center gap-1.5">
-              <input type="checkbox" checked={warehouse} onChange={(e) => setWarehouse(e.target.checked)} />
-              倉庫に入れる（安全登録・非公開）
+            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+              <span>登録後の状態:</span>
+              <select
+                value={regState}
+                onChange={(e) => setRegState(e.target.value as RegisterState)}
+                className="rounded border border-slate-300 bg-white px-1.5 py-0.5"
+              >
+                <option value="warehouse">倉庫に入れる（安全登録・非公開）</option>
+                <option value="keep">現状維持（既存の倉庫/公開のまま）</option>
+                <option value="publish">公開する（倉庫から出す）</option>
+              </select>
               <span className="text-slate-400">
-                {warehouse
-                  ? ""
-                  : preview.willOverwrite
-                    ? "→ 現在の公開/倉庫状態を維持します"
-                    : "→ 新規は維持対象が無いため倉庫で登録されます"}
+                {regState === "keep" && !preview.willOverwrite && "新規は維持対象が無いため倉庫で登録されます"}
+                {regState === "publish" && "⚠ 検索・店舗ページに公開されます"}
               </span>
-            </label>
+            </div>
           )}
           {(preview.skuCount ?? 1) > 1 && (
             <div>Yahooは{preview.skuCount}SKUに分けて登録します（item_code=各SKUのNEコード）</div>

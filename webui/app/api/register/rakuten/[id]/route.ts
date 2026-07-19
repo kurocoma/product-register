@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getProduct, dbRowToProductInput } from "@/lib/product";
 import { getRakutenCredentialsFromEnv } from "@/lib/rakuten";
+import { registerStateToOpts } from "@/lib/register";
 import {
   dryRunRakutenRegister,
   commitRakutenRegister,
@@ -42,15 +43,19 @@ export async function POST(req: Request, { params }: { params: Promise<{ id: str
   if (!cred) return NextResponse.json({ ok: false, error: "楽天 ESA 認証情報が未設定です" }, { status: 500 });
 
   const reqBody = await req.json().catch(() => ({}));
-  const publish: boolean = reqBody?.publish === true;
-  // warehouse === false のときだけ現状維持（未指定の旧クライアント・一括経路は従来どおり倉庫）
-  const keepExistingState: boolean = reqBody?.warehouse === false;
+  // 登録後の状態（260720）: state = "publish"（公開/倉庫解除） | "keep"（現状維持） | "warehouse"（倉庫）。
+  // 旧クライアント互換: state 未指定時は publish / warehouse===false（現状維持）を従来どおり解釈。
+  const state = reqBody?.state;
+  const opts =
+    state === "publish" || state === "keep" || state === "warehouse"
+      ? registerStateToOpts(state)
+      : { publish: reqBody?.publish === true, keepExistingState: reqBody?.warehouse === false };
 
   const row = await getProduct(supabase, id);
   if (!row) return NextResponse.json({ ok: false, error: "商品が見つかりません" }, { status: 404 });
   const product = dbRowToProductInput(row);
 
-  const result = await commitRakutenRegister(supabase, cred, product, id, { publish, keepExistingState });
+  const result = await commitRakutenRegister(supabase, cred, product, id, opts);
   if (!result.ok) {
     if (result.kind === "api") {
       return NextResponse.json(

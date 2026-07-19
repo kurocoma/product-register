@@ -4,6 +4,7 @@
 // （bulk-plan / bulk-run / missing-labels / types）を直 import のままにする
 // （barrel は *-register-service 経由でモールクライアントを含むため）。
 export * from "./bulk-plan";
+export * from "./register-state";
 export * from "./bulk-run";
 export * from "./missing-labels";
 export * from "./rakuten-register-service";
