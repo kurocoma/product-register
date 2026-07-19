@@ -1,6 +1,7 @@
 import type { ProductInput, Variant } from "@/lib/product/schema";
 import type { ChangedField } from "@/lib/product/diff";
 import { rakutenVariantId, buildVariantShippingForPatch, buildRakutenAttributes } from "./rakuten-api";
+import { sanitizeRakutenSpHtml } from "./rakuten-sp-html";
 
 /** 楽天 items.patch のボディ。変更されたフィールドだけを含む部分更新用。 */
 export type RakutenPatchBody = Record<string, unknown>;
@@ -123,7 +124,10 @@ export function buildRakutenPatchBody(
   if (fields.has("description_pc") || fields.has("description_sp")) {
     body.productDescription = {
       pc: fields.has("description_pc") ? p.description_pc : (snapshot.description_pc ?? p.description_pc),
-      sp: fields.has("description_sp") ? p.description_sp : (snapshot.description_sp ?? p.description_sp),
+      // sp は PC より許可タグが厳しい（strong/tbody 等は IE0215 で拒否）ため送信直前に自動変換
+      sp: sanitizeRakutenSpHtml(
+        fields.has("description_sp") ? p.description_sp : (snapshot.description_sp ?? p.description_sp),
+      ),
     };
   }
 

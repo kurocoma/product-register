@@ -2,6 +2,7 @@ import { productVariants, resolveAttributes, type ProductInput, type Variant } f
 import { baseCodeOf } from "./rakuten";
 import { buildCabinetFileName } from "./cabinet-path";
 import { buildRakutenImgList } from "./image-url";
+import { sanitizeRakutenSpHtml } from "./rakuten-sp-html";
 
 /** Variant → 楽天 variant.shipping。送料無料は postageIncluded のみ。送料別は
  * 個別送料(fee) XOR 送料区分(postageSegment.local/overseas) を設定（排他、docs/楽天/04の制約）。
@@ -274,7 +275,8 @@ export function buildRakutenUpsertBody(p: ProductInput, opts: BuildUpsertOptions
     title: p.display_name,
     itemType: "NORMAL",
     genreId: p.mall_category_id,
-    productDescription: { pc: p.description_pc, sp: saleBlock + p.description_sp },
+    // sp は PC より許可タグが厳しい（strong/tbody 等は IE0215 で拒否）ため送信直前に自動変換する
+    productDescription: { pc: p.description_pc, sp: sanitizeRakutenSpHtml(saleBlock + p.description_sp) },
     salesDescription: saleBlock,
     images: buildUpsertImages(p),
     // 税別登録（taxIncluded: false）。当店の楽天商品は税別で登録されており（items.get の
