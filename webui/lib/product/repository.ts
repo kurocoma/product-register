@@ -1,5 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { ProductInputSchema, type ProductInput } from "./schema";
+import { ProductInputSchema, pruneEmptyVariants, type ProductInput } from "./schema";
 import { recordHistory } from "@/lib/history/recorder";
 
 /** DB の products テーブル上で「主要列」として持つフィールド (25列)。残りは extra JSONB へ。 */
@@ -54,6 +54,10 @@ export function productInputToDbRow(p: ProductInput): Record<string, unknown> {
     if (key === "is_single" || key === "is_set") continue; // 派生プロパティ
     if (MAIN_COLUMN_SET.has(key)) {
       dbRow[key] = value;
+    } else if (key === "variants") {
+      // 「+ SKU追加」の空行（ゴーストSKU）を保存しない。空行が残ると多SKU扱いに
+      // 切り替わり、商品レベルの定期購入価格が無視される等の事故が起きる（IE0433）。
+      extra[key] = pruneEmptyVariants(p.variants ?? []);
     } else {
       extra[key] = value;
     }

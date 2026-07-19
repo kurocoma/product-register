@@ -29,6 +29,7 @@ import { Accordion, AccordionItem } from "@/components/ui/accordion";
 import { Input, Label } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { emptySafeNumber } from "@/lib/product/form-number";
 
 type FormValues = z.input<typeof ProductInputBaseSchema>;
 
@@ -199,7 +200,7 @@ function TextField({
       <Input
         id={name}
         type={type}
-        {...register(name, type === "number" ? { valueAsNumber: true } : undefined)}
+        {...register(name, type === "number" ? { setValueAs: emptySafeNumber } : undefined)}
       />
     </div>
   );
@@ -285,15 +286,15 @@ function VariantsSection() {
                   <td className="px-1"><input {...reg(idx, "sku_manage_number")} className={`${cell} w-28 font-mono`} /></td>
                   <td className="px-1"><input {...reg(idx, "ne_code")} className={`${cell} w-28 font-mono`} /></td>
                   <td className="px-1"><input {...reg(idx, "jan_code")} className={`${cell} w-32 font-mono`} /></td>
-                  <td className="px-1"><input type="number" {...reg(idx, "selling_price", { valueAsNumber: true })} className={`${cell} w-20 text-right`} /></td>
+                  <td className="px-1"><input type="number" {...reg(idx, "selling_price", { setValueAs: emptySafeNumber })} className={`${cell} w-20 text-right`} /></td>
                   {/* 表示価格（二重価格）。楽天 referencePrice / Yahoo original-price / Shopify compareAt。空 = 販売価格に連動 */}
-                  <td className="px-1"><input type="number" {...reg(idx, "display_price", { setValueAs: (x) => (x === "" || x == null || Number.isNaN(Number(x)) ? undefined : Number(x)) })} className={`${cell} w-20 text-right`} /></td>
+                  <td className="px-1"><input type="number" {...reg(idx, "display_price", { setValueAs: emptySafeNumber })} className={`${cell} w-20 text-right`} /></td>
                   <td className="px-1">
                     <select {...reg(idx, "tax_rate", { valueAsNumber: true })} className={`${cell} bg-white`}>
                       <option value={8}>8%</option><option value={10}>10%</option>
                     </select>
                   </td>
-                  <td className="px-1"><input type="number" {...reg(idx, "quantity", { valueAsNumber: true })} className={`${cell} w-14 text-right`} /></td>
+                  <td className="px-1"><input type="number" {...reg(idx, "quantity", { setValueAs: emptySafeNumber })} className={`${cell} w-14 text-right`} /></td>
                   <td className="px-1">
                     <select {...reg(idx, "shipping_type")} className={`${cell} bg-white`}>
                       <option value="送料別">送料別</option><option value="送料無料">送料無料</option>
@@ -649,13 +650,13 @@ function RakutenSubscriptionFields() {
                   <Input
                     type="number"
                     className="max-w-28"
-                    {...register(`variants.${i}.subscription_base_price` as FieldPath<FormValues>, { valueAsNumber: true })}
+                    {...register(`variants.${i}.subscription_base_price` as FieldPath<FormValues>, { setValueAs: emptySafeNumber })}
                   />
                   <span className="text-xs text-slate-400">初回価格</span>
                   <Input
                     type="number"
                     className="max-w-28"
-                    {...register(`variants.${i}.subscription_first_price` as FieldPath<FormValues>, { valueAsNumber: true })}
+                    {...register(`variants.${i}.subscription_first_price` as FieldPath<FormValues>, { setValueAs: emptySafeNumber })}
                   />
                 </div>
               ))}

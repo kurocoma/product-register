@@ -248,8 +248,32 @@ export function displayPrice(p: { display_price?: number; selling_price: number 
 /** 商品の SKU(variant) 一覧を統一的に取り出す。
  * variants[] が1件以上あればそれを、無ければフラットフィールドから単一SKUを1件合成する（後方互換）。
  * 全消費側(プレビュー/CSV/反映)はこのヘルパ経由で多SKU対応へ段階移行する。 */
+/** 実質空の variant（「+ SKU追加」の空行が保存されたゴーストSKU）か。
+ * 識別子・ラベル・価格・定期価格・属性・配送指定のどれも持たない行を「空」とみなす。
+ * 空行が1件でも保存されると多SKU扱いに切り替わり、商品レベルの定期購入価格が
+ * 無視される等の事故（IE0433・r0101-1 実件）が起きるため、判定を一箇所に持つ。 */
+export function isEmptyVariant(v: Variant): boolean {
+  const texts = [
+    v.sku_manage_number, v.ne_code, v.jan_code, v.variation_value, v.image_url,
+    v.postage_segment_1, v.postage_segment_2, v.shipping_method_group,
+    v.normal_delivery_date_id, v.individual_shipping_fee,
+  ];
+  if (texts.some((s) => String(s ?? "").trim() !== "")) return false;
+  const nums = [v.selling_price, v.display_price, v.subscription_base_price, v.subscription_first_price];
+  if (nums.some((n) => (n ?? 0) > 0)) return false;
+  if ((v.attributes ?? []).length > 0) return false;
+  return true;
+}
+
+/** 実質空の variant 行だけを除去する（実内容のある行はそのまま）。 */
+export function pruneEmptyVariants(list: Variant[]): Variant[] {
+  return list.filter((v) => !isEmptyVariant(v));
+}
+
 export function productVariants(p: ProductInput): Variant[] {
-  if (p.variants && p.variants.length > 0) return p.variants;
+  // ゴーストSKU（実質空の行）は無視する。全部空ならフラット合成へフォールバック。
+  const real = pruneEmptyVariants(p.variants ?? []);
+  if (real.length > 0) return real;
   return [
     VariantSchema.parse({
       sku_manage_number: p.rakuten_variant_id || p.ne_code,
