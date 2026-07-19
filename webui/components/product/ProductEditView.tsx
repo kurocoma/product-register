@@ -16,6 +16,7 @@ import { MallEditPanel } from "./MallEditPanel";
 import { NewProductChecklist } from "./NewProductChecklist";
 import { TemplateSaveButton } from "./TemplateSaveButton";
 import { canAutoSaveNewProduct } from "@/lib/product/new-product-checklist";
+import { productCodeSummary } from "@/lib/product/code-summary";
 import { HelpLink } from "@/components/help/HelpLink";
 
 export function ProductEditView({
@@ -63,6 +64,11 @@ export function ProductEditView({
           </div>
           <div className="font-mono text-sm">
             [{currentId ? data.ne_code : "新規商品"}]
+            {currentId && productCodeSummary(data) && (
+              <span className="ml-2 text-xs text-slate-500" title="この商品に含まれる代表コード以外のコード">
+                {productCodeSummary(data)}
+              </span>
+            )}
           </div>
         </div>
         <div className="flex items-center gap-3">

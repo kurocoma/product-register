@@ -6,7 +6,7 @@ import { createClient } from "@/lib/supabase/client";
 import { deleteProduct } from "@/lib/product/repository";
 import type { ProductRow } from "@/lib/product/repository";
 import { mallPresence } from "@/lib/product/schema";
-import { matchesProductQuery, matchesListedFilter, type ListedFilter } from "@/lib/product/search";
+import { matchesProductQuery, matchesListedFilter, productSubCodes, type ListedFilter } from "@/lib/product/search";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { HelpLink } from "@/components/help/HelpLink";
@@ -59,6 +59,8 @@ export function ProductList({ initial }: { initial: ProductRow[] }) {
         ne_code: String(p.ne_code ?? ""),
         product_name: String(p.product_name ?? ""),
         jan_code: String(p.jan_code ?? ""),
+        // 多SKU統合商品を SKU の ne_code / SKU管理番号 / 楽天管理番号でも見つけられるようにする
+        sub_codes: productSubCodes(p.extra),
       };
       if (!matchesProductQuery(fields, query)) return false;
       // 掲載状況の絞り込みは反映ボタンの活性化と同じ情報源（mallPresence）で判定する
