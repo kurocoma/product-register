@@ -148,6 +148,33 @@ export function buildUpsertImages(p: ProductInput): { type: "CABINET"; location:
   return out;
 }
 
+/** 商品オプション（customizationOptions）の送出（260720）。
+ * 編集用の customization_options（選択肢あり）に、忠実性メタ（種別・必須フラグ。
+ * 自由入力 FREE_TEXT はメタのみ）を name で対応付けて楽天形式へ戻す。
+ * upsert は全置換のため、これを送らないと登録のたびに楽天側の商品オプションが消える。 */
+export function buildCustomizationOptions(p: ProductInput): Record<string, unknown>[] {
+  const metaByName = new Map((p.customization_options_meta ?? []).map((m) => [m.name, m]));
+  const out: Record<string, unknown>[] = [];
+  for (const o of p.customization_options ?? []) {
+    if (!o.name || o.values.length === 0) continue;
+    const meta = metaByName.get(o.name);
+    out.push({
+      displayName: o.name,
+      inputType: meta?.input_type ?? "SINGLE_SELECTION",
+      required: meta?.required ?? false,
+      selections: o.values.map((v) => ({ displayValue: v })),
+    });
+    metaByName.delete(o.name);
+  }
+  // 自由入力等（編集用リストに無い・メタのみのオプション）を維持して送る。
+  // 選択式なのに選択肢が無い残骸（アプリで削除されたオプションのメタ）は送らない＝復活させない。
+  for (const m of metaByName.values()) {
+    if (m.input_type === "SINGLE_SELECTION") continue;
+    out.push({ displayName: m.name, inputType: m.input_type, required: m.required });
+  }
+  return out;
+}
+
 /** 画像URL → images[].location（"/フォルダ/ファイル名.jpg"）。
  * buildImageLocations と同じ location 形式（items.upsert の location は
  * `https://image.rakuten.co.jp/[SHOP_URL]/cabinet/画像パス` の "/画像パス" 部分のみ）。
@@ -263,6 +290,9 @@ export function buildRakutenUpsertBody(p: ProductInput, opts: BuildUpsertOptions
   // 未設定・cabinet 公開URLでない値はキー自体を送らない（不正 location での upsert 失敗防止）。
   const wbLocation = cabinetLocationFromUrl(p.white_bg_image_url);
   if (wbLocation) body.whiteBgImage = { type: "CABINET", location: wbLocation };
+  // 商品オプション（項目選択肢）。upsert は全置換のため、送らないと楽天側から消える（260720）。
+  const customization = buildCustomizationOptions(p);
+  if (customization.length > 0) body.customizationOptions = customization;
   if (p.catch_copy_pc) body.tagline = p.catch_copy_pc;
   if (opts.hideItem) body.hideItem = true;
   if (opts.hideStock) {

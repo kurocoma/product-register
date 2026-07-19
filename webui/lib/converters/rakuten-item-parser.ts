@@ -98,6 +98,19 @@ export function parseRakutenItem(
       // フォーム「バリエーション」欄の項目選択肢項目名（NE の sentakusi_yoko_name 用途 = 単一名のため先頭のみ）
       out.option_item_name = options[0].name;
     }
+    // 忠実性メタ（260720）: 全オプション（自由入力 FREE_TEXT 含む）の種別・必須フラグを保持。
+    // 登録（upsert 全置換）で customizationOptions を劣化なく送り返すために使う。
+    const meta = copts
+      .map((o) => {
+        const opt = (o ?? {}) as { displayName?: unknown; inputType?: unknown; required?: unknown };
+        return {
+          name: typeof opt.displayName === "string" ? opt.displayName : "",
+          input_type: typeof opt.inputType === "string" ? opt.inputType : "SINGLE_SELECTION",
+          required: opt.required === true,
+        };
+      })
+      .filter((m) => m.name !== "");
+    if (meta.length > 0) out.customization_options_meta = meta;
   }
 
   // バリエーション軸（variantSelectors）→ フォーム「バリエーション」欄へ（260711修正依頼-8）。

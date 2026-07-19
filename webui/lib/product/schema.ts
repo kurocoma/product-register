@@ -217,6 +217,12 @@ export const ProductInputBaseSchema = z.object({
   customization_options: z
     .array(z.object({ name: z.string(), values: z.array(z.string()) }))
     .default([]),
+  // 商品オプションの忠実性メタ（260720）。取込時に全オプション（自由入力 FREE_TEXT 含む）の
+  // 種別・必須フラグを保持し、登録（upsert 全置換）で楽天へ劣化なく送り返すために使う。
+  // customization_options（選択肢ありのみ・編集用）とは name で対応付ける。
+  customization_options_meta: z
+    .array(z.object({ name: z.string(), input_type: z.string().default("SINGLE_SELECTION"), required: z.boolean().default(false) }))
+    .default([]),
 });
 
 /** transform 適用版 (is_single/is_set 派生フィールドを追加) */

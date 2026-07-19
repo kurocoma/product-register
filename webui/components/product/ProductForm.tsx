@@ -560,12 +560,51 @@ function YahooGroupingSection() {
   );
 }
 
+/** 商品オプション（項目選択肢）の編集（260720）。楽天取込で自動で入り、
+ * 楽天登録（upsert）・Yahoo CSV の options に送られる。自由入力型（FREE_TEXT）は
+ * メタ（customization_options_meta）で不可視のまま維持され、登録時に劣化しない。 */
+function CustomizationOptionsEditor() {
+  const { control, register } = useFormContext<FormValues>();
+  const { fields, append, remove } = useFieldArray({ control, name: "customization_options" });
+  return (
+    <div className="space-y-1.5">
+      <div className="text-xs font-medium text-slate-600">商品オプション（項目選択肢）</div>
+      <p className="text-[11px] text-slate-500">
+        楽天取込で自動で入ります。楽天登録・Yahoo CSV に送信されます（自由入力型オプションは非表示のまま維持）。
+      </p>
+      {fields.length === 0 && <p className="text-sm text-slate-400">オプションなし</p>}
+      {fields.map((f, i) => (
+        <div key={f.id} className="flex items-center gap-2 text-sm">
+          <input
+            {...register(`customization_options.${i}.name` as FieldPath<FormValues>)}
+            placeholder="項目名（例: のし）"
+            className="w-44 rounded border border-slate-300 px-2 py-1"
+          />
+          <input
+            {...register(`customization_options.${i}.values` as FieldPath<FormValues>, {
+              setValueAs: (x) =>
+                Array.isArray(x) ? x : String(x ?? "").split(",").map((s) => s.trim()).filter(Boolean),
+            })}
+            placeholder="選択肢（カンマ区切り。例: あり,なし）"
+            className="flex-1 rounded border border-slate-300 px-2 py-1"
+          />
+          <button type="button" onClick={() => remove(i)} className="text-red-600 hover:underline">削除</button>
+        </div>
+      ))}
+      <Button type="button" variant="outline" onClick={() => append({ name: "", values: [] } as never)}>
+        + オプション追加
+      </Button>
+    </div>
+  );
+}
+
 function VariationSection() {
   const { register, watch } = useFormContext<FormValues>();
   const mode = watch("yahoo_variation_mode");
   const variantCount = (watch("variants") ?? []).length;
   return (
     <div className="space-y-3">
+      <CustomizationOptionsEditor />
       <div className="grid grid-cols-2 gap-3">
         <TextField name="option_item_name" label="項目選択肢項目名" />
         <TextField name="variation_key" label="バリエーション項目キー" />
