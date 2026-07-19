@@ -17,6 +17,7 @@ import { NewProductChecklist } from "./NewProductChecklist";
 import { TemplateSaveButton } from "./TemplateSaveButton";
 import { canAutoSaveNewProduct } from "@/lib/product/new-product-checklist";
 import { productCodeSummary } from "@/lib/product/code-summary";
+import { duplicateProductInput } from "@/lib/product/duplicate";
 import { HelpLink } from "@/components/help/HelpLink";
 
 export function ProductEditView({
@@ -44,6 +45,37 @@ export function ProductEditView({
     },
     [currentId, router],
   );
+
+  // 複製（アウトレット品作成用・260720）: 識別子だけ変えて残りをそのままコピーし、
+  // 新しい商品として保存 → その編集画面へ移動する（モール連携キーはリセット済み）。
+  const [duplicating, setDuplicating] = useState(false);
+  const duplicate = useCallback(async () => {
+    if (duplicating) return;
+    const neCode = window.prompt(
+      "複製先の新しいNEコードを入力してください（例: アウトレットは -ol を付ける）",
+      `${data.ne_code}-ol`,
+    );
+    if (neCode === null) return; // キャンセル
+    const manage = window.prompt(
+      "新しい楽天管理番号（任意。空欄=未設定のまま。登録時はNEコード由来の番号になります）",
+      "",
+    );
+    if (manage === null) return; // キャンセル
+    setDuplicating(true);
+    try {
+      const dup = duplicateProductInput(data, {
+        ne_code: neCode,
+        rakuten_manage_number: manage,
+      });
+      const supabase = createClient();
+      const saved = await upsertProduct(supabase, dup);
+      router.push(`/products/${saved.id}`);
+    } catch (e) {
+      alert("複製に失敗しました: " + (e instanceof Error ? e.message : String(e)));
+    } finally {
+      setDuplicating(false);
+    }
+  }, [data, duplicating, router]);
 
   // 新規作成時のみ: NEコード(保存の必須)が入るまで自動保存を開始しない
   // （空のNEコードで保存エラーを出し続けない）。既存商品の編集は従来どおり常時自動保存。
@@ -73,6 +105,12 @@ export function ProductEditView({
         </div>
         <div className="flex items-center gap-3">
           <AutoSaveIndicator status={status} savedAt={savedAt} draft={!autoSaveEnabled} />
+          {/* 複製（アウトレット品作成用）: 既存商品のみ。識別子以外をそのままコピー */}
+          {currentId && (
+            <Button onClick={duplicate} variant="outline" disabled={duplicating} title="この商品をコピーして新しい商品を作る（NEコード・楽天管理番号だけ変更。モール掲載記録はリセット）">
+              {duplicating ? "複製中…" : "📑 複製"}
+            </Button>
+          )}
           <TemplateSaveButton data={data} />
           <Button onClick={manualSave} variant="outline">
             💾 保存
