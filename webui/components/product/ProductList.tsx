@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { HelpLink } from "@/components/help/HelpLink";
 import { BulkRegisterPanel } from "./BulkRegisterPanel";
+import { RakutenItemPageLink, RakutenRmsItemEditLink, RakutenRmsLink } from "./RakutenLinks";
 
 type Mall = "rakuten" | "yahoo";
 const MALL_LABEL: Record<Mall, string> = { rakuten: "楽天", yahoo: "Yahoo" };
@@ -193,6 +194,7 @@ export function ProductList({ initial }: { initial: ProductRow[] }) {
         <div className="flex items-center gap-2">
           <h1 className="text-2xl font-bold">商品一覧</h1>
           <HelpLink anchor="screen-products" />
+          <RakutenRmsLink className="text-sm text-blue-600 hover:underline" />
         </div>
         <Link href="/products/new"><Button>+ 新規商品</Button></Link>
       </div>
@@ -245,6 +247,17 @@ export function ProductList({ initial }: { initial: ProductRow[] }) {
                     <Link href={`/products/${p.id}`} className="text-blue-600 hover:underline">
                       {String(p.product_name).trim() || <span className="text-slate-400 italic">(名称未設定)</span>}
                     </Link>
+                    {/* 楽天掲載済み（管理番号あり）の商品は RMS編集・公開ページへ直接飛べるようにする（260720依頼） */}
+                    <div className="flex flex-wrap gap-2">
+                      <RakutenRmsItemEditLink
+                        manageNumber={(p.extra as { rakuten_manage_number?: string })?.rakuten_manage_number}
+                        className="text-xs text-blue-600 hover:underline"
+                      />
+                      <RakutenItemPageLink
+                        manageNumber={(p.extra as { rakuten_manage_number?: string })?.rakuten_manage_number}
+                        className="text-xs text-blue-600 hover:underline"
+                      />
+                    </div>
                   </td>
                   <td className="px-3 py-2">
                     <div className="space-y-2">

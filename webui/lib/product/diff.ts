@@ -26,6 +26,12 @@ export const EDITABLE_FIELDS: (keyof ProductInput)[] = [
   "yahoo_subscription_group_index",
   "yahoo_subscription_recommended_cycle",
   "yahoo_subscription_point_code",
+  // バリエーション軸（項目キー・項目名=ページの「タイプ:」表示）。楽天の items.patch では
+  // 送れない（RAKUTEN_PATCHABLE 対象外→skipped 表示で「登録を使う」誘導）が、差分として
+  // 見えないと「変えたのに変わらない」ように見えるため検出だけは行う（260720実件）。
+  // 楽天以外は snapshot にこれらのキーが無ければ比較対象外＝誤検知しない（diffProduct の仕様）。
+  "variation_key",
+  "variation_name",
   // 画像(image_count)は本フローの差分対象外。画像差し替えは ImageUploadPanel + 登録で行う。
 ];
 

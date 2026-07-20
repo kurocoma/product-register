@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { PreviewTabs } from "@/components/preview/PreviewTabs";
 import { CsvDownloadPanel } from "@/components/csv/CsvDownloadPanel";
 import { ImageUploadPanel } from "./ImageUploadPanel";
+import { RakutenLinksBar } from "./RakutenLinks";
 import { RegisterPanel } from "./RegisterPanel";
 import { MallEditPanel } from "./MallEditPanel";
 import { NewProductChecklist } from "./NewProductChecklist";
@@ -147,6 +148,7 @@ export function ProductEditView({
         </div>
         <div className="flex-1 overflow-y-auto p-4 bg-slate-50 space-y-3">
           {/* 反映系（画像アップ・モール登録・取込編集・CSV）はプレビューの上に置く（プレビューが長く下まで届きにくいため） */}
+          <RakutenLinksBar manageNumber={data.rakuten_manage_number} />
           <ImageUploadPanel productId={currentId} />
           <RegisterPanel productId={currentId} />
           <MallEditPanel productId={currentId} formApi={formApi} />

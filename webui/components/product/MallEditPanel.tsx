@@ -32,6 +32,8 @@ const FIELD_LABEL: Record<string, string> = {
   mall_category_id: "カテゴリ",
   yahoo_category_id: "カテゴリ",
   jan_code: "JANコード",
+  variation_key: "バリエーション項目キー",
+  variation_name: "バリエーション項目名（タイプ表示）",
   shipping_type: "送料区分",
   image_count: "画像枚数",
   // Shopify 拡張分（vendor/tags/status/SEO は shopify-patch の差分計画で使うフィールド名）

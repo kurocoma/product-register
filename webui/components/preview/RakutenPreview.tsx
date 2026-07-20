@@ -89,7 +89,11 @@ export function RakutenPreview({
   // バリエーション選択（多SKU）。実ページ同様、価格と数量の間に置く。
   const variantSelector = entries.length > 1 && (
     <div className="border border-slate-200 rounded p-3 space-y-2">
-      <div className="text-sm font-semibold">{page.yahoo_variation_title || "タイプ"}:</div>
+      {/* 軸名は items.upsert の変換（rakuten-api.ts の axisName）と同じ優先順位で表示する。
+          プレビューだけ古い優先順位だと「項目名を変えても変わらない」ように見える（260720実件） */}
+      <div className="text-sm font-semibold">
+        {page.variation_name?.trim() || page.yahoo_variation_title?.trim() || "タイプ"}:
+      </div>
       <div className="space-y-1">
         {entries.map((e) => (
           <label key={e.v.ne_code} className="flex items-center gap-2 text-sm cursor-pointer">

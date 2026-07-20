@@ -92,7 +92,10 @@ export function YahooPreview({
   const groupingSelector = grouped && entries.length > 1 && (
     <div className="border border-slate-200 rounded p-3 space-y-2">
       <div className="flex items-center justify-between">
-        <div className="text-sm font-semibold">{cur.p.yahoo_variation_title || "数量"}:</div>
+        {/* 軸名は Yahoo 送信側（lib/yahoo/variation-params.ts の axis）と同じ優先順位で表示する（260720） */}
+        <div className="text-sm font-semibold">
+          {(cur.p.variation_name || cur.p.variation_key || cur.p.yahoo_variation_title || "タイプ").trim()}:
+        </div>
         <div className="text-xs text-orange-700 bg-orange-50 px-2 py-0.5 rounded">
           grouping-id で集約
         </div>

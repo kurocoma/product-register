@@ -211,8 +211,10 @@ export function buildRakutenUpsertBody(p: ProductInput, opts: BuildUpsertOptions
   const multi = vlist.length > 1;
   // 多SKUは variantSelectors(バリエーション軸) + 各variantの selectorValues が必須(IE0269)。
   // 単軸とし、選択肢ラベルは variation_value（無ければ数量/連番）。重複・空は連番付与で一意化。
-  const axisKey = "type";
-  const axisName = (p.yahoo_variation_title?.trim() || "タイプ").slice(0, 32); // displayName は string(32)
+  // 軸キーは取込時に保存した楽天上の実キー(variation_key)を優先する。既存商品に別キーを送ると
+  // 同一 variantId の selectorValues 変更と扱われ IE0416 で拒否されるため（260720実件）。
+  const axisKey = p.variation_key?.trim() || "type";
+  const axisName = (p.variation_name?.trim() || p.yahoo_variation_title?.trim() || "タイプ").slice(0, 32); // displayName は string(32)
   const labels = multi ? uniqueVariationLabels(vlist) : [];
 
   // SKUごとに variants.{key} を組み立てる（key = SKU管理番号、無ければ NEコード）。
@@ -315,6 +317,107 @@ export function buildRakutenUpsertBody(p: ProductInput, opts: BuildUpsertOptions
     };
   }
   return body;
+}
+
+type SelectorAlignContext = {
+  selectors: { key: string; displayName?: string; values: { displayValue: string }[] }[];
+  bodyVariants: Record<string, Record<string, unknown>>;
+  exKey: string;
+};
+
+/** selector 整合の共通ガード。多SKU body ＋ 既存側に軸キーがあるときだけ整合対象。 */
+function selectorAlignContext(
+  body: RakutenUpsertBody,
+  existingJson: Record<string, unknown> | null | undefined,
+): SelectorAlignContext | null {
+  const selectors = body.variantSelectors as SelectorAlignContext["selectors"] | undefined;
+  const bodyVariants = body.variants as Record<string, Record<string, unknown>> | undefined;
+  if (!selectors || selectors.length === 0 || !bodyVariants || !existingJson) return null;
+  const exSelectors = existingJson.variantSelectors;
+  if (!Array.isArray(exSelectors) || exSelectors.length === 0) return null;
+  const exKey = (exSelectors[0] as { key?: unknown })?.key;
+  if (typeof exKey !== "string" || exKey === "") return null;
+  return { selectors, bodyVariants, exKey };
+}
+
+/** 軸キーだけを既存商品に揃える（選択肢値はアプリの編集値を維持）。
+ * IE0416 の楽観送信（1回目）に使う: 選択肢名の変更を楽天が受けるならそのまま反映され、
+ * 拒否されたら alignSelectorsWithExisting のボディで再送信する（register service 側）。 */
+export function alignSelectorKeyWithExisting(
+  body: RakutenUpsertBody,
+  existingJson: Record<string, unknown> | null | undefined,
+): RakutenUpsertBody {
+  const ctx = selectorAlignContext(body, existingJson);
+  if (!ctx) return body;
+  const { selectors, bodyVariants, exKey } = ctx;
+  const newVariants: Record<string, unknown> = {};
+  for (const [id, v] of Object.entries(bodyVariants)) {
+    const own = v.selectorValues as Record<string, unknown> | undefined;
+    const ownVal = own ? Object.values(own).find((x): x is string => typeof x === "string" && x !== "") : undefined;
+    newVariants[id] = ownVal !== undefined ? { ...v, selectorValues: { [exKey]: ownVal } } : { ...v };
+  }
+  return {
+    ...body,
+    variants: newVariants,
+    variantSelectors: [{ ...selectors[0], key: exKey }, ...selectors.slice(1)],
+  };
+}
+
+/** 既存商品の variantSelectors / selectorValues に upsert body を揃える（IE0416 自動補正・260720実件）。
+ * 楽天は既存 variantId の selectorValues（軸キー・選択肢値とも）を upsert で変更できない
+ * （IE0416: Cannot update selectorValues for the same variantId）。過去に軸キー "type" 固定で
+ * API 登録した商品や、外部作成→取込した商品を再反映すると、body 側の軸キー/選択肢が
+ * 楽天の現状とずれて全 variant 分このエラーになる。そこで送信直前に:
+ * - 軸キーは楽天の現行1軸目のキーを正として採用
+ * - 既存 variantId には楽天の現行選択肢値をそのまま送る（変更不可のため。アプリ側の編集値は適用されない）
+ * - 新規 variantId は body 側の値を維持（既存値と重複したら連番付与で一意化）
+ * 単品⇔多SKUの構造変更・既存側に軸が無い場合は対象外（body をそのまま返す）。入力は変更しない。 */
+export function alignSelectorsWithExisting(
+  body: RakutenUpsertBody,
+  existingJson: Record<string, unknown> | null | undefined,
+): RakutenUpsertBody {
+  const ctx = selectorAlignContext(body, existingJson);
+  if (!ctx) return body;
+  const { selectors, bodyVariants, exKey } = ctx;
+  const exVariants = ((existingJson as Record<string, unknown>).variants ?? {}) as Record<
+    string,
+    Record<string, unknown>
+  >;
+
+  // 既存 variantId の現行値を先に確定し（変更不可のため最優先）、新規はその後に重複回避で決める。
+  const used = new Set<string>();
+  const aligned: Record<string, string> = {};
+  const ids = Object.keys(bodyVariants);
+  for (const id of ids) {
+    const exVal = (exVariants[id]?.selectorValues as Record<string, unknown> | undefined)?.[exKey];
+    if (typeof exVal === "string" && exVal !== "") {
+      aligned[id] = exVal;
+      used.add(exVal);
+    }
+  }
+  for (const id of ids) {
+    if (aligned[id] !== undefined) continue;
+    const own = bodyVariants[id].selectorValues as Record<string, unknown> | undefined;
+    const ownVal = own ? Object.values(own).find((x): x is string => typeof x === "string" && x !== "") : undefined;
+    const base = (ownVal ?? "").slice(0, 32) || `タイプ${ids.indexOf(id) + 1}`;
+    let label = base;
+    let n = 2;
+    while (used.has(label)) label = `${base.slice(0, 28)}(${n++})`;
+    aligned[id] = label;
+    used.add(label);
+  }
+
+  const newVariants: Record<string, unknown> = {};
+  for (const id of ids) newVariants[id] = { ...bodyVariants[id], selectorValues: { [exKey]: aligned[id] } };
+  const values = ids.map((id) => aligned[id]).filter((v, i, a) => a.indexOf(v) === i);
+  return {
+    ...body,
+    variants: newVariants,
+    variantSelectors: [
+      { ...selectors[0], key: exKey, values: values.map((l) => ({ displayValue: l })) },
+      ...selectors.slice(1),
+    ],
+  };
 }
 
 /** 画像 alt 用の平文化。楽天は images[].alt に HTML を許可しない（IE0218）ため、

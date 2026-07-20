@@ -8,6 +8,8 @@ import { upsertProduct } from "@/lib/product/repository";
 import { productVariants, type ProductInput } from "@/lib/product/schema";
 import type { RakutenCredentials } from "@/lib/rakuten/cabinet-client";
 import {
+  alignSelectorKeyWithExisting,
+  alignSelectorsWithExisting,
   buildRakutenManageNumber,
   buildRakutenUpsertBody,
   validateUpsertBody,
@@ -63,18 +65,23 @@ export async function dryRunRakutenRegister(
   deps: RakutenRegisterDeps = defaultDeps,
 ): Promise<RakutenDryRunResult> {
   const manageNumber = buildRakutenManageNumber(product);
-  const body = buildRakutenUpsertBody(product);
+  let body = buildRakutenUpsertBody(product);
+
+  let exists = false;
+  try {
+    const existing = await deps.getItem(cred, manageNumber);
+    exists = existing.exists;
+    // 既存商品はバリエーション軸キーを楽天の現状に揃える（IE0416 自動補正）。
+    // commit の1回目送信（楽観ボディ＝選択肢名はアプリの編集値）と同じ補正を dry-run にも
+    // 適用し、プレビュー body と実送信 body を一致させる。
+    if (exists && existing.json) body = alignSelectorKeyWithExisting(body, existing.json);
+  } catch {
+    /* プレビューは続行 */
+  }
   const valid = validateUpsertBody(manageNumber, body);
   // 定期購入の事前検証（IE0179/IE0430系）。commit と同じ検証を dry-run でも surface する
   // （定期購入が無効な商品は常に ok = 既存挙動不変）。
   const sub = validateSubscription(product);
-
-  let exists = false;
-  try {
-    exists = (await deps.getItem(cred, manageNumber)).exists;
-  } catch {
-    /* プレビューは続行 */
-  }
 
   return {
     ok: true,
@@ -102,6 +109,8 @@ export type RakutenCommitOk = {
   safeState: boolean;
   inventorySet: boolean;
   inventoryMessage: string;
+  /** バリエーション選択肢名の変更が楽天に拒否され（IE0416）、現状値のまま登録した場合の案内。 */
+  selectorNote?: string;
 };
 
 /** commit: items.upsert 実行 + 掲載記録(mall_listed/rakuten_manage_number) + 在庫別送。
@@ -144,7 +153,17 @@ export async function commitRakutenRegister(
     hideStock = true;
   }
 
-  const body = buildRakutenUpsertBody(product, { hideItem, hideStock });
+  let body = buildRakutenUpsertBody(product, { hideItem, hideStock });
+  // 既存商品のバリエーション整合（IE0416 対策・260720実件）: 軸キーは楽天の現状に揃えつつ、
+  // 選択肢名はまずアプリの編集値のまま送る（楽観送信。ラベル変更を楽天が受けるならそのまま反映）。
+  // 楽天が IE0416 で拒否した場合だけ、現状の選択肢値に揃えたボディで自動再送信する。
+  let selectorFallback: RakutenUpsertBody | null = null;
+  if (exists && existing?.json) {
+    const optimistic = alignSelectorKeyWithExisting(body, existing.json);
+    const conservative = alignSelectorsWithExisting(body, existing.json);
+    body = optimistic;
+    if (JSON.stringify(optimistic) !== JSON.stringify(conservative)) selectorFallback = conservative;
+  }
   const valid = validateUpsertBody(manageNumber, body);
   if (!valid.ok) {
     return { ok: false, kind: "invalid", error: "必須項目が不足: " + valid.missing.join(", "), missing: valid.missing };
@@ -155,7 +174,17 @@ export async function commitRakutenRegister(
     return { ok: false, kind: "invalid", error: "定期購入設定が不正: " + sub.errors.join(" / "), missing: sub.errors };
   }
 
-  const result = await deps.upsertItem(cred, manageNumber, body);
+  let result = await deps.upsertItem(cred, manageNumber, body);
+  let selectorNote = "";
+  if (!result.ok && selectorFallback && /IE0416/.test(result.message)) {
+    result = await deps.upsertItem(cred, manageNumber, selectorFallback);
+    if (result.ok) {
+      selectorNote =
+        "バリエーション選択肢名の変更は楽天が拒否したため（IE0416: 既存SKUの選択肢は変更不可）、" +
+        "選択肢名は現状のまま他の変更だけ登録しました。選択肢名を変えるには RMS編集ページで変更後、" +
+        "「モールから取込」で同期してください";
+    }
+  }
   if (!result.ok) {
     return {
       ok: false,
@@ -206,5 +235,6 @@ export async function commitRakutenRegister(
     safeState: hideItem,
     inventorySet,
     inventoryMessage,
+    ...(selectorNote ? { selectorNote } : {}),
   };
 }

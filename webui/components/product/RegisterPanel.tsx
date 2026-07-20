@@ -68,7 +68,8 @@ export function RegisterPanel({ productId }: { productId?: string }) {
       const j = await res.json();
       if (!res.ok || !j.ok) { setErr(j.error || `登録失敗 (HTTP ${res.status})`); return; }
       setMsg(mall === "rakuten"
-        ? `✓ 楽天に${j.created ? "新規登録" : "更新"}しました (${j.manageNumber})`
+        // selectorNote: 選択肢名の変更が楽天に拒否され現状のまま登録した場合の案内（IE0416 楽観送信）
+        ? `✓ 楽天に${j.created ? "新規登録" : "更新"}しました (${j.manageNumber})${j.selectorNote ? `。⚠ ${j.selectorNote}` : ""}`
         // 統合商品（多SKU）は SKU 別の成否を集約表示（例「4SKU中4件登録」）
         : `✓ Yahooに${j.wasUpdate ? "更新" : "登録"}しました (${j.skuSummary ? `${j.itemCode} ほか: ${j.skuSummary.message}` : j.itemCode})。「Yahooに反映」で公開できます`);
     } catch (e) { setErr("通信エラー: " + (e instanceof Error ? e.message : String(e))); }
