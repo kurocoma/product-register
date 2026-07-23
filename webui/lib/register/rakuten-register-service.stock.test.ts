@@ -56,8 +56,22 @@ describe("buildInventoryPlan（在庫送信の決定・純関数）", () => {
 /** commit 用のフェイク deps（実送信しない）。 */
 function fakeDeps(existing: { exists: boolean; json?: Record<string, unknown> }) {
   const calls: { body?: Record<string, unknown>; inventory?: unknown[] } = {};
+  const defaultExistingJson = {
+    variants: Object.fromEntries(
+      twoSkus().map((variant) => [
+        variant.sku_manage_number,
+        {
+          merchantDefinedSkuId: variant.ne_code,
+          standardPrice: String(variant.selling_price),
+          articleNumber: { value: variant.jan_code },
+          specs: [],
+        },
+      ]),
+    ),
+    ...(existing.json ?? {}),
+  };
   const deps: RakutenRegisterDeps = {
-    getItem: async () => ({ exists: existing.exists, status: existing.exists ? 200 : 404, json: existing.json ?? null, raw: "" }),
+    getItem: async () => ({ exists: existing.exists, status: existing.exists ? 200 : 404, json: existing.exists ? defaultExistingJson : null, raw: "" }),
     upsertItem: (async (_c: unknown, _m: unknown, body: unknown) => {
       calls.body = body as Record<string, unknown>;
       return { ok: true, created: !existing.exists, status: 200, message: "", body: {} };

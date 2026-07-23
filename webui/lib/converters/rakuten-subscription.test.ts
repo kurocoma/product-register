@@ -160,6 +160,20 @@ describe("validateSubscription — 事前検証（IE0179/IE0430/IE0431/IE0433/IE
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.errors.some((e) => e.includes("IE0433"))).toBe(true);
   });
+  it("多SKUの一部だけ定期価格なし → 全SKU必須として IE0433", () => {
+    const r = validateSubscription(
+      makeProduct({
+        subscription_enabled: true,
+        subscription_shipping_date_flag: true,
+        variants: [
+          { sku_manage_number: "sku-a", ne_code: "sku-a", jan_code: "4900000000001", selling_price: 3912, tax_rate: 8, quantity: 1, variation_value: "1袋", subscription_base_price: 3716 },
+          { sku_manage_number: "sku-b", ne_code: "sku-b", jan_code: "4900000000002", selling_price: 11000, tax_rate: 8, quantity: 3, variation_value: "3袋", subscription_base_price: 0 },
+        ],
+      }),
+    );
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.errors.some((e) => e.includes("IE0433") && e.includes("sku-b"))).toBe(true);
+  });
   it("初回価格だけ（定期価格なし）→ IE0434", () => {
     const r = validateSubscription(
       makeProduct({ subscription_enabled: true, subscription_shipping_date_flag: true, subscription_first_price: 8000 }),
@@ -177,5 +191,16 @@ describe("validateSubscription — 事前検証（IE0179/IE0430/IE0431/IE0433/IE
     );
     expect(ng.ok).toBe(false);
     if (!ng.ok) expect(ng.errors.some((e) => e.includes("5%以上"))).toBe(true);
+  });
+  it("5%上限は浮動小数ではなく税抜整数で切り捨てる（3912円 → 3716円）", () => {
+    const ok = validateSubscription(
+      makeProduct({ selling_price: 3912, subscription_enabled: true, subscription_shipping_date_flag: true, subscription_base_price: 3716 }),
+    );
+    expect(ok.ok).toBe(true);
+    const ng = validateSubscription(
+      makeProduct({ selling_price: 3912, subscription_enabled: true, subscription_shipping_date_flag: true, subscription_base_price: 3717 }),
+    );
+    expect(ng.ok).toBe(false);
+    if (!ng.ok) expect(ng.errors.some((e) => e.includes("3716円以下"))).toBe(true);
   });
 });

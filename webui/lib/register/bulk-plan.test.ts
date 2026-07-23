@@ -18,12 +18,25 @@ const cred: RakutenCredentials = { serviceSecret: "sec", licenseKey: "key" };
 
 /** モールAPIを呼ばない注入deps。existingKeys にある管理番号だけ「既存あり」を返す。 */
 const fakeDeps = (existingKeys: string[] = []): RakutenRegisterDeps => ({
-  getItem: async (_c, manageNumber) => ({
-    exists: existingKeys.includes(manageNumber),
-    status: existingKeys.includes(manageNumber) ? 200 : 404,
-    json: null,
-    raw: "",
-  }),
+  getItem: async (_c, manageNumber) => {
+    const exists = existingKeys.includes(manageNumber);
+    return {
+      exists,
+      status: exists ? 200 : 404,
+      json: exists
+        ? {
+            variants: {
+              "t002-2542-1": {
+                merchantDefinedSkuId: "t002-2542-1",
+                standardPrice: "10000",
+                specs: [],
+              },
+            },
+          }
+        : null,
+      raw: "",
+    };
+  },
   upsertItem: async () => {
     throw new Error("dry-run で upsertItem を呼んではいけない");
   },

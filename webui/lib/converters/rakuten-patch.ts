@@ -1,6 +1,11 @@
 import type { ProductInput, Variant } from "@/lib/product/schema";
 import type { ChangedField } from "@/lib/product/diff";
-import { rakutenVariantId, buildVariantShippingForPatch, buildRakutenAttributes } from "./rakuten-api";
+import {
+  rakutenVariantId,
+  buildVariantShippingForPatch,
+  buildRakutenAttributes,
+  buildRakutenSpecs,
+} from "./rakuten-api";
 import { sanitizeRakutenSpHtml } from "./rakuten-sp-html";
 
 /** 楽天 items.patch のボディ。変更されたフィールドだけを含む部分更新用。 */
@@ -59,6 +64,13 @@ function variantShippingChanged(a: Variant | undefined, b: Variant): boolean {
   );
 }
 
+/** SKU自由入力行の差分。edited.specs が undefined の旧データは「未管理」なので、
+ * モールsnapshotに値があっても変更扱いにせず既存値を保持する。[] は明示削除。 */
+function variantSpecsChanged(a: Variant | undefined, b: Variant): boolean {
+  if (b.specs === undefined) return false;
+  return JSON.stringify(a?.specs ?? []) !== JSON.stringify(b.specs);
+}
+
 /** 多SKUの差分（snapshot.variants vs edited.variants）を ChangedField[] で返す。
  * 反映プレビュー表示と「変更ありか」判定に使う（patch本体は buildRakutenPatchBody が組む）。
  * field 名は "SKU[{key}].販売価格/配送/JAN" 形式。 */
@@ -79,6 +91,9 @@ export function diffVariants(snap: Variant[] | undefined, edited: Variant[] | un
     }
     if (variantShippingChanged(s, v)) out.push({ field: `SKU[${key}].配送`, before: s?.shipping_type, after: v.shipping_type });
     if (!s || s.jan_code !== v.jan_code) out.push({ field: `SKU[${key}].JAN`, before: s?.jan_code, after: v.jan_code });
+    if (variantSpecsChanged(s, v)) {
+      out.push({ field: `SKU[${key}].自由入力行`, before: s?.specs, after: v.specs });
+    }
     const subChanged = s
       ? (s.subscription_base_price ?? 0) !== (v.subscription_base_price ?? 0) ||
         (s.subscription_first_price ?? 0) !== (v.subscription_first_price ?? 0)
@@ -200,6 +215,10 @@ export function buildRakutenPatchBody(
         } else {
           skipped.push(`SKU[${key}].定期価格(0円への解除はpatch未対応・RMSで解除してください)`);
         }
+      }
+      if (variantSpecsChanged(s, v)) {
+        const specs = buildRakutenSpecs(v.specs);
+        if (specs !== undefined) vp.specs = specs;
       }
       // patchはshipping objectをマージするため、モード切替時に旧キーが残らないようnull明示版を使う。
       if (variantShippingChanged(s, v)) vp.shipping = buildVariantShippingForPatch(v);

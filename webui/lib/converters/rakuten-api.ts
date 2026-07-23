@@ -3,6 +3,7 @@ import { baseCodeOf } from "./rakuten";
 import { buildCabinetFileName } from "./cabinet-path";
 import { buildRakutenImgList } from "./image-url";
 import { sanitizeRakutenSpHtml } from "./rakuten-sp-html";
+import { clampRakutenSubscriptionNet } from "./rakuten-tax";
 
 /** Variant → 楽天 variant.shipping。送料無料は postageIncluded のみ。送料別は
  * 個別送料(fee) XOR 送料区分(postageSegment.local/overseas) を設定（排他、docs/楽天/04の制約）。
@@ -82,6 +83,16 @@ export function buildRakutenAttributes(
   return (attrs || [])
     .filter((a): a is { item: string; value: string; unit?: string } => !!a.item && !!a.value)
     .map((a) => (a.unit ? { name: a.item, values: [a.value], unit: a.unit } : { name: a.item, values: [a.value] }));
+}
+
+/** アプリのSKU自由入力行 → 楽天 variants.{}.specs[]。
+ * undefined は「未管理」のまま返し、patchが楽天上の既存値を保持できるようにする。
+ * 空配列はpatchでの明示削除に使うため保持する。 */
+export function buildRakutenSpecs(
+  specs: Variant["specs"],
+): { label: string; value: string }[] | undefined {
+  if (specs === undefined) return undefined;
+  return specs.map(({ label, value }) => ({ label, value }));
 }
 
 /** SKU(variant)の属性を楽天 variants.{}.attributes[] へ。variant固有の属性(item+value)が
@@ -252,6 +263,10 @@ export function buildRakutenUpsertBody(p: ProductInput, opts: BuildUpsertOptions
     }
     const attributes = buildVariantAttributes(v, p);
     if (attributes.length > 0) variant.attributes = attributes;
+    // SKU自由入力行。upsertは全置換なので全SKUで必ず完全配列を送る。
+    // 既存商品の undefined（旧データ＝未管理）は register service が items.get snapshot から
+    // 補完してからここへ渡す。新規商品の undefined は「行なし」なので [] として明示する。
+    variant.specs = buildRakutenSpecs(v.specs) ?? [];
     if (multi) variant.selectorValues = { [axisKey]: labels[i] };
     // SKU管理画像（variants.{}.images、SKUごとに0..1枚）。商品レベル images と同じ
     // { type: "CABINET", location: "/画像パス" } 形式（cabinetLocationFromUrl で変換）。
@@ -441,9 +456,10 @@ export function validateSubscription(p: ProductInput): { ok: true } | { ok: fals
     errors.push("お届け日付指定・お届け間隔指定の少なくとも一方を有効にしてください（IE0179）");
   }
   const vlist = productVariants(p);
-  const withBase = vlist.filter((v) => (v.subscription_base_price ?? 0) > 0);
-  if (withBase.length === 0) {
-    errors.push("少なくとも1つのSKUに定期購入価格を設定してください（IE0433）");
+  const withoutBase = vlist.filter((v) => (v.subscription_base_price ?? 0) <= 0);
+  if (withoutBase.length > 0) {
+    const labels = withoutBase.map((v) => v.ne_code || v.sku_manage_number).join(", ");
+    errors.push(`定期購入を有効にする場合は全SKUに定期購入価格を設定してください（IE0433: ${labels}）`);
   }
   for (const v of vlist) {
     const label = v.ne_code || v.sku_manage_number;
@@ -456,13 +472,14 @@ export function validateSubscription(p: ProductInput): { ok: true } | { ok: fals
       if (v.selling_price <= 0) {
         errors.push(`SKU ${label}: 通常販売価格が0のため定期購入を設定できません（IE0431）`);
       } else {
-        // 定期価格・初回価格とも通常価格から5%以上の割引が必要（IE0430）
-        const limit = v.selling_price * 0.95;
+        // 定期価格・初回価格とも通常価格から5%以上の割引が必要（IE0430）。
+        // 要件定義書どおり整数演算で税抜上限を切り捨てる。
+        const limit = clampRakutenSubscriptionNet(v.selling_price, v.selling_price);
         if (base > limit) {
-          errors.push(`SKU ${label}: 定期購入価格は通常価格から5%以上割引が必要です（通常${v.selling_price}円 → ${Math.floor(limit)}円以下）`);
+          errors.push(`SKU ${label}: 定期購入価格は通常価格から5%以上割引が必要です（通常${v.selling_price}円 → ${limit}円以下）`);
         }
         if (first > 0 && first > limit) {
-          errors.push(`SKU ${label}: 初回価格は通常価格から5%以上割引が必要です（通常${v.selling_price}円 → ${Math.floor(limit)}円以下）`);
+          errors.push(`SKU ${label}: 初回価格は通常価格から5%以上割引が必要です（通常${v.selling_price}円 → ${limit}円以下）`);
         }
       }
     }

@@ -16,7 +16,9 @@ import {
   validateSubscription,
   type RakutenUpsertBody,
 } from "@/lib/converters/rakuten-api";
+import { parseRakutenVariants } from "@/lib/converters/rakuten-item-parser";
 import { upsertItem, getItem } from "@/lib/rakuten/item-client";
+import { explainRakutenError } from "@/lib/rakuten/error-explainer";
 import { bulkUpsertInventory } from "@/lib/rakuten/inventory-client";
 import type { RegisterServiceError } from "./types";
 
@@ -58,6 +60,52 @@ export function buildInventoryPlan(
   });
 }
 
+const variantKey = (v: ReturnType<typeof productVariants>[number]): string =>
+  v.sku_manage_number?.trim() || v.ne_code?.trim() || "";
+
+function unmanagedSpecsErrors(product: ProductInput, reason: string): string[] {
+  return productVariants(product)
+    .filter((variant) => variant.specs === undefined)
+    .map((variant) => `SKU ${variantKey(variant)}: 自由入力行が未管理です。${reason}`);
+}
+
+/**
+ * 既存商品の全置換upsert前に、旧保存データの specs=undefined を items.get snapshotから補完する。
+ * ローカルで [] / 1..5件が明示されているSKUは編集意図として保持し、remoteで上書きしない。
+ */
+export function prepareRakutenProductForUpsert(
+  product: ProductInput,
+  existingJson: Record<string, unknown> | null,
+): { product: ProductInput; errors: string[] } {
+  const localVariants = productVariants(product);
+  if (localVariants.every((variant) => variant.specs !== undefined)) {
+    return { product, errors: [] };
+  }
+  if (!existingJson) {
+    return {
+      product,
+      errors: unmanagedSpecsErrors(product, "楽天の現状を取得してから再実行してください"),
+    };
+  }
+
+  const remoteVariants = parseRakutenVariants(existingJson);
+  const bySku = new Map(remoteVariants.map((variant) => [variant.sku_manage_number.trim(), variant]));
+  const byNe = new Map(remoteVariants.map((variant) => [variant.ne_code.trim(), variant]));
+  const errors: string[] = [];
+  const variants = localVariants.map((variant) => {
+    if (variant.specs !== undefined) return variant;
+    const sku = variant.sku_manage_number.trim();
+    const ne = variant.ne_code.trim();
+    const remote = (sku ? bySku.get(sku) : undefined) ?? (ne ? byNe.get(ne) : undefined);
+    if (!remote) {
+      errors.push(`SKU ${variantKey(variant)}: 楽天snapshotに対応SKUがなく自由入力行を補完できません`);
+      return variant;
+    }
+    return { ...variant, specs: remote.specs ?? [] };
+  });
+  return { product: { ...product, variants }, errors };
+}
+
 /** dry-run: 送信予定の upsert body の検証と既存有無の確認（書き込みなし）。 */
 export async function dryRunRakutenRegister(
   cred: RakutenCredentials,
@@ -65,23 +113,35 @@ export async function dryRunRakutenRegister(
   deps: RakutenRegisterDeps = defaultDeps,
 ): Promise<RakutenDryRunResult> {
   const manageNumber = buildRakutenManageNumber(product);
-  let body = buildRakutenUpsertBody(product);
 
   let exists = false;
+  let lookupFailed = false;
+  let existingJson: Record<string, unknown> | null = null;
   try {
     const existing = await deps.getItem(cred, manageNumber);
     exists = existing.exists;
-    // 既存商品はバリエーション軸キーを楽天の現状に揃える（IE0416 自動補正）。
-    // commit の1回目送信（楽観ボディ＝選択肢名はアプリの編集値）と同じ補正を dry-run にも
-    // 適用し、プレビュー body と実送信 body を一致させる。
-    if (exists && existing.json) body = alignSelectorKeyWithExisting(body, existing.json);
+    existingJson = existing.json;
   } catch {
-    /* プレビューは続行 */
+    lookupFailed = true;
   }
+  const prepared = exists
+    ? prepareRakutenProductForUpsert(product, existingJson)
+    : {
+        product,
+        errors: lookupFailed
+          ? unmanagedSpecsErrors(product, "既存商品の可能性を否定できないため、楽天の現状取得後に再実行してください")
+          : [],
+      };
+  let body = buildRakutenUpsertBody(prepared.product);
+  // 既存商品はバリエーション軸キーを楽天の現状に揃える（IE0416 自動補正）。
+  // commit の1回目送信（楽観ボディ＝選択肢名はアプリの編集値）と同じ補正を dry-run にも
+  // 適用し、プレビュー body と実送信 body を一致させる。
+  if (exists && existingJson) body = alignSelectorKeyWithExisting(body, existingJson);
   const valid = validateUpsertBody(manageNumber, body);
   // 定期購入の事前検証（IE0179/IE0430系）。commit と同じ検証を dry-run でも surface する
   // （定期購入が無効な商品は常に ok = 既存挙動不変）。
-  const sub = validateSubscription(product);
+  const sub = validateSubscription(prepared.product);
+  const missing = [...prepared.errors, ...(valid.ok ? [] : valid.missing), ...(sub.ok ? [] : sub.errors)];
 
   return {
     ok: true,
@@ -90,8 +150,8 @@ export async function dryRunRakutenRegister(
     manageNumber,
     exists,
     willOverwrite: exists,
-    valid: valid.ok && sub.ok,
-    missing: [...(valid.ok ? [] : valid.missing), ...(sub.ok ? [] : sub.errors)],
+    valid: missing.length === 0,
+    missing,
     body,
     inventoryPlan: productVariants(product).map((v) => ({
       variantId: v.sku_manage_number?.trim() || v.ne_code,
@@ -130,12 +190,29 @@ export async function commitRakutenRegister(
 
   // 既存商品の現状（存在・倉庫/公開状態）。倉庫の現状維持と在庫スキップ判定に使う（260720仕様変更）。
   let existing: Awaited<ReturnType<RakutenRegisterDeps["getItem"]>> | null = null;
+  let lookupFailed = false;
   try {
     existing = await deps.getItem(cred, manageNumber);
   } catch {
-    /* 取得失敗時は安全側（下の else = 倉庫）へ */
+    lookupFailed = true;
   }
   const exists = existing?.exists === true;
+  const prepared = exists
+    ? prepareRakutenProductForUpsert(product, existing?.json ?? null)
+    : {
+        product,
+        errors: lookupFailed
+          ? unmanagedSpecsErrors(product, "既存商品の可能性を否定できないため、楽天の現状取得後に再実行してください")
+          : [],
+      };
+  if (prepared.errors.length > 0) {
+    return {
+      ok: false,
+      kind: "invalid",
+      error: "自由入力行の完全payloadを作成できません: " + prepared.errors.join(" / "),
+      missing: prepared.errors,
+    };
+  }
 
   let hideItem: boolean;
   let hideStock: boolean;
@@ -153,7 +230,7 @@ export async function commitRakutenRegister(
     hideStock = true;
   }
 
-  let body = buildRakutenUpsertBody(product, { hideItem, hideStock });
+  let body = buildRakutenUpsertBody(prepared.product, { hideItem, hideStock });
   // 既存商品のバリエーション整合（IE0416 対策・260720実件）: 軸キーは楽天の現状に揃えつつ、
   // 選択肢名はまずアプリの編集値のまま送る（楽観送信。ラベル変更を楽天が受けるならそのまま反映）。
   // 楽天が IE0416 で拒否した場合だけ、現状の選択肢値に揃えたボディで自動再送信する。
@@ -169,7 +246,7 @@ export async function commitRakutenRegister(
     return { ok: false, kind: "invalid", error: "必須項目が不足: " + valid.missing.join(", "), missing: valid.missing };
   }
   // 定期購入の事前検証（5%割引・フラグ・価格ルール。楽天エラーを送信前に検出）
-  const sub = validateSubscription(product);
+  const sub = validateSubscription(prepared.product);
   if (!sub.ok) {
     return { ok: false, kind: "invalid", error: "定期購入設定が不正: " + sub.errors.join(" / "), missing: sub.errors };
   }
@@ -189,7 +266,7 @@ export async function commitRakutenRegister(
     return {
       ok: false,
       kind: "api",
-      error: "items.upsert 失敗: " + result.message,
+      error: "items.upsert 失敗: " + result.message + explainRakutenError(result.message),
       apiStatus: result.status,
       detail: result.body,
     };

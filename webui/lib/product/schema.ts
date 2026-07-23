@@ -8,6 +8,15 @@ export const AttributeSchema = z.object({
   requirement: z.string().default(""), // 必須/いずれか必須/任意（UI強調用。CSV出力には影響しない）
 });
 
+/** 楽天SKUの属性情報自由入力行（variants[].specs[]）。
+ * Item API / RMS CSV の制約をスキーマ境界で保証する。 */
+export const VariantSpecSchema = z
+  .object({
+    label: z.string().min(1).max(40),
+    value: z.string().min(1).max(140),
+  })
+  .strict();
+
 /** SKU(variant)単位の項目。1商品ページ(楽天 商品管理番号)に複数SKUがぶら下がるケースで使う。
  * 商品ページ共通(名前・説明・画像・カテゴリ)は ProductInput 側に残し、SKUごとに変わる
  * 識別子・価格・配送をここに持つ。後方互換: variants 未設定なら productVariants() がフラットから1件合成。 */
@@ -40,6 +49,10 @@ export const VariantSchema = z.object({
   individual_shipping_fee: z.string().default(""), // 個別送料(shipping.fee)
   okihai: z.boolean().default(true),               // 置き配 受付
   attributes: z.array(AttributeSchema).default([]),
+  // 楽天の属性情報自由入力行（RMS CSV「自由入力行（項目/値）1..5」）。
+  // optional は既存保存データとの互換用。undefined=未管理（patchは現行値を保持、既存商品の
+  // upsertはregister serviceがitems.get snapshotから補完）、[]=明示的に全行削除、1..5件=編集値を反映する。
+  specs: z.array(VariantSpecSchema).max(5).optional(),
   // 定期購入価格（260711修正依頼-5。楽天 variant.subscriptionPrice）。未設定/0 = このSKUは通常購入のみ。
   // optional = 既存variant互換（display_price と同じ理由）。
   subscription_base_price: z.number().int().min(0).optional(),  // subscriptionPrice.basePrice（税抜）
@@ -275,6 +288,7 @@ export function isEmptyVariant(v: Variant): boolean {
   const nums = [v.selling_price, v.display_price, v.subscription_base_price, v.subscription_first_price, v.stock_quantity];
   if (nums.some((n) => (n ?? 0) > 0)) return false;
   if ((v.attributes ?? []).length > 0) return false;
+  if ((v.specs ?? []).length > 0) return false;
   return true;
 }
 

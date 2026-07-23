@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { getProduct, dbRowToProductInput, upsertProduct } from "@/lib/product";
-import { ProductInputSchema, type ProductInput } from "@/lib/product";
+import { ProductInputSchema, productVariants, type ProductInput } from "@/lib/product";
 import { getRakutenCredentialsFromEnv } from "@/lib/rakuten";
 import { getItem as getRakutenItem } from "@/lib/rakuten";
-import { parseRakutenItem } from "@/lib/converters";
-import { buildRakutenManageNumber } from "@/lib/converters";
+import {
+  buildRakutenManageNumber,
+  mergeRakutenVariantSpecs,
+  parseRakutenItem,
+  parseRakutenVariants,
+} from "@/lib/converters";
 import { getYahooConfig, getYahooAccessToken } from "@/lib/yahoo";
 import { getItem as getYahooItem } from "@/lib/yahoo";
 import { parseYahooItem } from "@/lib/converters";
@@ -33,6 +37,9 @@ async function fetchMallSnapshot(
     if (!got.exists || !got.json) return { ok: true, exists: false, parsed: {}, key: manageNumber };
     const parsed = parseRakutenItem(got.json);
     delete (parsed as { _variantId?: string })._variantId;
+    // SKU自由入力行だけをモール現状へ同期する。items.get では在庫数を取得できないため、
+    // variants 全体は置換せず既存SKUの価格・在庫・配送等を保持する。
+    parsed.variants = mergeRakutenVariantSpecs(productVariants(product), parseRakutenVariants(got.json));
     return { ok: true, exists: true, parsed, key: manageNumber };
   }
   if (mall === "shopify") {

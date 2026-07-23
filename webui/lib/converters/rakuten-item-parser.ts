@@ -1,4 +1,4 @@
-import { VariantSchema, type ProductInput, type Variant } from "@/lib/product/schema";
+import { VariantSchema, VariantSpecSchema, type ProductInput, type Variant } from "@/lib/product/schema";
 import { DEFAULT_RAKUTEN_STORE } from "@/lib/rakuten/store";
 
 /** variants.{id}.attributes[] → アプリ属性配列。多値属性は先頭値を採用（必須属性は単一値）、名前/値が空の項目は除外。 */
@@ -15,6 +15,18 @@ function parseVariantAttributes(
       return { item, value: values[0] ?? "", unit, requirement: "" };
     })
     .filter((a) => a.item !== "" && a.value !== "");
+}
+
+/** variants.{id}.specs[] → 楽天SKU自由入力行。
+ * APIレスポンスの不正な要素だけを除外し、公式上限5件までを保持する。プロパティ欠落は
+ * undefined のままにして、旧保存データのpatchで楽天上の既存値を誤って消さない。 */
+function parseVariantSpecs(rawSpecs: unknown): Variant["specs"] {
+  if (!Array.isArray(rawSpecs)) return undefined;
+  return rawSpecs
+    .map((spec) => VariantSpecSchema.safeParse(spec))
+    .filter((result) => result.success)
+    .map((result) => result.data)
+    .slice(0, 5);
 }
 
 /** items.get の images[].location("/画像パス")を公開URLへ変換する。
@@ -311,6 +323,30 @@ export function parseRakutenVariants(json: Record<string, unknown>): Variant[] {
       postage_segment_2: str(ship?.postageSegment?.overseas),
       shipping_method_group: rakutenIdToString(ship?.shippingMethodGroup),
       attributes: parseVariantAttributes(v.attributes),
+      specs: parseVariantSpecs(v.specs),
     });
+  });
+}
+
+/** 編集画面の「モールから取込」用: 楽天snapshotから specs だけを既存SKUへ戻す。
+ * items.get では在庫数を取得できないため variants 全体を置換せず、価格・在庫・配送等の
+ * ローカル値を必ず保持する。SKU管理番号を優先し、合わない場合だけNEコードで照合する。 */
+export function mergeRakutenVariantSpecs(local: Variant[] | undefined, remote: Variant[]): Variant[] {
+  const bySku = new Map(
+    remote
+      .filter((variant) => variant.sku_manage_number.trim() !== "")
+      .map((variant) => [variant.sku_manage_number.trim(), variant]),
+  );
+  const byNe = new Map(
+    remote
+      .filter((variant) => variant.ne_code.trim() !== "")
+      .map((variant) => [variant.ne_code.trim(), variant]),
+  );
+
+  return (local ?? []).map((variant) => {
+    const sku = variant.sku_manage_number.trim();
+    const ne = variant.ne_code.trim();
+    const found = (sku ? bySku.get(sku) : undefined) ?? (ne ? byNe.get(ne) : undefined);
+    return found ? { ...variant, specs: found.specs } : variant;
   });
 }

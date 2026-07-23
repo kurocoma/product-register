@@ -195,6 +195,13 @@ export class RakutenConverter implements Converter {
       row[`商品属性（値）${i}`] = a.value;
       row[`商品属性（単位）${i}`] = a.unit === "0" ? "" : a.unit;
     });
+    // 楽天SKU自由入力行（Item API variants[].specs[] と同じ最大5行）。
+    // 未設定時は列自体を追加せず、既存CSVの列構成を維持する。
+    (v.specs ?? []).forEach((spec, idx) => {
+      const i = idx + 1;
+      row[`自由入力行（項目）${i}`] = spec.label;
+      row[`自由入力行（値）${i}`] = spec.value;
+    });
     return row;
   }
 }
