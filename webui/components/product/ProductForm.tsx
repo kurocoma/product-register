@@ -30,6 +30,8 @@ import { Input, Label } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { emptySafeNumber } from "@/lib/product/form-number";
+import { VariantSpecsEditor } from "./VariantSpecsEditor";
+import { AttributeTargetProvider, useAttributeTarget } from "./attribute-target";
 
 type FormValues = z.input<typeof ProductInputBaseSchema>;
 
@@ -177,7 +179,12 @@ export function ProductForm({
           <WhiteBgImageSection />
         </AccordionItem>
         <AccordionItem value="attribute" title="商品属性 (5)">
-          <AttributeSection />
+          <AttributeTargetProvider>
+            <AttributeSection />
+            <div className="mt-3">
+              <VariantSpecsEditor />
+            </div>
+          </AttributeTargetProvider>
         </AccordionItem>
       </Accordion>
     </FormProvider>
@@ -1143,7 +1150,8 @@ export function AttributeSection() {
   const count = variants.length;
   const hasVariants = count > 0;
 
-  const [target, setTarget] = React.useState<"product" | number>("product");
+  // 編集対象は自由入力行セクションと共有（Provider 内では連動、単体ではローカル state）。
+  const { target, setTarget } = useAttributeTarget();
   const [clipboard, setClipboard] = React.useState<AttrRow[] | null>(null);
   const [pasteNonce, setPasteNonce] = React.useState(0);
 
