@@ -2,6 +2,7 @@
 // 他機能からは "@/lib/rakuten" 経由で import する（内部ファイル直 import は段階的に廃止）。
 export * from "./cabinet-client";
 export * from "./credentials";
+export * from "./error-explainer";
 export * from "./inventory-client";
 export * from "./item-client";
 export * from "./qps-retry";

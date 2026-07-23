@@ -5,7 +5,7 @@ import { recordHistory } from "@/lib/history";
 import type { ProductInput } from "@/lib/product";
 import { diffProduct, type ChangedField } from "@/lib/product";
 import { getRakutenCredentialsFromEnv } from "@/lib/rakuten";
-import { getItem as getRakutenItem, patchItem } from "@/lib/rakuten";
+import { getItem as getRakutenItem, patchItem, explainRakutenError } from "@/lib/rakuten";
 import { parseRakutenItem, parseRakutenVariants } from "@/lib/converters";
 import { buildRakutenManageNumber } from "@/lib/converters";
 import { buildRakutenPatchBody, diffVariants, detectVariantStructuralChange } from "@/lib/converters";
@@ -230,15 +230,22 @@ export async function POST(req: Request, { params }: { params: Promise<{ mall: s
   const changedFields = plan.changed.map((c: ChangedField) => c.field);
 
   if (plan.mall === "rakuten") {
+    // 差分はあるが全て patch 非対応（表示価格・納期ID・定期価格の解除、Yahoo専用項目、バリエーション軸名等）で
+    // 本文が空のケース。空ボディを送ると楽天が GE0011 で拒否するため送信せず、未反映項目を明示して正常終了する。
+    if (Object.keys(plan.body as Record<string, unknown>).length === 0) {
+      return NextResponse.json({
+        ok: true, mall, key: plan.key, noChange: true, skipped: plan.skipped,
+        message: "楽天へAPI反映（patch）で送れる変更がありません（未対応の変更は skipped 参照。解除系は「楽天へ登録」で反映されます）",
+      });
+    }
     let result = await patchItem(plan.cred, plan.key, plan.body);
     // IE0418(ジャンル必須属性不足)なら、商品側の属性を同梱して1回だけ再試行（属性が揃っていれば成功）。
     if (!result.ok && /IE0418|mandatory attribute/i.test(result.message)) {
       result = await patchItem(plan.cred, plan.key, plan.bodyWithAttributes);
     }
     if (!result.ok) {
-      const hint = /IE0418|mandatory attribute/i.test(result.message)
-        ? "（楽天のジャンル必須属性が不足しています。商品編集の「商品属性」でカテゴリIDから属性を読み込み、不足項目を入力して再度反映してください）"
-        : "";
+      // 既知コードの原因・対処とフィールドパスの和訳を付与する（IE0418 の旧 hint も辞書へ集約済み）。
+      const hint = explainRakutenError(result.message);
       return NextResponse.json({ ok: false, error: "items.patch 失敗: " + result.message + hint, status: result.status }, { status: 502 });
     }
     await recordHistory(supabase, "edit", id, { via: "api_update", mall, key: plan.key, changedFields });
