@@ -9,5 +9,6 @@ export * from "./item-image-client";
 export * from "./item-mapper";
 export * from "./lib-image-client";
 export * from "./lib-path";
+export * from "./st-category-client";
 export * from "./subscription";
 export * from "./variation-params";
