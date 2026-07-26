@@ -41,7 +41,7 @@ function buildVariationName(quantity: number, unit: string): string {
 /** 商品オプション {name, values}[] → Yahoo options(自由文形式)文字列。
  *  形式: `name#v1,v2|name2#...`（最大20項目/各100値・name/value 全角28・
  *  使用不可文字(半角スペース/`<>;:&=#"\`/区切り `,|`)除去・合計20,000バイト以内）。 */
-function buildYahooOptions(opts: { name: string; values: string[] }[]): string {
+export function buildYahooOptions(opts: { name: string; values: string[] }[]): string {
   if (!Array.isArray(opts) || opts.length === 0) return "";
   // Yahoo の使用不可文字 + 構造区切り(, |)を除去（name/value とも）。
   const sanitize = (s: string) => fitFullWidth(s.replace(/[ \t<>;:&=#"\\,|]/g, ""), 28);

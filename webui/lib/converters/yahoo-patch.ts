@@ -2,6 +2,7 @@ import type { ProductInput } from "@/lib/product/schema";
 import { displayPrice } from "@/lib/product/schema";
 import type { ChangedField } from "@/lib/product/diff";
 import { yahooTaxInclusive } from "./yahoo-tax";
+import { buildYahooOptions, YahooConverter } from "./yahoo";
 
 /** Yahoo editItem の form パラメータ。 */
 export type YahooPatchParams = Record<string, string>;
@@ -138,6 +139,40 @@ function extractAdvancedParams(xml: string, params: YahooPatchParams): void {
   if (grouping) params.grouping_id = grouping;
 }
 
+/** getItem の <Options> を editItem `options` 文字列（name#v1,v2|name2#...）へ転記する（260723・51商品実件）。
+ * 実測で確認できた単純形（type="2"・スペック連携なし・有料/選択不可なし・自己終了 Value）だけを変換し、
+ * それ以外の形は null を返して従来どおり advanced ブロックに委ねる（安全側）。
+ * 書式と使用不可文字（半角 <>;:&=#"\ と半角スペース）は editItem.html / docs/Yahoo/04 に従う。
+ * 戻り値: "" = Options 実体なし（転記不要） / 文字列 = 転記値 / null = 未対応形（ブロック継続）。 */
+function serializeOptionsFromXml(xml: string): string | null {
+  const container = xml.match(/<Options>([\s\S]*?)<\/Options>/i);
+  if (!container) return "";
+  const attr = (s: string, name: string) => s.match(new RegExp(`${name}="([^"]*)"`, "i"))?.[1] ?? "";
+  const FORBIDDEN = /[#|,;:=<>&"\\ ]/; // 区切り記号・Yahoo使用不可の半角記号・半角スペース
+  const parts: string[] = [];
+  for (const m of container[1].matchAll(/<Option\b([^>]*)>([\s\S]*?)<\/Option>/gi)) {
+    const [, attrs, inner] = m;
+    if (attr(attrs, "type") !== "2") return null; // 実測はすべて type="2"。他typeは意味未確認のため転記しない
+    if (attr(attrs, "specId") !== "") return null; // スペック連携は未検証
+    const name = attr(attrs, "name");
+    if (!name || FORBIDDEN.test(name)) return null;
+    const values: string[] = [];
+    for (const vm of inner.matchAll(/<Value\b([^>]*?)\/>/gi)) {
+      const va = vm[1];
+      if (attr(va, "unselectableFlag") === "1") return null; // 選択不可(=接頭)は未検証
+      if (attr(va, "option_charge") !== "") return null; // 有料オプションは未検証
+      if (attr(va, "specValue") !== "") return null;
+      const vname = attr(va, "name");
+      if (!vname || FORBIDDEN.test(vname)) return null;
+      values.push(vname);
+    }
+    if (values.length === 0) return null;
+    parts.push(`${name}#${values.join(",")}`);
+  }
+  if (parts.length === 0) return ""; // <Options> はあるが Option 実体なし
+  return parts.join("|");
+}
+
 /** editItem で安全に転記できない高度な設定が「実体として存在する」かを検出する。
  * 存在する場合はラウンドトリップで失われる恐れがあるため、呼び出し側で警告/中止する。
  * spec / grouping / variation は extractAdvancedParams で転記できた場合のみ検出から外す
@@ -152,9 +187,10 @@ function detectAdvanced(xml: string, transcribed: YahooPatchParams): string[] {
     const done = transcribed[`variation${i}_spec_id`] || transcribed[`variation${i}_name`] || transcribed[`variation${i}_free_title`];
     if (hasContent(xml, `Variation${i}`) && !done) { adv.push("variation"); break; }
   }
-  // options / subcodes は editItem パラメータ自体は存在するが、getItem からの復元に未確定点が残る
-  // （Option の type 属性の意味・subcode_images の JSON 書式が別マニュアル）ため引き続きブロック。
-  if (/<Options>[\s\S]*?<Option[ >]/i.test(xml)) adv.push("options");
+  // options は単純形（type=2・スペック/有料/選択不可なし）のみ serializeOptionsFromXml で転記できる。
+  // 転記できなかった（未対応形）場合のみ従来どおりブロック。subcodes 等は引き続きブロック
+  // （subcode_images の JSON 書式が別マニュアルのため）。
+  if (/<Options>[\s\S]*?<Option[ >]/i.test(xml) && !transcribed.options) adv.push("options");
   if (/<SubCodes>[\s\S]*?<SubCode[ >]/i.test(xml)) adv.push("subcodes");
   if (/<Inscriptions>[\s\S]*?<Inscription[ >]/i.test(xml)) adv.push("inscriptions");
   // subscription は TAG_TO_PARAM の5項目でラウンドトリップ可能になったため advanced 扱いしない
@@ -189,6 +225,9 @@ export function xmlToEditItemParams(
     for (const k of SUBSCRIPTION_RELATED_PARAMS) delete params[k];
   }
   extractAdvancedParams(xml, params);
+  // 商品オプションの転記（保持）。null=未対応形は params に載せず detectAdvanced のブロックに委ねる。
+  const options = serializeOptionsFromXml(xml);
+  if (options) params.options = options;
   return { params, advanced: detectAdvanced(xml, params) };
 }
 
@@ -226,6 +265,20 @@ const OVERRIDE: Record<string, { param: string; get: (p: ProductInput) => string
   },
 };
 
+/** 多SKUページの商品を「この Yahoo 商品コード(= ne_code)の1商品」として扱えるよう、
+ * 自SKUを先頭（YahooConverter の代表行）に据えた商品を返す。
+ * YahooConverter は CSV/登録と共通で variants[0] を代表にするため、そのまま渡すと
+ * caption の画像一覧（imgList は代表SKUの商品コードで組み立てる）や送料アイコンが
+ * 別SKUの値になる（260726実件: r124 の商品コードは r124-3 なのに caption が r124-1 の画像を指していた）。
+ * 単一SKU・自SKUが見つからない場合は何もしない（従来動作）。 */
+function withOwnVariantFirst(p: ProductInput): ProductInput {
+  const vs = p.variants ?? [];
+  if (vs.length <= 1) return p;
+  const i = vs.findIndex((v) => String(v.ne_code ?? "").trim() === String(p.ne_code ?? "").trim());
+  if (i <= 0) return p;
+  return { ...p, variants: [vs[i], ...vs.slice(0, i), ...vs.slice(i + 1)] };
+}
+
 /** 現在の getItem XML を土台に、変更フィールドだけ上書きした editItem パラメータを作る（ラウンドトリップ更新）。
  * display は現在値を維持（XML から復元済み）し、誤公開を防ぐ。
  * editItem で扱えない変更（画像差し替え・在庫など）は skipped に積み、別フローへ委ねる。 */
@@ -236,6 +289,13 @@ export function buildYahooUpdateParams(
   opts: { sellerId: string },
 ): { params: YahooPatchParams; advanced: string[]; skipped: string[] } {
   const { params, advanced } = xmlToEditItemParams(currentXml, opts.sellerId);
+  // 商品オプション: アプリDB(customization_options)が非空なら DB を正として送る（削除・改名を反映。260723裁定）。
+  // Yahoo側が未対応形（advanced に options）なら上書きせず従来どおりブロック。DBが空の場合は
+  // ラウンドトリップ値を維持し、暗黙のオプション全消しはしない（安全側）。
+  if (!advanced.includes("options") && (p.customization_options ?? []).length > 0) {
+    const fromDb = buildYahooOptions(p.customization_options);
+    if (fromDb) params.options = fromDb;
+  }
   const REQUIRED = new Set(["name", "price", "product_category", "path"]);
   const skipped: string[] = [];
   for (const c of changed) {
@@ -251,6 +311,30 @@ export function buildYahooUpdateParams(
     // original_price も Yahoo は税込のため税込へ変換して送る。
     if (c.field === "selling_price") params.original_price = String(yahooTaxInclusive(displayPrice(p), p.tax_rate));
   }
+  // アプリ管理項目はビルダー（CSV/register と同一ロジック）の値で常に上書きする（260724・r8901-1実件）。
+  // - caption / sp_additional: imgList（Yahoo lib画像の一覧HTML）+ 説明文。素の description_pc を
+  //   送ると imgList が消えるため、変更有無に関わらずビルダー値を正とする。
+  // - ship_weight / delivery: 送料無料=100/1（送料無料アイコン）。DB の shipping_type を正とする。
+  // - subscription 5項目: DB の type が 1/2 のときだけ DB を正として送る。type=0 は「未管理」であり
+  //   Yahoo 側の既存定期設定をラウンドトリップで保持する（criteria C1・yahoo-subscription-patch.test.ts。
+  //   明示的な無効化は register 経路= buildYahooEditItemParams の役割）。
+  {
+    const row = new YahooConverter().convert([withOwnVariantFirst(p)])[0];
+    if (row["caption"]) {
+      params.caption = row["caption"];
+      params.sp_additional = row["sp-additional"] || row["caption"];
+    }
+    params.ship_weight = row["ship-weight"];
+    params.delivery = row["delivery"];
+    if (p.yahoo_subscription_type === 1 || p.yahoo_subscription_type === 2) {
+      params.subscription_type = row["subscription-type"];
+      params.subscription_price = row["subscription-price"];
+      params.subscription_group_index = row["subscription-group-index"];
+      params.subscription_recommended_cycle = row["subscription-recommended-cycle"];
+      params.subscription_point_code = row["subscription-point-code"];
+    }
+  }
+
   // 定期購入の送信値の最終整合（260711修正依頼-Task7。資料§5）:
   // - OVERRIDE が空文字を積んだ任意項目（cycle 未設定・point/group/price 0=未設定）は
   //   パラメータごと削除する（空文字で送ると既定値上書き/書式エラーになる）

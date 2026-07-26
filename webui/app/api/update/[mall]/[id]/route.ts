@@ -10,7 +10,7 @@ import { parseRakutenItem, parseRakutenVariants } from "@/lib/converters";
 import { buildRakutenManageNumber } from "@/lib/converters";
 import { buildRakutenPatchBody, diffVariants, detectVariantStructuralChange } from "@/lib/converters";
 import { EDITABLE_FIELDS } from "@/lib/product";
-import { getYahooConfig, getYahooAccessToken } from "@/lib/yahoo";
+import { getYahooConfig, getYahooAccessToken, fitYahooFieldLimits } from "@/lib/yahoo";
 import { getItem as getYahooItem, editItem, reservePublish } from "@/lib/yahoo";
 import { parseYahooItem } from "@/lib/converters";
 import { buildYahooUpdateParams } from "@/lib/converters";
@@ -101,7 +101,9 @@ async function buildPlan(mall: Mall, product: ProductInput) {
   // 税率フォールバック: XML に TaxrateType が無い場合は商品側の税率で税抜へ変換する（送受対称）。
   const mallParsed = parseYahooItem(got.raw, { fallbackTaxRate: product.tax_rate });
   const changed = diffProduct(mallParsed, product);
-  const { params, advanced, skipped } = buildYahooUpdateParams(got.raw, changed, product, { sellerId: cfg.sellerId });
+  const { params: rawParams, advanced, skipped } = buildYahooUpdateParams(got.raw, changed, product, { sellerId: cfg.sellerId });
+  // Yahoo の文字数上限へ整形（register 経路と同一。260724実件: 商品名75字超で it-01017 / キャッチ30字超で it-01030）。
+  const params = fitYahooFieldLimits(rawParams);
   // 定期購入パラメータの事前検証（it-14093〜14180 を送信前に日本語で検出。GET=プレビューで表示し POST で中止）。
   const sub = validateYahooSubscription(params);
   const subscriptionErrors = sub.ok ? [] : sub.errors;
