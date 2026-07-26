@@ -179,11 +179,20 @@ export function parseRakutenItem(
   if (variants) {
     let targetId = Object.keys(variants)[0];
     if (opts?.merchantSku) {
-      const found = Object.keys(variants).find((k) => {
+      const keys = Object.keys(variants);
+      const bySku = keys.filter((k) => {
         const ms = variants[k]?.merchantDefinedSkuId;
         return typeof ms === "string" && ms.trim() === opts.merchantSku;
       });
-      if (found) targetId = found;
+      // システム連携用SKU番号(merchantDefinedSkuId)が一意ならそれを採用する。
+      // 一致0件または重複のときは SKU管理番号(variantキー)の一致で解決する
+      // （260726実件: 楽天の r8389-1 は3SKUすべて merchantDefinedSkuId="r8389-1" で
+      //   重複しており、msku一致だけだと5袋SKU(12284円)を1袋商品として掴んでいた）。
+      // どちらでも決まらなければ従来どおり先頭SKUへフォールバックする。
+      const byKey = keys.find((k) => k === opts.merchantSku);
+      if (bySku.length === 1) targetId = bySku[0];
+      else if (byKey) targetId = byKey;
+      else if (bySku.length > 1) targetId = bySku[0];
     }
     if (targetId) {
       out._variantId = targetId;

@@ -56,7 +56,11 @@ export async function POST(req: Request, { params }: { params: Promise<{ mall: s
     if (!got.exists || !got.json) {
       return NextResponse.json({ ok: false, error: `楽天に「${code}」の商品が見つかりません（管理番号・システム連携用SKU番号いずれも該当なし。検索反映は最大24h遅延）` }, { status: 404 });
     }
-    const p = parseRakutenItem(got.json, targetSku ? { merchantSku: targetSku } : undefined);
+    // 多SKUページでは、入力コードと一致する SKU のフラット項目を取込む。
+    // SKU検索で解決した場合は targetSku、そうでなければ入力コード自体が SKU 番号でもあり得る
+    // （260726実件: 管理番号 s071-1132-1 のページに SKU s071-1132-1 があるのに、先頭SKU
+    //  s071-1132-6 の価格8619円で取込まれていた）。一致が無ければ従来どおり先頭SKUへフォールバック。
+    const p = parseRakutenItem(got.json, { merchantSku: targetSku ?? code });
     delete (p as { _variantId?: string })._variantId;
     // 多SKU(P2): 1商品ページ配下の全SKUを variants[] に取込む（編集画面でまとめて価格・配送改定するため）。
     p.variants = parseRakutenVariants(got.json);

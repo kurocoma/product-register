@@ -35,7 +35,11 @@ async function fetchMallSnapshot(
     const manageNumber = buildRakutenManageNumber(product);
     const got = await getRakutenItem(cred, manageNumber);
     if (!got.exists || !got.json) return { ok: true, exists: false, parsed: {}, key: manageNumber };
-    const parsed = parseRakutenItem(got.json);
+    // 多SKUページでは「この商品のSKU」(= ne_code = システム連携用SKU番号)のフラット項目を取込む。
+    // merchantSku を渡さないと variants の先頭SKU（API応答順＝不定）が採用され、価格・JAN・配送・
+    // 定期価格・オプションが別SKUの値で上書きされる（260726実件: r3001-1 の 2445円が5袋の11000円になった）。
+    // 一致するSKUが無い場合は parseRakutenItem 側で従来どおり先頭SKUへフォールバックする。
+    const parsed = parseRakutenItem(got.json, { merchantSku: product.ne_code });
     delete (parsed as { _variantId?: string })._variantId;
     // SKU自由入力行だけをモール現状へ同期する。items.get では在庫数を取得できないため、
     // variants 全体は置換せず既存SKUの価格・在庫・配送等を保持する。
