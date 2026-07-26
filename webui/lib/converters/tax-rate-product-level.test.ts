@@ -61,7 +61,7 @@ describe("yahooItemsForProduct — SKU展開時の税率は商品レベルを引
 describe("YahooConverter — 多SKU代表行の税込変換は商品税率を使う", () => {
   it("price / original-price / taxrate-type が 8% で出力される", () => {
     const row = new YahooConverter().convert([staleProduct()])[0];
-    expect(row["price"]).toBe(String(Math.floor(3912 * 1.08 + 0.5))); // 4225 (四捨五入)
+    expect(row["price"]).toBe(String(Math.floor((3912 * 108) / 100))); // 4224 (切り捨て・2026-07-24裁定)
     expect(row["taxrate-type"]).toBe("0.08");
   });
 });
@@ -77,7 +77,7 @@ describe("buildYahooVariationParams — subcode_param の税込価格は商品�
     const r = buildYahooVariationParams(p);
     expect(r.ok).toBe(true);
     if (r.ok) {
-      expect(r.params.subcode_param).toContain(`r7201-1-mg=price:${Math.floor(3912 * 1.08 + 0.5)}`); // 4225
+      expect(r.params.subcode_param).toContain(`r7201-1-mg=price:${Math.floor((3912 * 108) / 100)}`); // 4224 (切り捨て)
       expect(r.params.subcode_param).toContain(`r7201-1-sw=price:${Math.floor(7517 * 1.08 + 0.5)}`); // 8118
     }
   });
