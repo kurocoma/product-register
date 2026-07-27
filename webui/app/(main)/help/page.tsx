@@ -43,6 +43,7 @@ const SCREEN_TOC = [
   { id: "screen-bulk-register", label: "一括登録" },
   { id: "screen-bulk-images", label: "画像一括アップロード" },
   { id: "screen-migrate", label: "楽天→Yahoo 一括移行" },
+  { id: "screen-sale-support", label: "セール支援" },
   { id: "screen-related-import", label: "関連商品（セット）取込" },
   { id: "screen-csv", label: "CSV ダウンロード" },
   { id: "screen-templates", label: "テンプレート管理" },
@@ -165,6 +166,19 @@ export default function HelpPage() {
           <li>対応表に見つからない商品は Yahoo カテゴリID を手入力してから登録する</li>
           <li>ドライランで確認 → Yahoo へ登録</li>
         </ol>
+      </HelpSection>
+
+      <HelpSection id="screen-sale-support" title="🏷 セール支援（楽天スーパーセール）">
+        <p>楽天の商品を一括で値引きし、販売期間（購入可能期間）を設定する画面です。実行前に元価格の控えとして「-SS 倉庫コピー」（非公開）を自動作成するので、セール後に元へ戻せます。</p>
+        <ol className="list-decimal list-inside space-y-1">
+          <li>「セール適用」タブに商品管理番号を貼り付け、値引き％・販売期間・二重価格の有無を指定する</li>
+          <li>「プレビュー」で SKU ごとの割引後価格（税込×(1-％) 切り捨て）を確認する</li>
+          <li>「実行」で -SS コピー作成 → 値引き・期間設定 → 読み戻し検証まで一括実行される</li>
+          <li>セール終了後は「復元」タブで -SS コピーを選び、価格・二重価格・販売期間を書き戻す（-SS は削除するか残すかを選べる）</li>
+        </ol>
+        <p className="text-slate-500">
+          💡 既に -SS コピーがある商品は上書きせず対象外になります。定期購入価格は変更しません。
+        </p>
       </HelpSection>
 
       <HelpSection id="screen-related-import" title="🧩 関連商品（セット）取込">

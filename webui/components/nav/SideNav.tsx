@@ -27,6 +27,7 @@ const groups: NavGroup[] = [
       { href: "/bulk-images", label: "画像一括アップロード", icon: "🖼" },
       { href: "/csv", label: "CSV ダウンロード", icon: "📥" },
       { href: "/migrate", label: "楽天→Yahoo 一括移行", icon: "🚚" },
+      { href: "/sale-support", label: "セール支援", icon: "🏷" },
     ],
   },
   {
