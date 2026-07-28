@@ -44,6 +44,9 @@ const SCREEN_TOC = [
   { id: "screen-bulk-images", label: "画像一括アップロード" },
   { id: "screen-migrate", label: "楽天→Yahoo 一括移行" },
   { id: "screen-sale-support", label: "セール支援" },
+  { id: "screen-bulk-price", label: "JAN売価変更" },
+  { id: "screen-bulk-notice", label: "お知らせ一括追記" },
+  { id: "screen-bulk-rename", label: "商品名セール文言" },
   { id: "screen-related-import", label: "関連商品（セット）取込" },
   { id: "screen-csv", label: "CSV ダウンロード" },
   { id: "screen-templates", label: "テンプレート管理" },
@@ -179,6 +182,41 @@ export default function HelpPage() {
         <p className="text-slate-500">
           💡 既に -SS コピーがある商品は上書きせず対象外になります。定期購入価格は変更しません。
         </p>
+      </HelpSection>
+
+      <HelpSection id="screen-bulk-price" title="💴 JAN売価変更">
+        <p>JANコードから商品を抽出して、売価（税抜）を一括変更する画面です。同じJANを持つ単品・セット商品・SKUがまとめて対象になります。</p>
+        <ol className="list-decimal list-inside space-y-1">
+          <li>JANコード（13桁）を貼り付けて「抽出・プレビュー」する</li>
+          <li>一覧で現在の税抜価格と税込換算（楽天/Yahoo）を確認し、変更したい行に新税抜価格を入力する（未入力の行は変更されない）</li>
+          <li>もう一度「プレビュー」して新税込を確認 → 「実行」でアプリDB → 楽天（patch）→ Yahoo（editItem）の順に反映される</li>
+          <li>「実行後に Yahoo 反映予約」にチェックがあると、最後にストア全体の反映予約（reservePublish）まで行う</li>
+        </ol>
+        <p className="text-slate-500">
+          💡 多SKU商品はSKU行ごとに価格を入力します。プレビュー後に入力を変えた場合は再プレビューが必要です（安全のため、プレビューで表示した値だけが実行されます）。
+        </p>
+      </HelpSection>
+
+      <HelpSection id="screen-bulk-notice" title="📢 お知らせ一括追記">
+        <p>夏季休業などのお知らせを、商品説明文の冒頭または末尾へ一括追記する画面です。楽天PC販売説明文 / PC商品説明文 / スマホ説明文から対象を選べます（PC商品説明文はYahooの商品説明にも反映されます）。</p>
+        <ol className="list-decimal list-inside space-y-1">
+          <li>「追記」タブでお知らせ本文（HTML可）・位置（冒頭/末尾）・対象フィールドを指定し、管理番号を貼り付ける</li>
+          <li>プレビューで対象と追記フィールドを確認 → 実行でアプリDB → 楽天 → Yahoo に反映される</li>
+          <li>外すときは「解除」タブで同じ管理番号を貼り付けて検出 → 削除するお知らせを選んでプレビュー → 実行</li>
+        </ol>
+        <p className="text-slate-500">
+          💡 追記部分は目印マーカー（HTMLコメント・ページ表示に影響なし）で囲まれるため、解除で元の説明文に完全に戻ります。空欄の説明文には追記しません。
+        </p>
+      </HelpSection>
+
+      <HelpSection id="screen-bulk-rename" title="🔤 商品名セール文言">
+        <p>セール文言（例:【スーパーセール10%OFF】）を商品名の先頭へ一括追記・解除する画面です。</p>
+        <ol className="list-decimal list-inside space-y-1">
+          <li>「追記」を選び、セール文言と管理番号を入力してプレビューする</li>
+          <li>文字数レギュレーション（楽天255バイト＝全角127字相当・Yahoo全角75字）を超える商品は自動で除外され、超過量が警告一覧に出る（商品名を短くしてから再実行）</li>
+          <li>実行でアプリDB → 楽天 → Yahoo に反映される</li>
+          <li>セール終了後は「解除」を選んで同じ文言で実行すると、先頭の文言だけが除去されて元に戻る（先頭に文言が無い商品はスキップ）</li>
+        </ol>
       </HelpSection>
 
       <HelpSection id="screen-related-import" title="🧩 関連商品（セット）取込">

@@ -10,6 +10,10 @@ import { cn } from "@/lib/utils";
  * - screen-bulk-register  … 一括登録
  * - screen-bulk-images    … 画像一括アップロード
  * - screen-migrate        … 楽天→Yahoo 一括移行
+ * - screen-sale-support   … セール支援
+ * - screen-bulk-price     … JAN売価変更
+ * - screen-bulk-notice    … お知らせ一括追記
+ * - screen-bulk-rename    … 商品名セール文言
  * - screen-related-import … 関連商品（セット）取込
  * - screen-csv            … CSV ダウンロード
  * - screen-templates      … テンプレート管理
