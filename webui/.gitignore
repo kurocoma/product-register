@@ -25,6 +25,9 @@
 .DS_Store
 *.pem
 
+# NEマスタ自動ダウンロードの取得物（CSV・storage state・失敗時の証跡）
+/.ne-master-downloads/
+
 # debug
 npm-debug.log*
 yarn-debug.log*

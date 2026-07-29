@@ -252,6 +252,44 @@ export default function HelpPage() {
           <li>取込元（NE 各マスタ / Excel）ごとにファイルを選んで取り込む</li>
           <li>NEコードを軸に 1 つの台帳へ統合される</li>
         </ol>
+        <p className="text-slate-500">
+          💡 NE の3マスタ（商品・セット・紐づけ）は「NEから自動ダウンロード」ボタンで取得できます。商品・セットは NE にログインして詳細検索から
+          CSV を落とし、1000件を超える場合は2ページ目以降も取得して結合したうえで、そのまま取込みます。
+          紐づけ表は専用ページ（設定＞商品＞商品コード紐づけ）から店舗未選択＝全店舗一括でダウンロードします（ページ分割なし）。
+          事前に環境変数 <code>NEXT_ENGINE_LOGIN_ID</code> / <code>NEXT_ENGINE_PASSWORD</code> の設定が必要です。
+        </p>
+        <ul className="list-disc list-inside space-y-1 text-slate-500">
+          <li>
+            件数やページ数が合わない対象は<strong>自動取込を止めます</strong>（部分データ・重複データの流し込み防止）。
+            CSV を確認してから「警告を承知で取込む」を押してください。
+            なおセット商品マスタは1件が構成品ごとの複数行になるため（実測: 一覧1472件→CSV1677行）、
+            行数の照合はせずページ数だけで取りこぼしを判定します。
+          </li>
+          <li>
+            取得に失敗するときは「NEの画面構成を調べる（診断）」を実行します。検索対象3種（商品情報単位／セット商品情報単位／ページ情報単位）
+            ×店舗ごとに、どの CSV（<code>data-file-name</code>）が落とせるかをダウンロードせずに一覧化します。
+            正しい値が分かったら <code>NE_MASTER_SYOHIN_FILE</code> / <code>_SEARCH_TARGET</code> / <code>_CONTAINER</code>
+            （対象ごとに SYOHIN / SET / HIMODUKE）で上書きできます。紐づけ表の専用ページが変わったときは
+            <code>NE_MASTER_HIMODUKE_DIRECT_URL</code> / <code>NE_MASTER_HIMODUKE_DIRECT_BUTTON</code> で上書きします。
+          </li>
+          <li>
+            ブラウザ操作は Playwright（<code>devDependencies</code>）を使うため、<strong>この機能は開発用サーバー・社内端末でのみ動作</strong>します。
+            Playwright を含まない本番デプロイでは実行できません。CLI から直接叩く場合は
+            <code>node scripts/ne-master-download.mjs --probe</code> / <code>--targets ne-syohin,ne-set,ne-himoduke</code> を使います。
+          </li>
+          <li>
+            同時に1本だけ実行できます（多重起動時は「実行中です」と表示）。全体タイムアウトは <code>NE_MASTER_TIMEOUT_MS</code> で調整できます。
+          </li>
+          <li>
+            件数（<code>data-entries</code> や「全N件中…」表記）が読み取れなかった対象も<strong>自動取込を止めます</strong>。
+            行数の照合ができず、1000件超の後半ページを取りこぼしていても検出できないためです。
+          </li>
+          <li>
+            失敗時の証跡（スクリーンショット・HTML）と保存済みセッション（<code>next_engine_state.json</code>）は
+            <code>.ne-master-downloads/_work/</code> に残ります。<strong>NE のログイン状態そのものを含む</strong>ため、
+            他人への共有・チケット添付・リポジトリへのコミットはしないでください。
+          </li>
+        </ul>
       </HelpSection>
 
       <HelpSection id="screen-masters-related" title="🔎 関連商品抽出">
