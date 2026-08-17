@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { IchibaSearchItem } from "@/lib/rakuten";
 import {
+  JAN_NAME_MATCH_THRESHOLD,
   competitorMaxRate,
   filterCompetitors,
   nameMatchScore,
   normalizeNameKeyword,
+  significantTokens,
   tokenize,
 } from "./matcher";
 
@@ -54,6 +56,27 @@ describe("filterCompetitors", () => {
     });
     expect(out.map((c) => c.shopCode)).toEqual(["match"]);
   });
+
+  it("別ブランド品が販促常套句・数量語の一致だけで競合扱いにならない", () => {
+    const items = [item({ shopCode: "other-brand", itemName: "【送料無料】レノア 柔軟剤 8個セット" })];
+    const out = filterCompetitors(items, {
+      ownShopCode: "me",
+      ownPrice: 5000,
+      ownName: "【送料無料】ランドリン 柔軟剤 8個セット",
+    });
+    expect(out).toHaveLength(0); // 有意トークン[ランドリン,柔軟剤]のうち一致は柔軟剤のみ = 0.5 < 0.6
+  });
+
+  it("nameThreshold でしきい値を緩められる（JAN検索用の緩い検証）", () => {
+    const items = [item({ shopCode: "other-brand", itemName: "【送料無料】レノア 柔軟剤 8個セット" })];
+    const out = filterCompetitors(items, {
+      ownShopCode: "me",
+      ownPrice: 5000,
+      ownName: "【送料無料】ランドリン 柔軟剤 8個セット",
+      nameThreshold: JAN_NAME_MATCH_THRESHOLD,
+    });
+    expect(out).toHaveLength(1); // 0.5 >= 0.3 で通過（JAN一致という別根拠がある前提の緩い検証）
+  });
 });
 
 describe("competitorMaxRate", () => {
@@ -66,6 +89,12 @@ describe("competitorMaxRate", () => {
     expect(competitorMaxRate(comps, 3)).toBe(2);
   });
 
+  it("同一店の複数出品がN枠を潰さない（店単位で数える）", () => {
+    const comps = [comp("a", 1000, 1), comp("a", 1100, 1), comp("b", 1200, 1), comp("c", 1300, 5)];
+    // 上位3「店」= a,b,c → c の5倍が拾われる（件数で切ると [a,a,b] で 1 になってしまう）
+    expect(competitorMaxRate(comps, 3)).toBe(5);
+  });
+
   it("競合なしは null", () => {
     expect(competitorMaxRate([], 3)).toBeNull();
   });
@@ -76,15 +105,24 @@ describe("competitorMaxRate", () => {
   });
 });
 
-describe("tokenize / nameMatchScore", () => {
+describe("tokenize / significantTokens / nameMatchScore", () => {
   it("記号・括弧を除いて2文字以上のトークンに分割する", () => {
     expect(tokenize("【送料無料】ランドリン (8個セット)")).toEqual(["送料無料", "ランドリン", "8個セット"]);
   });
 
-  it("一致度は自店トークンの包含割合", () => {
+  it("有意トークンは販促常套句・数量語を除外する", () => {
+    expect(significantTokens("【送料無料】ランドリン 柔軟剤 8個セット あす楽 ポイント2倍")).toEqual([
+      "ランドリン",
+      "柔軟剤",
+    ]);
+  });
+
+  it("一致度は有意トークンの包含割合（汎用語は根拠にならない）", () => {
     const score = nameMatchScore("ランドリン 柔軟剤 8個セット", "ランドリン 柔軟剤 クラシック 8個セット 送料無料");
     expect(score).toBe(1);
     expect(nameMatchScore("ランドリン 柔軟剤", "レノア ハピネス")).toBe(0);
+    // 有意トークンが1つも無い名前は一致度0（=競合と認めない）
+    expect(nameMatchScore("送料無料 8個セット", "送料無料 8個セット")).toBe(0);
   });
 });
 

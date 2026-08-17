@@ -4,6 +4,7 @@
  * （service role + 明示 userId）の双方から同じ関数を使う。 */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { rakutenTaxInclusive } from "@/lib/converters";
 import {
   DEFAULT_RAKUTEN_STORE,
   createQpsPacer,
@@ -14,11 +15,12 @@ import {
   type IchibaSearchResult,
   type RakutenCredentials,
 } from "@/lib/rakuten";
-import { filterCompetitors, normalizeNameKeyword } from "./matcher";
-import { parsePointCampaign, buildBoostPatch, buildClearPatch } from "./point-campaign";
+import { JAN_NAME_MATCH_THRESHOLD, filterCompetitors, normalizeNameKeyword } from "./matcher";
+import { parsePointCampaign, buildBoostPatch } from "./point-campaign";
 import { planProduct, type SkuCompetitors } from "./planner";
 import {
   createRun,
+  deleteResultsForRun,
   fetchRakutenTargets,
   finishRun,
   getPointBoostSettings,
@@ -128,7 +130,8 @@ export async function runPointBoost(deps: PointBoostDeps, options: RunOptions = 
         () => searchIchibaItems(applicationId, { keyword }),
         isIchibaRateLimited,
       );
-      searchCache.set(keyword, result);
+      // 成功時のみキャッシュ（一過性の429/503が run 全体に固定化されるのを防ぐ）
+      if (result.ok) searchCache.set(keyword, result);
       consecutiveSearchFailures = result.ok ? 0 : consecutiveSearchFailures + 1;
       return result;
     };
@@ -154,14 +157,18 @@ export async function runPointBoost(deps: PointBoostDeps, options: RunOptions = 
     return {
       runId, dryRun, trigger, status: "done",
       message: dryRun
-        ? `dry-run 完了: 対象${totals.total_targets}件 / 変倍予定${totals.boosted_count}件 / 解除予定${totals.cleared_count}件`
-        : `実行完了: 対象${totals.total_targets}件 / 変倍${totals.boosted_count}件 / 解除${totals.cleared_count}件 / エラー${totals.error_count}件`,
+        ? `dry-run 完了: 対象${totals.total_targets}件 / 変倍予定${totals.boosted_count}件 / 変更なし${totals.unchanged_count}件`
+        : `実行完了: 対象${totals.total_targets}件 / 変倍${totals.boosted_count}件 / 変更なし${totals.unchanged_count}件 / エラー${totals.error_count}件`,
       totals, results,
     };
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
-    // 途中までの結果は保存を試みる（失敗しても run のエラー記録を優先）
-    try { await insertResults(deps.supabase, deps.userId, runId, results); } catch { /* noop */ }
+    // 途中までの結果は保存を試みる。部分保存済みの可能性があるため先に消して冪等にする
+    // （point_boost_results に unique 制約が無く、再insertだけだと二重登録になる）
+    try {
+      await deleteResultsForRun(deps.supabase, deps.userId, runId);
+      await insertResults(deps.supabase, deps.userId, runId, results);
+    } catch { /* noop */ }
     try { await finishRun(deps.supabase, runId, { status: "error", error: message, ...totals }); } catch { /* noop */ }
     return { runId, dryRun, trigger, status: "error", message, totals, results };
   }
@@ -178,7 +185,8 @@ type ProcessCtx = {
 };
 
 async function processTarget(target: BoostTarget, ctx: ProcessCtx): Promise<ProductResult> {
-  // 1) SKUごとにJANで競合検索（同一JANはキャッシュで1回に集約される）
+  // 1) SKUごとにJANで競合検索（同一JANはキャッシュで1回に集約される）。
+  // JANは他店の説明文マッチで姉妹品等が混ざるため、税込換算した価格帯ガード＋緩い商品名検証を通す
   const skuCompetitors: SkuCompetitors[] = [];
   const searchErrors: string[] = [];
   for (const sku of target.skus.slice(0, MAX_SKU_SEARCH)) {
@@ -193,19 +201,24 @@ async function processTarget(target: BoostTarget, ctx: ProcessCtx): Promise<Prod
       keywordType: "jan",
       competitors: filterCompetitors(res.items, {
         ownShopCode: ctx.ownShopCode,
-        ownPrice: sku.sellingPrice,
+        // 検索APIの itemPrice は税込・selling_price は税抜統一のため税込換算して比較する
+        ownPrice: rakutenTaxInclusive(sku.sellingPrice, sku.taxRate),
+        ownName: target.displayName,
+        nameThreshold: JAN_NAME_MATCH_THRESHOLD,
       }),
     });
   }
 
-  // 2) JANで有効な競合ゼロなら掲載商品名で1回だけ再検索（一致度で検証）
+  // 2) JANで有効な競合ゼロなら掲載商品名で1回だけ再検索（一致度で検証）。
+  // 価格不明（repPrice=0）だと価格帯ガードが効かないため、その場合は名前検索しない（安全側）
   let keywordType: "jan" | "name" = "jan";
-  if (skuCompetitors.every((s) => s.competitors.length === 0)) {
+  const repSku = target.skus[0];
+  const repPrice = repSku ? rakutenTaxInclusive(repSku.sellingPrice, repSku.taxRate) : 0;
+  if (skuCompetitors.every((s) => s.competitors.length === 0) && repPrice > 0) {
     const nameKeyword = normalizeNameKeyword(target.displayName);
     if (nameKeyword) {
       const res = await ctx.search(nameKeyword);
       if (res.ok) {
-        const repPrice = target.skus[0]?.sellingPrice ?? 0;
         const competitors = filterCompetitors(res.items, {
           ownShopCode: ctx.ownShopCode,
           ownPrice: repPrice,
@@ -225,15 +238,22 @@ async function processTarget(target: BoostTarget, ctx: ProcessCtx): Promise<Prod
     return emptyResult(target.neCode, "error", `競合検索に失敗しました: ${searchErrors.join(" / ")}`, target);
   }
 
-  // 3) 現在の変倍状態を RMS から取得
+  // 3) 現在の変倍状態を RMS から取得（404=商品なし は対象外、それ以外の失敗は error として区別）
   const item = await ctx.rmsPace(
     () => getItem(ctx.rmsCred, target.manageNumber),
-    (r) => r.status === 429,
+    (r) => !r.exists && (r.status === 429 || r.status === 503),
   );
   if (!item.exists) {
+    if (item.status === 404) {
+      return emptyResult(
+        target.neCode, "skipped",
+        `楽天に商品が見つかりません（商品管理番号 ${target.manageNumber}）`,
+        target,
+      );
+    }
     return emptyResult(
-      target.neCode, "skipped",
-      `楽天に商品が見つかりません（商品管理番号 ${target.manageNumber} / HTTP ${item.status}）`,
+      target.neCode, "error",
+      `RMS商品照会に失敗しました（商品管理番号 ${target.manageNumber} / HTTP ${item.status}）`,
       target,
     );
   }
@@ -248,21 +268,11 @@ async function processTarget(target: BoostTarget, ctx: ProcessCtx): Promise<Prod
     const patch = buildBoostPatch(plan.targetRate, ctx.now, ctx.settings.campaign_days);
     const res = await ctx.rmsPace(
       () => patchItem(ctx.rmsCred, target.manageNumber, patch),
-      (r) => !r.ok && r.status === 429,
+      (r) => !r.ok && (r.status === 429 || r.status === 503),
     );
     if (!res.ok) {
       action = "error";
       detail = `変倍PATCHに失敗しました: ${res.message}`;
-    }
-  } else if (!ctx.dryRun && plan.action === "cleared") {
-    const res = await ctx.rmsPace(
-      () => patchItem(ctx.rmsCred, target.manageNumber, buildClearPatch()),
-      (r) => !r.ok && r.status === 429,
-    );
-    if (!res.ok) {
-      // 解除がAPIで受け付けられない場合は期間満了の自然失効に委ねる（要件 FR3）
-      action = "unchanged";
-      detail = `解除は反映できませんでした（期間満了で自然失効します）。API応答: ${res.message}`;
     }
   }
 

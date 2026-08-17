@@ -8,9 +8,14 @@ export const runtime = "nodejs";
 export const maxDuration = 300;
 
 /** 1回のHTTPリクエストで処理する商品数の上限（タイムアウトの安全弁）。
- * 全件処理は定期実行スクリプト（webui/scripts/point_boost_run.mjs）で行う。 */
-const MAX_LIMIT = 50;
-const DEFAULT_LIMIT = 40;
+ * 最悪ケースは1商品あたり検索6回＋RMS2回×1100ms ≒ 約9秒のため、25件 ≒ 最大4分弱で
+ * maxDuration=300 に収める。全件処理は定期実行スクリプト（webui/scripts/point_boost_run.mjs）で行う。 */
+const MAX_LIMIT = 25;
+const DEFAULT_LIMIT = 20;
+
+/** 多重実行ガード（単一プロセスのローカル運用前提）。
+ * 実行中の二重起動は楽天APIのQPS超過と二重PATCHを招くため 409 で弾く。 */
+let inFlight = false;
 
 /** POST = ポイント変倍チェックの実行。
  * body: { dryRun?: boolean(既定true), limit?: number(既定40・最大50) }
@@ -26,6 +31,13 @@ export async function POST(req: Request) {
   const rawLimit = Number(body?.limit);
   const limit = Number.isFinite(rawLimit) && rawLimit > 0 ? Math.min(Math.floor(rawLimit), MAX_LIMIT) : DEFAULT_LIMIT;
 
+  if (inFlight) {
+    return NextResponse.json(
+      { ok: false, error: "実行中の処理があります。完了してから再実行してください" },
+      { status: 409 },
+    );
+  }
+  inFlight = true;
   try {
     const summary = await runPointBoost(
       {
@@ -60,5 +72,7 @@ export async function POST(req: Request) {
       { ok: false, error: e instanceof Error ? e.message : String(e) },
       { status: 500 },
     );
+  } finally {
+    inFlight = false;
   }
 }

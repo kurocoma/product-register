@@ -61,6 +61,15 @@ describe("searchIchibaItems", () => {
     expect(result).toEqual({ ok: false, status: 400, message: "wrong_parameter: keyword is not valid" });
   });
 
+  it("ネットワーク断は throw せず ok:false / status:0 を返す（連続失敗ブレーカー用）", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new TypeError("fetch failed")));
+    const result = await searchIchibaItems("app-123", { keyword: "4900000000001" });
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.status).toBe(0);
+    expect(result.message).toContain("ネットワークエラー");
+  });
+
   it("pointRate 未設定は1倍として扱う", async () => {
     const body = JSON.stringify({
       count: 1,

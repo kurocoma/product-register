@@ -19,10 +19,11 @@ const sku = (rates: number[], keyword = "4900000000001"): SkuCompetitors => ({
   })),
 });
 
-const campaign = (rate: number, endsInMs: number): CurrentCampaign => ({
+const campaign = (rate: number, endsInMs: number, startsInMs = -1000): CurrentCampaign => ({
   rate,
-  start: null,
+  start: new Date(now.getTime() + startsInMs).toISOString(),
   end: new Date(now.getTime() + endsInMs).toISOString(),
+  startsAt: new Date(now.getTime() + startsInMs),
   endsAt: new Date(now.getTime() + endsInMs),
 });
 
@@ -52,7 +53,7 @@ describe("planProduct", () => {
     expect(plan.targetRate).toBe(2);
   });
 
-  it("競合ゼロなら現状維持（誤って解除しない）", () => {
+  it("競合ゼロなら現状維持（誤って触らない）", () => {
     const plan = planProduct([sku([])], campaign(2, 5 * 24 * 3600 * 1000), settings, now);
     expect(plan.action).toBe("no_competitor");
     expect(plan.detail).toContain("2倍を維持");
@@ -66,15 +67,29 @@ describe("planProduct", () => {
     expect(plan.detail).toContain("上限3倍で打ち止め");
   });
 
-  it("上限1倍設定で適用中の変倍があれば解除（cleared）", () => {
+  it("降格ガード: 現在の倍率が目標より高ければ下げない（手動設定の可能性）", () => {
+    const plan = planProduct([sku([1])], campaign(5, 5 * 24 * 3600 * 1000), settings, now);
+    expect(plan.action).toBe("unchanged");
+    expect(plan.detail).toContain("5倍が目標2倍より高い");
+  });
+
+  it("開始前の予約キャンペーンには一切触らない", () => {
+    const reserved = campaign(10, 10 * 24 * 3600 * 1000, 2 * 24 * 3600 * 1000); // 2日後開始
+    const plan = planProduct([sku([1])], reserved, settings, now);
+    expect(plan.action).toBe("unchanged");
+    expect(plan.detail).toContain("予約キャンペーン");
+  });
+
+  it("上限1倍設定では解除PATCHせず自然失効に委ねる", () => {
     const plan = planProduct(
       [sku([1])],
       campaign(2, 5 * 24 * 3600 * 1000),
       { ...settings, max_rate: 1 },
       now,
     );
-    expect(plan.action).toBe("cleared");
+    expect(plan.action).toBe("unchanged");
     expect(plan.targetRate).toBe(1);
+    expect(plan.detail).toContain("自然失効");
   });
 
   it("上限1倍設定で未設定なら unchanged", () => {

@@ -3,6 +3,7 @@
  * 定期実行スクリプトは service role クライアント＋明示 userId で使う（常に user_id で絞る）。 */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { buildRakutenManageNumber } from "@/lib/converters";
 import { dbRowToProductInput, mallPresence, productVariants, type ProductRow } from "@/lib/product";
 import {
   DEFAULT_POINT_BOOST_SETTINGS,
@@ -108,6 +109,20 @@ export async function insertResults(
   }
 }
 
+/** 1つの run の結果行を全削除する（エラーパスの再保存を冪等にするため）。 */
+export async function deleteResultsForRun(
+  supabase: SupabaseClient,
+  userId: string,
+  runId: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from("point_boost_results")
+    .delete()
+    .eq("user_id", userId)
+    .eq("run_id", runId);
+  if (error) throw error;
+}
+
 export type RunRow = {
   id: string;
   trigger: string;
@@ -182,11 +197,14 @@ export async function fetchRakutenTargets(
       try {
         const p = dbRowToProductInput(row);
         if (!mallPresence(p).rakuten) continue;
-        const manageNumber = (p.rakuten_manage_number ?? "").trim();
-        if (!manageNumber) continue; // 掲載フラグのみで番号不明の旧データは対象外（結果に出さない）
+        // 保存済みの実番号を優先し、無ければ規約書式（baseCodeOf）で導出する（登録経路と同じ規則）。
+        // 導出番号が楽天に実在しない場合は service 側の getItem 404 が skipped として記録する。
+        const manageNumber = buildRakutenManageNumber(p).trim();
+        if (!manageNumber) continue;
         const skus = productVariants(p).map((v) => ({
           janCode: (v.jan_code || p.jan_code || "").trim(),
           sellingPrice: v.selling_price || p.selling_price || 0,
+          taxRate: v.tax_rate || p.tax_rate || 10,
           label: v.variation_value || v.ne_code || p.ne_code,
         }));
         targets.push({

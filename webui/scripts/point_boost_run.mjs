@@ -1,13 +1,16 @@
 // ポイント変倍最適化の単体実行スクリプト（タスクスケジューラから1日2回実行される）。
 // dev サーバの起動に依存せず、.env.local と Supabase(service role) で直接実行する。
-// 実行: cd webui && npx tsx scripts/point_boost_run.mjs [--dry-run] [--limit N] [--manual]
+// 実行: cd webui && npx tsx scripts/point_boost_run.mjs [--dry-run] [--limit N] [--manual [--live]]
 //   --dry-run : 照会のみ（RMSへ反映しない）
 //   --limit N : 処理する商品数の上限（既定: 全件）
-//   --manual  : trigger=manual として実行（設定が無効でも動く。動作確認用）
-// 既定は trigger=scheduled ＝ 画面の「自動実行を有効にする」がONのときだけ反映する（安全弁）。
+//   --manual  : trigger=manual として実行（設定が無効でも動く。動作確認用のため既定 dry-run。
+//               RMSへ実際に反映するときだけ --manual --live と明示する）
+// 既定（フラグなし）は trigger=scheduled ＝ 画面の「自動実行を有効にする」がONのときだけ反映する（安全弁）。
 import { readFileSync } from "node:fs";
 import { createClient } from "@supabase/supabase-js";
-import { runPointBoost } from "../lib/point-boost/index.ts";
+// barrel(index.ts) 経由は tsx のモジュール解決で落ちるため service を直 import する
+// （barrel は Next.js 側の公開境界。ここは同一 feature 内スクリプトなので直 import を許容）
+import { runPointBoost } from "../lib/point-boost/service.ts";
 import { getRakutenApplicationIdFromEnv, getRakutenCredentialsFromEnv } from "../lib/rakuten/credentials.ts";
 
 // .env.local を process.env へ（既存 e2e スクリプトと同じ方式）
@@ -18,8 +21,9 @@ for (const line of env.split("\n")) {
 }
 
 const args = process.argv.slice(2);
-const dryRun = args.includes("--dry-run");
 const trigger = args.includes("--manual") ? "manual" : "scheduled";
+// --manual（動作確認用）は既定 dry-run。反映は --live の明示が必要（誤操作でのPATCH防止）
+const dryRun = trigger === "manual" ? !args.includes("--live") : args.includes("--dry-run");
 const limitIdx = args.indexOf("--limit");
 const limit = limitIdx >= 0 ? Number(args[limitIdx + 1]) || undefined : undefined;
 
@@ -67,11 +71,11 @@ console.log(`[point-boost] ${summary.status}: ${summary.message}`);
 if (summary.status === "done") {
   const t = summary.totals;
   console.log(
-    `[point-boost] 対象=${t.total_targets} 変倍=${t.boosted_count} 解除=${t.cleared_count} 変更なし=${t.unchanged_count} 競合なし=${t.no_competitor_count} 対象外=${t.skipped_count} エラー=${t.error_count} runId=${summary.runId}`,
+    `[point-boost] 対象=${t.total_targets} 変倍=${t.boosted_count} 変更なし=${t.unchanged_count} 競合なし=${t.no_competitor_count} 対象外=${t.skipped_count} エラー=${t.error_count} runId=${summary.runId}`,
   );
 }
 for (const r of summary.results) {
-  if (r.action === "boosted" || r.action === "cleared" || r.action === "error") {
+  if (r.action === "boosted" || r.action === "error") {
     console.log(`[point-boost]   ${r.action} ${r.ne_code} ${r.detail}`);
   }
 }

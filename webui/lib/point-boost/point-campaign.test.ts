@@ -13,6 +13,7 @@ describe("parsePointCampaign", () => {
     expect(c).not.toBeNull();
     expect(c!.rate).toBe(2);
     expect(c!.end).toBe("2026-08-20T00:00:00+09:00");
+    expect(c!.startsAt?.toISOString()).toBe("2026-07-31T15:00:00.000Z");
     expect(c!.endsAt?.toISOString()).toBe("2026-08-19T15:00:00.000Z");
   });
 
@@ -24,6 +25,7 @@ describe("parsePointCampaign", () => {
   it("文字列の pointRate も数値化する", () => {
     const c = parsePointCampaign({ pointCampaign: { benefits: { pointRate: "3" } } });
     expect(c!.rate).toBe(3);
+    expect(c!.startsAt).toBeNull();
     expect(c!.endsAt).toBeNull();
   });
 

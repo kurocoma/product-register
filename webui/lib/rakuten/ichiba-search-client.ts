@@ -47,8 +47,15 @@ export async function searchIchibaItems(
     availability: "1",
     formatVersion: "2",
   });
-  const res = await fetch(`${BASE}?${q.toString()}`);
-  const text = await res.text();
+  let res: Response;
+  let text: string;
+  try {
+    res = await fetch(`${BASE}?${q.toString()}`);
+    text = await res.text();
+  } catch (e) {
+    // ネットワーク断も throw せず判別ユニオンで返す（呼び出し側の連続失敗ブレーカーを効かせる）
+    return { ok: false, status: 0, message: `ネットワークエラー: ${e instanceof Error ? e.message : String(e)}` };
+  }
   if (res.status !== 200) {
     return { ok: false, status: res.status, message: formatIchibaError(text, res.status) };
   }

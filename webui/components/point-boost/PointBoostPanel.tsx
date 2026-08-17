@@ -114,7 +114,7 @@ export function PointBoostPanel() {
       const res = await fetch("/api/rakuten/point-boost/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ dryRun }),
+        body: JSON.stringify({ dryRun, limit: 25 }),
       });
       const body = (await res.json()) as RunResponse;
       if (!body.ok) throw new Error(body.error);
@@ -239,7 +239,7 @@ export function PointBoostPanel() {
       <section className="rounded border border-slate-200 bg-white p-4">
         <h2 className="mb-3 text-base font-semibold text-slate-900">手動実行</h2>
         <p className="mb-3 text-xs text-slate-500">
-          1回の手動実行で処理するのは最大50件です（楽天APIの間隔制限のため数分かかります）。全件は定期実行（1日2回）が処理します。
+          1回の手動実行で処理するのは最大25件です（楽天APIの間隔制限のため数分かかります）。全件は定期実行（1日2回）が処理します。
         </p>
         <div className="flex flex-wrap gap-3">
           <button

@@ -1,7 +1,8 @@
 @echo off
-rem ポイント変倍最適化をWindowsタスクスケジューラに登録する（1日2回）。
-rem 時刻を変えたい場合は下の TIME1 / TIME2 を編集して再実行（/F で上書き登録される）。
-rem 前提: PCがこの時刻に起動していること。削除は:
+rem Register point-boost as Windows scheduled tasks (twice a day).
+rem Edit TIME1 / TIME2 below and re-run to change times (/F overwrites).
+rem The PC must be powered on at these times.
+rem To remove:
 rem   schtasks /Delete /TN "ProductRegister PointBoost AM" /F
 rem   schtasks /Delete /TN "ProductRegister PointBoost PM" /F
 setlocal
@@ -15,13 +16,13 @@ schtasks /Create /F /TN "ProductRegister PointBoost PM" /TR "\"%RUN_BAT%\"" /SC 
 if errorlevel 1 goto :fail
 
 echo.
-echo 登録しました: %TIME1% / %TIME2% に毎日実行されます。
-echo 実行ログ: logs\point_boost_task.log
-echo ※実際に変倍を反映するには、アプリの「ポイント変倍」画面で「自動実行を有効にする」をONにしてください。
+echo Registered: runs daily at %TIME1% and %TIME2%.
+echo Log: logs\point_boost_task.log
+echo NOTE: enable "auto run" in the app's Point Boost screen to actually apply changes.
 endlocal
 exit /b 0
 
 :fail
-echo タスク登録に失敗しました。管理者権限で実行してみてください。
+echo ERROR: schtasks /Create failed. Try running this bat as Administrator.
 endlocal
 exit /b 1

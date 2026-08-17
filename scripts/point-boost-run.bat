@@ -1,6 +1,6 @@
 @echo off
-rem ポイント変倍最適化の定期実行（タスクスケジューラから呼ばれる）。
-rem 実行ログは logs\point_boost_task.log に追記される。
+rem Point-boost scheduled runner (called by Windows Task Scheduler).
+rem Output is appended to logs\point_boost_task.log.
 setlocal
 cd /d "%~dp0..\webui"
 if not exist "..\logs" mkdir "..\logs"

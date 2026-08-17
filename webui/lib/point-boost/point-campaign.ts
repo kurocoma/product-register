@@ -8,7 +8,9 @@ export type CurrentCampaign = {
   rate: number;
   start: string | null;
   end: string | null;
-  /** end を Date 化したもの（解析不能なら null） */
+  /** start/end を Date 化したもの（解析不能なら null）。
+   * startsAt が未来 = 手動予約されたキャンペーン（planner はこれに触らない） */
+  startsAt: Date | null;
   endsAt: Date | null;
 };
 
@@ -27,12 +29,7 @@ export function parsePointCampaign(itemJson: Record<string, unknown> | null): Cu
   if (!Number.isFinite(rate) || rate < 1) return null;
   const start = typeof p.applicablePeriod?.start === "string" ? p.applicablePeriod.start : null;
   const end = typeof p.applicablePeriod?.end === "string" ? p.applicablePeriod.end : null;
-  let endsAt: Date | null = null;
-  if (end) {
-    const d = new Date(end);
-    if (!Number.isNaN(d.getTime())) endsAt = d;
-  }
-  return { rate: Math.floor(rate), start, end, endsAt };
+  return { rate: Math.floor(rate), start, end, startsAt: toDate(start), endsAt: toDate(end) };
 }
 
 /** 変倍設定のPATCHボディ。適用期間は now〜now+days（JST表記）。 */
@@ -63,4 +60,10 @@ function floorToMinute(d: Date): Date {
   const t = new Date(d.getTime());
   t.setSeconds(0, 0);
   return t;
+}
+
+function toDate(iso: string | null): Date | null {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? null : d;
 }

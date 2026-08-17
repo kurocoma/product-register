@@ -83,6 +83,6 @@ export type BoostTarget = {
   productName: string;
   displayName: string;
   manageNumber: string;
-  /** SKU単位の突合キー（JAN と販売価格）。フラット商品は1件合成される */
-  skus: { janCode: string; sellingPrice: number; label: string }[];
+  /** SKU単位の突合キー。sellingPrice は税抜（アプリ統一）、taxRate は税込換算用 */
+  skus: { janCode: string; sellingPrice: number; taxRate: number; label: string }[];
 };

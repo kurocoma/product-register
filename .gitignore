@@ -4,6 +4,7 @@ dist/
 output/
 logs/*.json
 logs/*.txt
+logs/*.log
 .venv/
 
 # 外部API資料・サンプルデータは git 管理外
