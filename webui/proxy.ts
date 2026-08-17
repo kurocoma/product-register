@@ -6,7 +6,13 @@ export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // 未ログインで保護領域にアクセスしたら /login へ
-  if (!user && !pathname.startsWith("/login") && !pathname.startsWith("/auth")) {
+  // /links は公開リンク一覧（スマホ・未ログイン閲覧用の読取専用ページ）なので認証除外
+  if (
+    !user &&
+    !pathname.startsWith("/login") &&
+    !pathname.startsWith("/auth") &&
+    !pathname.startsWith("/links")
+  ) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
   // ログイン済みで /login にアクセスしたら / へ

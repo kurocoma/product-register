@@ -49,6 +49,7 @@ const SCREEN_TOC = [
   { id: "screen-masters", label: "マスタ取込" },
   { id: "screen-masters-related", label: "関連商品抽出" },
   { id: "screen-rule-audit", label: "ルール監査" },
+  { id: "screen-links-shimanoya", label: "しまのや リンク一覧（公開）" },
   { id: "screen-history", label: "作業履歴" },
   { id: "screen-settings", label: "設定" },
 ];
@@ -213,6 +214,18 @@ export default function HelpPage() {
           <li>画面を開くと全商品がスキャンされ、ルール違反のある商品が理由付きで一覧表示される</li>
           <li>行のリンクから商品編集画面を開いて修正する</li>
           <li>商品編集のモール別パネルでは、AI（Codex）による修正案の提案も使える</li>
+        </ol>
+      </HelpSection>
+
+      <HelpSection id="screen-links-shimanoya" title="🔗 しまのや リンク一覧（公開）">
+        <p>
+          しまのや（s071）全商品の楽天・Yahoo!ショッピングの商品ページ URL を一覧にした画面です。
+          ログイン不要の公開ページなので、スマホでもそのまま開けます（URL: /links/shimanoya）。
+        </p>
+        <ol className="list-decimal list-inside space-y-1">
+          <li>商品ごとに楽天・Yahoo の掲載状況バッジとリンクが並ぶ（リンクは新しいタブで開く）</li>
+          <li>商品コードの書式異常やデータ不備は赤字で表示される</li>
+          <li>リンク切れの自動チェックは webui で <code>node tests/e2e_shimanoya_links.mjs</code> を実行する</li>
         </ol>
       </HelpSection>
 

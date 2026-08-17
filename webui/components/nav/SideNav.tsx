@@ -39,7 +39,10 @@ const groups: NavGroup[] = [
   },
   {
     heading: "品質・監査",
-    items: [{ href: "/rule-audit", label: "ルール監査", icon: "🧭" }],
+    items: [
+      { href: "/rule-audit", label: "ルール監査", icon: "🧭" },
+      { href: "/links/shimanoya", label: "しまのや リンク一覧（公開）", icon: "🔗" },
+    ],
   },
   {
     heading: "その他",
