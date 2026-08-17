@@ -49,6 +49,7 @@ const SCREEN_TOC = [
   { id: "screen-masters", label: "マスタ取込" },
   { id: "screen-masters-related", label: "関連商品抽出" },
   { id: "screen-rule-audit", label: "ルール監査" },
+  { id: "screen-point-boost", label: "ポイント変倍" },
   { id: "screen-history", label: "作業履歴" },
   { id: "screen-settings", label: "設定" },
 ];
@@ -214,6 +215,23 @@ export default function HelpPage() {
           <li>行のリンクから商品編集画面を開いて修正する</li>
           <li>商品編集のモール別パネルでは、AI（Codex）による修正案の提案も使える</li>
         </ol>
+      </HelpSection>
+
+      <HelpSection id="screen-point-boost" title="🎯 ポイント変倍">
+        <p>
+          楽天市場で同一商品（JAN・商品名で突合）を最安値順に検索して競合店のポイント倍率をチェックし、
+          自店の商品別ポイント変倍を「競合最大+1倍（上限あり）」で自動設定する画面です。
+          上乗せ分のポイント原資は店舗負担のため、上限倍率がコストの安全弁になります。
+        </p>
+        <ol className="list-decimal list-inside space-y-1">
+          <li>「dry-run」で競合の検出結果と目標倍率を確認する（RMSには反映されない）</li>
+          <li>問題なければ「今すぐ実行」で反映、または設定を有効にして1日2回の自動実行に任せる</li>
+          <li>実行履歴から各回の商品別結果（競合店・価格・倍率・アクション）を確認できる</li>
+        </ol>
+        <p className="text-slate-500">
+          事前準備: 楽天ウェブサービスの applicationId を .env.local に設定（画面の案内参照）。
+          自動実行は scripts\register-point-boost-task.bat でタスクスケジューラに登録します。
+        </p>
       </HelpSection>
 
       <HelpSection id="screen-history" title="🕒 作業履歴">

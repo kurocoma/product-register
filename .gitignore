@@ -14,6 +14,9 @@ docs/*
 # アーキテクチャ監査（分析・設計ドキュメント）は追跡対象
 !docs/architecture-audit/
 !docs/architecture-audit/**
+# ポイント変倍最適化の要件定義・設計は追跡対象
+!docs/point-boost/
+!docs/point-boost/**
 
 # 旧 plans/plan.md (Phase 1 全体計画書) は git 管理外
 # docs/superpowers/plans/ は追跡対象 (上のルールで !docs/superpowers/** 済み)
