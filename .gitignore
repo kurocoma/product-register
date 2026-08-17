@@ -38,3 +38,4 @@ webui/.mso/
 /eval-loop-report.html
 /loop-progress.html
 /question-dashboard.html
+node_modules/
