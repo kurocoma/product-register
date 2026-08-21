@@ -16,6 +16,7 @@
 | 項目 | 決定 |
 |---|---|
 | 倍率決定ルール | **競合最安値上位の最大倍率 +1倍、上限3倍**（上限・比較店舗数などは設定画面で変更可） |
+| 適用期間（2026-08-21 変更・同日3区切りへ再変更） | **窓方式**: 昼帯 9:00〜17:59:59 ／ 夜帯 20:00〜23:59:59 ／ 深夜 0:00〜8:59 は変倍を置かない＝必ず1倍（売れない時間帯）。適用期間中は更新も解除も不可（IE0154）のため、各窓は次の定期実行前に失効する設計 — ユーザー指示で7日間から短期化 |
 | 反映方式 | **自動反映**（ガード付き。全件を実行履歴に記録し画面で確認できる） |
 | 実行環境 | **Windows タスクスケジューラ**で1日2回（実行スクリプト＋タスク登録batを提供） |
 | 競合検索の認証 | 楽天ウェブサービス applicationId は**未取得 → 後から `.env.local` に設定**。未設定時はエラーではなく案内を表示 |
@@ -23,8 +24,11 @@
 ## 3. 用語
 
 - **商品別ポイント変倍**: 楽天RMSで商品単位にポイント倍率（2〜20倍）と適用期間を設定する機能。上乗せ分のポイント原資は**店舗負担**。
-- **楽天ウェブサービス（Ichiba Item Search API）**: 楽天市場の公開検索API。`applicationId`（無料発行）で認証し、
+- **楽天ウェブサービス（Ichiba Item Search API）**: 楽天市場の公開検索API。
   キーワード検索・価格昇順ソート・各商品の `pointRate`（ポイント倍率）/`itemPrice`/`shopCode` が取れる。RMSのESA認証とは別系統。
+  **2026年のインフラ刷新**（移行期間 2026-02-10〜05-13、実機確認 2026-08-20）でエンドポイントが
+  `openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search/20260701` に変わり、認証は `applicationId`（UUID形式）＋
+  `accessKey`（ヘッダ渡し）の両方必須になった。formatVersion=2 のレスポンスキーは `items`（小文字）。
 - **登録済みSKU**: 本アプリの products のうち楽天に掲載済みのもの（`mallPresence().rakuten` = `mall_listed.rakuten` または `rakuten_manage_number` あり）。
 
 ## 4. 機能要件
@@ -40,13 +44,18 @@
     （汎用語だけの一致で別ブランド品を競合と誤認しない）。
 - **FR2 倍率決定**: 最安値上位N**店**（既定3店。同一店の複数出品は1店と数える）の最大ポイント倍率 +1倍。
   上限（既定3倍）で打ち止め（capped として記録）。競合に勝てる倍率が1倍以下なら変倍しない。
-- **FR3 自動反映**: 決定した倍率を RMS Item API 2.0 の `pointCampaign`（倍率＋適用期間、既定7日間）で自店商品へ PATCH する。
+- **FR3 自動反映**: 決定した倍率を RMS Item API 2.0 の `pointCampaign`（倍率＋適用期間）で自店商品へ PATCH する。
+  - 適用期間は「now+2時間超の次の正時」以降に入れる最初の**窓**（昼帯 9:00〜17:59:59 / 夜帯 20:00〜23:59:59、
+    `point-campaign.ts` の CAMPAIGN_WINDOWS_JST）。深夜 0:00〜8:59 には置かない＝必ず1倍。
+    各窓は次の定期実行（6:45/17:45）前に失効するため、IE0154（適用期間中は更新・解除不可）の制約下でも
+    毎回の実行で再評価できる（2026-08-21 ユーザー指示。campaign_days は上限日数として残置）。
   - 既に目標倍率で適用中かつ残り期間が36時間超なら何もしない（unchanged）。
   - **降格ガード**: 現在の倍率が目標より高いときは下げない（手動設定の可能性。期間満了で自然失効）。
   - **予約保護**: 開始前の予約キャンペーン（applicablePeriod.start が未来）には一切触らない。
   - **自動の解除PATCHは行わない**（誤発動で手動キャンペーンを消すリスクを避ける）。変倍を止めたいときは
     上限倍率を1にする/無効化する → 適用中の変倍は期間満了（最長 campaign_days）で自然失効する。
-- **FR4 定期実行**: 1日2回（既定 9:00 / 21:00、タスク登録batで変更可）。アプリ（next dev）の起動有無に依存しない単体スクリプト。
+- **FR4 定期実行**: 1日2回（2026-08-21 から 6:45 / 17:45 — 各窓の開始2時間15分前。タスク登録batで変更可だが、
+  窓の開始が実行+2時間超になるよう CAMPAIGN_WINDOWS_JST とセットで変更する）。アプリ（next dev）の起動有無に依存しない単体スクリプト。
 - **FR5 手動実行**: 画面から dry-run（照会のみ）と本実行をいつでも実行できる（1回の上限25件・多重実行は409で拒否）。
 - **FR6 記録**: 実行（run）と商品別結果（検索キーワード・競合スナップショット・現在→目標倍率・アクション・詳細）を全件DBに記録し、画面で閲覧できる。
 - **FR7 設定**: 有効/無効・+n倍・上限倍率・比較店舗数・適用日数を画面で変更できる（既定: 無効 / +1 / 3倍 / 3店 / 7日）。
@@ -81,8 +90,10 @@
 ### 6.2 モジュール（規約: モールAPI呼び出しはクライアント層のみ、機能は lib/<feature>+barrel）
 
 - `webui/lib/rakuten/ichiba-search-client.ts` … 楽天市場商品検索APIクライアント（新規・barrel公開）。
-  `searchIchibaItems(applicationId, {keyword, hits, sort:"+itemPrice"})` → `pointRate/itemPrice/shopCode/...`（formatVersion=2）
-- `webui/lib/rakuten/credentials.ts` … `getRakutenApplicationIdFromEnv()` を追加（env: `RAKUTEN_APPLICATION_ID`）
+  `searchIchibaItems({applicationId, accessKey}, {keyword, hits, sort:"+itemPrice"})` → `pointRate/itemPrice/shopCode/...`
+  （formatVersion=2。accessKey はヘッダで渡す＝URL・ログへ露出させない）
+- `webui/lib/rakuten/credentials.ts` … `getRakutenApplicationIdFromEnv()`（env: `RAKUTEN_APPLICATION_ID`）と
+  `getRakutenWebServiceAccessKeyFromEnv()`（env: `RAKUTEN_WEBSERVICE_ACCESS_KEY`）を追加
 - `webui/lib/point-boost/`（新規featureフォルダ＋barrel）
   - `types.ts` 設定・結果型と既定値
   - `matcher.ts` 競合抽出（自店除外・価格帯ガード・商品名一致度）【純関数・テスト】
@@ -113,8 +124,9 @@
 
 ## 7. 運用手順（初回セットアップ）
 
-1. https://webservice.rakuten.co.jp/ でアプリ登録し applicationId を発行（無料）
-2. `webui/.env.local` に `RAKUTEN_APPLICATION_ID=xxxxxxxxxxxxxxxxxxx` を追記
+1. https://webservice.rakuten.co.jp/ でアプリ登録し Application ID と Access Key を発行（無料。/app/list で確認）
+2. `webui/.env.local` に `RAKUTEN_APPLICATION_ID=...`（UUID形式）と `RAKUTEN_WEBSERVICE_ACCESS_KEY=...` を追記
+   （対象ユーザーのメール `POINT_BOOST_USER_EMAIL=...` も定期実行スクリプトに必要）
 3. マイグレーション適用: `cd webui && node scripts/apply_sql.mjs supabase/migrations/20260817000001_create_point_boost.sql`
 4. アプリの「ポイント変倍」画面で dry-run を実行し、競合検出と目標倍率を確認
 5. 問題なければ設定を「有効」にして保存
@@ -122,9 +134,16 @@
 
 ## 8. リスク・要実機確認
 
-- **R1 `pointCampaign` フィールド**: RMS Item API 2.0 の item リソースに `pointCampaign`（applicablePeriod/benefits.pointRate）が
-  存在する前提（RMSの「商品別ポイント変倍」に対応）。リポジトリ内の楽天API仕様書（docs/楽天/…）は git 管理外で本環境から確認できないため、
-  **初回 dry-run 後の実機 PATCH 1件で要確認**。フィールド名が異なる場合も `point-campaign.ts` の修正のみで済む構造にした。
+- **R1 `pointCampaign` フィールド**: **解消（2026-08-20 実機確認済み）**。フィールドは実在し、PATCH→GET で反映を確認
+  （bir-shiku24 に 2倍・7日間を適用）。実機で判明した制約（`docs/楽天/items.patch.txt` と一致）:
+  - start は「時」単位（00分00秒へ自動切り捨て）。過去は IE0121、現在から2時間以内は IE0173、60日以降は IE0259 で拒否
+    → `buildBoostPatch` は「now+2時間超の次の正時」を送る（planner の予約保護に最大3時間「予約扱い」で映るが、
+    1日2回の定期実行では次回実行時に必ず適用中になるため実害なし）
+  - end は 59分59秒へ自動変換（適用期間が送信値より最大約1時間延びるのは仕様）
+  - **IE0154: 適用期間中の更新は不可** — **解除（pointCampaign: null の PATCH）も不可**（2026-08-21 実機確認:
+    適用中の bir-shiku24 への解除PATCHが IE0154 で拒否された）。適用中に目標倍率が上がった場合の
+    追随PATCHもエラー記録になる（期間満了の自然失効後に次の定期実行が再設定する）。
+    → この制約が適用期間を短期化（8:00/20:00 区切り）した理由。長期設定は「戻せない」リスクそのもの
   自動の解除PATCHは行わない設計のため、解除セマンティクスの実機依存は無い（自然失効のみ）。
 - **R2 JAN検索の網羅性**: 検索APIにJAN専用パラメータがなく、JANを記載していない店舗はヒットしない。
   商品名フォールバック＋一致度ガードで補うが、「競合なし」誤判定の可能性は残る（その場合は変倍しない=安全側）。
