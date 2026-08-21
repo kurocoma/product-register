@@ -103,7 +103,9 @@ function productRow(over: Parameters<typeof makeProduct>[0] = {}): Record<string
   return { id: "prod-1", user_id: USER_ID, created_at: "", updated_at: "", ...row };
 }
 
-/** 検索・RMS の fetch スタブ。PATCH ボディを捕捉する。 */
+/** 検索・RMS の fetch スタブ。PATCH ボディを捕捉する。
+ * 検索は2026年刷新後の実APIと同様に accessKey ヘッダが無ければ 400 を返す
+ * （accessKey をヘッダで送らない実装バグを全テストで検出する）。 */
 function stubRakuten(opts: {
   searchItems: Record<string, unknown>[];
   currentCampaign?: Record<string, unknown>;
@@ -113,9 +115,15 @@ function stubRakuten(opts: {
     "fetch",
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.includes("app.rakuten.co.jp/services/api/IchibaItem/Search")) {
+      if (url.includes("openapi.rakuten.co.jp/ichibams/api/IchibaItem/Search")) {
+        if (!new Headers(init?.headers).get("accessKey")) {
+          return new Response(
+            JSON.stringify({ error: "wrong_parameter", error_description: "specify valid accessKey" }),
+            { status: 400 },
+          );
+        }
         return new Response(
-          JSON.stringify({ count: opts.searchItems.length, Items: opts.searchItems }),
+          JSON.stringify({ count: opts.searchItems.length, items: opts.searchItems }),
           { status: 200 },
         );
       }
@@ -159,6 +167,7 @@ function deps(state: FakeState, over: Partial<PointBoostDeps> = {}): PointBoostD
     userId: USER_ID,
     rmsCred: { serviceSecret: "ss", licenseKey: "lk" },
     applicationId: "app-123",
+    accessKey: "ak-456",
     sleep: async () => {},
     now: () => NOW,
     ...over,
@@ -197,12 +206,13 @@ describe("runPointBoost 結合", () => {
     expect(summary.status).toBe("done");
     expect(summary.totals).toMatchObject({ total_targets: 1, boosted_count: 1, error_count: 0 });
 
-    // PATCH の実ペイロード（JST・7日間・2倍）
+    // PATCH の実ペイロード（JST・2倍。now = JST 12:24:30 → earliest 15:00 は昼帯（9〜17時）の途中
+    //  → 15:00〜17:00 の残り区間。IE0121/IE0173/IE0154 対策。次の定期実行時点では必ず失効済み）
     expect(patched).toHaveLength(1);
     expect(patched[0].manageNumber).toBe("ldr-5414");
     expect(patched[0].body).toEqual({
       pointCampaign: {
-        applicablePeriod: { start: "2026-08-17T12:24:00+09:00", end: "2026-08-24T12:24:00+09:00" },
+        applicablePeriod: { start: "2026-08-17T15:00:00+09:00", end: "2026-08-17T17:00:00+09:00" },
         benefits: { pointRate: 2 },
       },
     });
@@ -258,6 +268,17 @@ describe("runPointBoost 結合", () => {
     });
     expect(summary.status).toBe("not_configured");
     expect(summary.message).toContain("RAKUTEN_APPLICATION_ID");
+    expect(state.runs).toHaveLength(0);
+  });
+
+  it("accessKey 未設定も not_configured の案内を返す（2026年刷新後は両方必須）", async () => {
+    const state = newState();
+    const summary = await runPointBoost(deps(state, { accessKey: null }), {
+      dryRun: false,
+      trigger: "manual",
+    });
+    expect(summary.status).toBe("not_configured");
+    expect(summary.message).toContain("RAKUTEN_WEBSERVICE_ACCESS_KEY");
     expect(state.runs).toHaveLength(0);
   });
 

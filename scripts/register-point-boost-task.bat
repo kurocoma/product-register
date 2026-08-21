@@ -2,12 +2,16 @@
 rem Register point-boost as Windows scheduled tasks (twice a day).
 rem Edit TIME1 / TIME2 below and re-run to change times (/F overwrites).
 rem The PC must be powered on at these times.
+rem NOTE: campaign windows (9:00-17:59 / 20:00-23:59 JST) are defined in
+rem   webui/lib/point-boost/point-campaign.ts (CAMPAIGN_WINDOWS_JST).
+rem   Each window's start must be more than 2 hours after the run time (RMS IE0173),
+rem   so change TIME1/TIME2 and the windows together.
 rem To remove:
 rem   schtasks /Delete /TN "ProductRegister PointBoost AM" /F
 rem   schtasks /Delete /TN "ProductRegister PointBoost PM" /F
 setlocal
-set TIME1=09:00
-set TIME2=21:00
+set TIME1=06:45
+set TIME2=17:45
 set RUN_BAT=%~dp0point-boost-run.bat
 
 schtasks /Create /F /TN "ProductRegister PointBoost AM" /TR "\"%RUN_BAT%\"" /SC DAILY /ST %TIME1%

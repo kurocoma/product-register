@@ -11,7 +11,11 @@ import { createClient } from "@supabase/supabase-js";
 // barrel(index.ts) 経由は tsx のモジュール解決で落ちるため service を直 import する
 // （barrel は Next.js 側の公開境界。ここは同一 feature 内スクリプトなので直 import を許容）
 import { runPointBoost } from "../lib/point-boost/service.ts";
-import { getRakutenApplicationIdFromEnv, getRakutenCredentialsFromEnv } from "../lib/rakuten/credentials.ts";
+import {
+  getRakutenApplicationIdFromEnv,
+  getRakutenCredentialsFromEnv,
+  getRakutenWebServiceAccessKeyFromEnv,
+} from "../lib/rakuten/credentials.ts";
 
 // .env.local を process.env へ（既存 e2e スクリプトと同じ方式）
 const env = readFileSync(new URL("../.env.local", import.meta.url), "utf8");
@@ -62,6 +66,7 @@ const summary = await runPointBoost(
     userId: user.id,
     rmsCred: getRakutenCredentialsFromEnv(),
     applicationId: getRakutenApplicationIdFromEnv(),
+    accessKey: getRakutenWebServiceAccessKeyFromEnv(),
     log: (msg) => console.log(`[point-boost] ${msg}`),
   },
   { dryRun, trigger, limit },

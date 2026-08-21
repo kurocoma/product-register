@@ -35,6 +35,8 @@ export type PointBoostDeps = {
   rmsCred: RakutenCredentials | null;
   /** 楽天ウェブサービスの applicationId（競合検索に必要） */
   applicationId: string | null;
+  /** 楽天ウェブサービスの Access Key（2026年刷新後は applicationId とセットで必須） */
+  accessKey: string | null;
   /** 自店の shopCode（競合から除外する）。既定 DEFAULT_RAKUTEN_STORE */
   ownShopCode?: string;
   /** テスト注入用 */
@@ -85,11 +87,11 @@ export async function runPointBoost(deps: PointBoostDeps, options: RunOptions = 
       totals: emptyTotals(), results: [],
     };
   }
-  if (!deps.applicationId) {
+  if (!deps.applicationId || !deps.accessKey) {
     return {
       runId: null, dryRun, trigger, status: "not_configured",
       message:
-        "楽天ウェブサービスの applicationId が未設定です。https://webservice.rakuten.co.jp/ でアプリ登録し、webui/.env.local に RAKUTEN_APPLICATION_ID=... を追加してください",
+        "楽天ウェブサービスの認証情報が未設定です。https://webservice.rakuten.co.jp/ のアプリ情報から webui/.env.local に RAKUTEN_APPLICATION_ID=...（Application ID）と RAKUTEN_WEBSERVICE_ACCESS_KEY=...（Access Key）の両方を設定してください",
       totals: emptyTotals(), results: [],
     };
   }
@@ -100,7 +102,7 @@ export async function runPointBoost(deps: PointBoostDeps, options: RunOptions = 
       totals: emptyTotals(), results: [],
     };
   }
-  const applicationId = deps.applicationId;
+  const wsAuth = { applicationId: deps.applicationId, accessKey: deps.accessKey };
   const rmsCred = deps.rmsCred;
 
   const runId = await createRun(deps.supabase, deps.userId, { trigger, dryRun });
@@ -127,7 +129,7 @@ export async function runPointBoost(deps: PointBoostDeps, options: RunOptions = 
       const cached = searchCache.get(keyword);
       if (cached) return cached;
       const result = await wsPace(
-        () => searchIchibaItems(applicationId, { keyword }),
+        () => searchIchibaItems(wsAuth, { keyword }),
         isIchibaRateLimited,
       );
       // 成功時のみキャッシュ（一過性の429/503が run 全体に固定化されるのを防ぐ）

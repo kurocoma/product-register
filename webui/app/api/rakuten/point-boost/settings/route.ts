@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createClient } from "@/lib/supabase/server";
-import { getRakutenApplicationIdFromEnv, getRakutenCredentialsFromEnv } from "@/lib/rakuten";
+import {
+  getRakutenApplicationIdFromEnv,
+  getRakutenCredentialsFromEnv,
+  getRakutenWebServiceAccessKeyFromEnv,
+} from "@/lib/rakuten";
 import { getPointBoostSettings, upsertPointBoostSettings } from "@/lib/point-boost";
 
 export const runtime = "nodejs";
@@ -26,6 +30,7 @@ export async function GET() {
       ok: true,
       settings,
       hasApplicationId: !!getRakutenApplicationIdFromEnv(),
+      hasAccessKey: !!getRakutenWebServiceAccessKeyFromEnv(),
       hasRmsCred: !!getRakutenCredentialsFromEnv(),
     });
   } catch (e) {

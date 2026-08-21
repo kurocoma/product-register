@@ -5,7 +5,7 @@ import { HelpLink } from "@/components/help/HelpLink";
 import type { PointBoostSettings, ProductResult, RunTotals } from "@/lib/point-boost/types";
 
 type SettingsResponse =
-  | { ok: true; settings: PointBoostSettings; hasApplicationId: boolean; hasRmsCred: boolean }
+  | { ok: true; settings: PointBoostSettings; hasApplicationId: boolean; hasAccessKey: boolean; hasRmsCred: boolean }
   | { ok: false; error: string };
 
 type RunRow = {
@@ -43,6 +43,7 @@ const ACTION_LABEL: Record<ProductResult["action"], { label: string; cls: string
 export function PointBoostPanel() {
   const [settings, setSettings] = useState<PointBoostSettings | null>(null);
   const [hasApplicationId, setHasApplicationId] = useState(true);
+  const [hasAccessKey, setHasAccessKey] = useState(true);
   const [hasRmsCred, setHasRmsCred] = useState(true);
   const [saving, setSaving] = useState(false);
   const [running, setRunning] = useState<false | "dry" | "commit">(false);
@@ -68,6 +69,7 @@ export function PointBoostPanel() {
         if (body.ok) {
           setSettings(body.settings);
           setHasApplicationId(body.hasApplicationId);
+          setHasAccessKey(body.hasAccessKey);
           setHasRmsCred(body.hasRmsCred);
         } else {
           setError(body.error);
@@ -155,14 +157,19 @@ export function PointBoostPanel() {
         </p>
       </div>
 
-      {!hasApplicationId && (
+      {(!hasApplicationId || !hasAccessKey) && (
         <div className="rounded border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
-          ⚠ 楽天ウェブサービスの applicationId が未設定のため、競合検索を実行できません。
+          ⚠ 楽天ウェブサービスの認証情報が未設定のため、競合検索を実行できません。
           <a href="https://webservice.rakuten.co.jp/" target="_blank" rel="noreferrer" className="mx-1 text-blue-700 underline">
             楽天ウェブサービス
           </a>
-          でアプリ登録（無料）し、<code className="mx-1 rounded bg-amber-100 px-1">webui/.env.local</code> に
-          <code className="mx-1 rounded bg-amber-100 px-1">RAKUTEN_APPLICATION_ID=...</code> を追加して再起動してください。
+          でアプリ登録（無料）し、アプリ情報の Application ID と Access Key を
+          <code className="mx-1 rounded bg-amber-100 px-1">webui/.env.local</code> に
+          <code className="mx-1 rounded bg-amber-100 px-1">RAKUTEN_APPLICATION_ID=...</code> と
+          <code className="mx-1 rounded bg-amber-100 px-1">RAKUTEN_WEBSERVICE_ACCESS_KEY=...</code> として追加して再起動してください。
+          {hasApplicationId && !hasAccessKey && (
+            <span className="mt-1 block">（Application ID は設定済みです。不足しているのは Access Key のみです）</span>
+          )}
         </div>
       )}
       {!hasRmsCred && (
@@ -245,7 +252,7 @@ export function PointBoostPanel() {
           <button
             type="button"
             onClick={() => void run(true)}
-            disabled={running !== false || !hasApplicationId || !hasRmsCred}
+            disabled={running !== false || !hasApplicationId || !hasAccessKey || !hasRmsCred}
             className="rounded border border-blue-300 px-4 py-2 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:opacity-50"
           >
             {running === "dry" ? "確認中…" : "dry-run（照会のみ・反映しない）"}
@@ -253,7 +260,7 @@ export function PointBoostPanel() {
           <button
             type="button"
             onClick={() => void run(false)}
-            disabled={running !== false || !hasApplicationId || !hasRmsCred}
+            disabled={running !== false || !hasApplicationId || !hasAccessKey || !hasRmsCred}
             className="rounded bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50"
           >
             {running === "commit" ? "実行中…" : "今すぐ実行（RMSへ反映）"}

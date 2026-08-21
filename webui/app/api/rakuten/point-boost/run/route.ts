@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { getRakutenApplicationIdFromEnv, getRakutenCredentialsFromEnv } from "@/lib/rakuten";
+import {
+  getRakutenApplicationIdFromEnv,
+  getRakutenCredentialsFromEnv,
+  getRakutenWebServiceAccessKeyFromEnv,
+} from "@/lib/rakuten";
 import { runPointBoost } from "@/lib/point-boost";
 
 export const runtime = "nodejs";
@@ -45,6 +49,7 @@ export async function POST(req: Request) {
         userId: user.id,
         rmsCred: getRakutenCredentialsFromEnv(),
         applicationId: getRakutenApplicationIdFromEnv(),
+        accessKey: getRakutenWebServiceAccessKeyFromEnv(),
       },
       { dryRun, trigger: "manual", limit },
     );
