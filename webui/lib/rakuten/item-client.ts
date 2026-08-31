@@ -124,6 +124,43 @@ export async function searchManageNumberBySku(
   return null;
 }
 
+export type RakutenSearchHit = {
+  manageNumber: string;
+  title: string;
+  /** 倉庫（非公開）に入っている商品か。 */
+  hideItem: boolean;
+};
+
+/** items.search で商品名(title)の部分一致検索（260901修正依頼-1: 商品名からの取込用）。
+ * 実測 2026-09-01: title=部分一致で results[].item.{manageNumber,title,hideItem} が返る。
+ * ※検索インデックス反映は最大24h遅延（直近登録・改名した商品は引けないことがある）。 */
+export async function searchItemsByTitle(
+  cred: RakutenCredentials,
+  title: string,
+  hits = 20,
+): Promise<{ ok: boolean; message?: string; results: RakutenSearchHit[] }> {
+  const res = await fetch(
+    `${BASE}/items/search?title=${encodeURIComponent(title)}&hits=${Math.max(1, Math.min(100, hits))}`,
+    { headers: { Authorization: esaAuthHeader(cred.serviceSecret, cred.licenseKey) } },
+  );
+  const text = await res.text();
+  if (res.status !== 200) {
+    return { ok: false, message: formatRakutenError(text, res.status), results: [] };
+  }
+  try {
+    const json = JSON.parse(text) as {
+      results?: { item?: { manageNumber?: string; title?: string; hideItem?: boolean } }[];
+    };
+    const results = (json.results ?? [])
+      .map((r) => r.item)
+      .filter((i): i is { manageNumber: string; title?: string; hideItem?: boolean } => typeof i?.manageNumber === "string")
+      .map((i) => ({ manageNumber: i.manageNumber, title: i.title ?? "", hideItem: i.hideItem === true }));
+    return { ok: true, results };
+  } catch {
+    return { ok: false, message: "items.search 応答の解析に失敗しました", results: [] };
+  }
+}
+
 /** items.delete（商品削除、テスト後始末用）。 */
 export async function deleteItem(
   cred: RakutenCredentials,

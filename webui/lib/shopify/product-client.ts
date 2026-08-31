@@ -147,6 +147,45 @@ export async function getProduct(cfg: ShopifyConfig, gid: string): Promise<GetPr
   return { exists: true, product: parseProductNode(node as Record<string, unknown>) };
 }
 
+export type ShopifySearchHit = {
+  gid: string;
+  /** 管理画面URL末尾の数値ID（取込入力に使う形）。 */
+  numericId: string;
+  title: string;
+  status: string;
+};
+
+/** products(query:"title:*…*") で商品名の部分一致検索（260901修正依頼-1: 商品名からの取込用）。 */
+export async function searchProductsByTitle(
+  cfg: ShopifyConfig,
+  text: string,
+  first = 20,
+): Promise<{ ok: boolean; message?: string; hits: ShopifySearchHit[] }> {
+  const QUERY = `
+query searchProducts($first: Int!, $query: String!) {
+  products(first: $first, query: $query) {
+    edges { node { id title status } }
+  }
+}`;
+  // Shopify 検索構文の引用符・バックスラッシュはクエリ崩れの原因になるため空白へ置換する。
+  const sanitized = text.replace(/["\\]/g, " ").trim();
+  const r = await shopifyGraphQL(cfg, QUERY, { first, query: `title:*${sanitized}*` });
+  if (!r.ok) return { ok: false, message: r.message, hits: [] };
+  const edges =
+    (r.data?.products as { edges?: { node?: { id?: unknown; title?: unknown; status?: unknown } }[] } | undefined)
+      ?.edges ?? [];
+  const hits = edges
+    .map((e) => e.node)
+    .filter((n): n is { id: string; title?: unknown; status?: unknown } => typeof n?.id === "string")
+    .map((n) => ({
+      gid: n.id,
+      numericId: gidToNumericId(n.id),
+      title: typeof n.title === "string" ? n.title : "",
+      status: typeof n.status === "string" ? n.status : "",
+    }));
+  return { ok: true, hits };
+}
+
 export type MutationResult = { ok: boolean; message: string };
 
 type MutationPayload = { userErrors?: UserError[] } & Record<string, unknown>;

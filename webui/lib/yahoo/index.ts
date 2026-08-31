@@ -6,6 +6,7 @@
 export * from "./auth";
 export * from "./item-client";
 export * from "./item-image-client";
+export * from "./item-search-client";
 export * from "./item-mapper";
 export * from "./lib-image-client";
 export * from "./lib-path";
