@@ -263,11 +263,15 @@ export default function HelpPage() {
 
       <HelpSection id="fail-yahoo-image" title="Yahoo 登録で画像エラー（it-14091）が出る">
         <p>Yahoo に商品を登録するとき、画像がまだ Yahoo 側の画像置き場（lib）に無いと、このエラーになります。</p>
+        <p>
+          「Yahooへ登録」は取込んだ画像URL（image_url）を<b>自動で Yahoo lib へ転送してから登録</b>するため、
+          通常はこのエラーは出なくなりました。それでも出る・「画像の転送に失敗」と出るときは次を確認してください。
+        </p>
         <ol className="list-decimal list-inside space-y-1">
-          <li>商品編集の画像アップロード欄で「⤴ 取込画像をYahoo libへ転送」を押す</li>
-          <li>転送が終わってから、あらためて「Yahooへ登録」を押す</li>
+          <li>商品編集の「画像URL」欄に、実際に表示できる画像URLが入っているか（リンク切れは転送できません）</li>
+          <li>手動でやり直すときは、画像アップロード欄の「⤴ 取込画像をYahoo libへ転送」を押してから再登録する</li>
         </ol>
-        <p className="text-slate-500">💡 順番が大事です。「先に画像、あとで登録」と覚えてください。</p>
+        <p className="text-slate-500">💡 順番は「先に画像、あとで登録」。アプリはこの順番を自動で守ります。</p>
       </HelpSection>
 
       <HelpSection

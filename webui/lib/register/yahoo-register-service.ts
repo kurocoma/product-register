@@ -5,12 +5,20 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { upsertProduct } from "@/lib/product/repository";
-import type { ProductInput } from "@/lib/product/schema";
+import { productVariants, type ProductInput } from "@/lib/product/schema";
 import { yahooItemsForProduct } from "@/lib/product/yahoo-split";
 import { getYahooAccessToken, type YahooConfig } from "@/lib/yahoo/auth";
 import { buildYahooEditItemParams, validateEditItemParams } from "@/lib/yahoo/item-mapper";
-import { editItem, getItem, setStock, reservePublish } from "@/lib/yahoo/item-client";
+import { editItem, getItem, setStock, reservePublish, type EditItemResult } from "@/lib/yahoo/item-client";
 import { buildYahooVariationParams, type YahooVariationParams } from "@/lib/yahoo/variation-params";
+import { buildYahooItemImageUrls } from "@/lib/converters/image-url";
+import {
+  collectImageSources,
+  syncYahooLibImages,
+  isYahooImagePropagationError,
+  YAHOO_EDIT_RETRY_DELAY_MS,
+  type YahooImageSyncResult,
+} from "./yahoo-image-sync";
 import type { RegisterServiceError } from "./types";
 
 /** Yahoo 1ページ統合モード（260711修正依頼-7）の editItem パラメータ調整。
@@ -42,6 +50,13 @@ export type YahooRegisterDeps = {
   setStock: typeof setStock;
   reservePublish: typeof reservePublish;
   upsertProduct: typeof upsertProduct;
+  /** 260901修正依頼-2: editItem 前に取込画像URL(image_url_N)を Yahoo lib へ転送する（it-14091 対策）。
+   * 未注入なら転送しない（既存テストの後方互換）。 */
+  syncImages?: (token: string, sellerId: string, product: ProductInput, imageCode: string) => Promise<YahooImageSyncResult>;
+  /** アップロード成功 index のみで item_image_urls を再構築する（壊れURL参照の防止）。 */
+  buildImageUrls?: (imageCode: string, indices: number[], sellerId: string) => string;
+  /** it-14091/im-02005 リトライ前の待機（テストは no-op を注入して実時間を消費しない）。 */
+  sleep?: (ms: number) => Promise<void>;
 };
 
 const defaultDeps: YahooRegisterDeps = {
@@ -51,7 +66,59 @@ const defaultDeps: YahooRegisterDeps = {
   setStock,
   reservePublish,
   upsertProduct,
+  syncImages: syncYahooLibImages,
+  buildImageUrls: buildYahooItemImageUrls,
 };
+
+const defaultSleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** editItem の前処理（A1/A2）: 取込画像を Yahoo lib へ転送し、item_image_urls を
+ * アップロード成功分だけで再構築する。転送元URL(image_url_N)が無い商品は何もしない
+ * （lib へ直接アップロード済みの商品を壊さない・従来動作）。
+ * imageCode は item_image_urls が参照するコード（YahooConverter と同じ productVariants[0].ne_code）。 */
+async function prepareYahooImages(
+  deps: YahooRegisterDeps,
+  token: string,
+  cfg: YahooConfig,
+  item: ProductInput,
+  editParams: Record<string, string>,
+): Promise<{ abort?: string; note?: string }> {
+  if (!deps.syncImages) return {};
+  if (collectImageSources(item).length === 0) return {};
+  const imageCode = (productVariants(item)[0]?.ne_code ?? "").trim() || item.ne_code;
+  let synced: YahooImageSyncResult;
+  try {
+    synced = await deps.syncImages(token, cfg.sellerId, item, imageCode);
+  } catch (e) {
+    synced = { ok: false, error: e instanceof Error ? e.message : String(e), uploaded: [] };
+  }
+  if (synced.uploaded.length === 0) {
+    return {
+      abort:
+        "画像の Yahoo lib 転送に全て失敗したため登録を中止しました（存在しない画像を参照すると it-14091 で登録全体が失敗するため）: " +
+        (synced.error ?? "原因不明"),
+    };
+  }
+  if (deps.buildImageUrls) {
+    editParams.item_image_urls = deps.buildImageUrls(imageCode, synced.uploaded, cfg.sellerId);
+  }
+  return { note: synced.ok ? undefined : "画像転送に注意（成功分のみで登録）: " + synced.error };
+}
+
+/** editItem 実行（A4）: it-14091/im-02005 は lib アップロード直後の伝播ラグの可能性があるため、
+ * 短い待機後に1回だけリトライする（migrate executor と同じ是正）。 */
+async function editItemWithRetry(
+  deps: YahooRegisterDeps,
+  token: string,
+  params: Record<string, string>,
+): Promise<EditItemResult> {
+  let result = await deps.editItem(token, params);
+  if (!result.ok && isYahooImagePropagationError(result)) {
+    await (deps.sleep ?? defaultSleep)(YAHOO_EDIT_RETRY_DELAY_MS);
+    result = await deps.editItem(token, params);
+  }
+  return result;
+}
 
 /** SKU別の登録計画（統合商品を Yahoo は SKU ごとに分けて登録するため）。 */
 export type YahooSkuPlan = {
@@ -238,7 +305,13 @@ export async function commitYahooRegister(
       return { ok: false, kind: "invalid", error: "必須項目が不足: " + valid.missing.join(", "), missing: valid.missing };
     }
 
-    const result = await deps.editItem(token, editParams);
+    // 画像準備（A1/A2）: 取込画像を lib へ転送してから editItem する（it-14091 の自動解消）。
+    const img = await prepareYahooImages(deps, token, cfg, product, editParams);
+    if (img.abort) {
+      return { ok: false, kind: "api", error: img.abort, errors: [], warnings: [] };
+    }
+
+    const result = await editItemWithRetry(deps, token, editParams);
     if (!result.ok) {
       return {
         ok: false,
@@ -248,6 +321,7 @@ export async function commitYahooRegister(
         warnings: result.warnings,
       };
     }
+    const warnings = img.note ? [...result.warnings, img.note] : result.warnings;
 
     // Yahoo に掲載済みを記録（一覧の反映ボタン活性用）。記録失敗は登録自体を妨げない。
     if (!product.mall_listed?.yahoo) {
@@ -288,7 +362,7 @@ export async function commitYahooRegister(
       mall: "yahoo",
       itemCode,
       wasUpdate: exists,
-      warnings: result.warnings,
+      warnings,
       submitted,
       submitMessage,
     };
@@ -311,18 +385,25 @@ export async function commitYahooRegister(
         });
         continue;
       }
-      const result = await deps.editItem(token, editParams);
+      // 画像準備（A1/A2）: SKU ごとに item_image_urls が参照するコード名で lib へ転送する。
+      const img = await prepareYahooImages(deps, token, cfg, item, editParams);
+      if (img.abort) {
+        skuResults.push({ itemCode: item.ne_code, ok: false, wasUpdate: exists, warnings: [], error: img.abort });
+        continue;
+      }
+      const result = await editItemWithRetry(deps, token, editParams);
+      const skuWarnings = img.note ? [...result.warnings, img.note] : result.warnings;
       if (!result.ok) {
         skuResults.push({
           itemCode: item.ne_code,
           ok: false,
           wasUpdate: exists,
-          warnings: result.warnings,
+          warnings: skuWarnings,
           error: "editItem 失敗: " + result.message,
         });
         continue;
       }
-      skuResults.push({ itemCode: item.ne_code, ok: true, wasUpdate: exists, warnings: result.warnings });
+      skuResults.push({ itemCode: item.ne_code, ok: true, wasUpdate: exists, warnings: skuWarnings });
     } catch (e) {
       skuResults.push({
         itemCode: item.ne_code,
