@@ -5,19 +5,55 @@
 export type ProductSearchFields = {
   ne_code: string;
   product_name: string;
+  /** 掲載商品名（モール表示名）。商品名と表記が違う商品を表示名でも見つけられるようにする。 */
+  display_name?: string;
   jan_code?: string;
   /** SKU の ne_code・SKU管理番号・楽天管理番号など、代表コード以外の検索対象コード。
    * 多SKU統合商品を SKU 側のコード（例 r74-1）で見つけられるようにする。 */
   sub_codes?: string[];
 };
 
-/** NEコード・商品名・JANコード・sub_codes の部分一致（大文字小文字無視）。query 空（空白のみ含む）は常に true。 */
+/** 小書き文字 → 大書き文字（表記ゆれ吸収: ウェット/ウエット 等）。 */
+const SMALL_KANA: Record<string, string> = {
+  ぁ: "あ", ぃ: "い", ぅ: "う", ぇ: "え", ぉ: "お", っ: "つ", ゃ: "や", ゅ: "ゆ", ょ: "よ", ゎ: "わ",
+  ァ: "ア", ィ: "イ", ゥ: "ウ", ェ: "エ", ォ: "オ", ッ: "ツ", ャ: "ヤ", ュ: "ユ", ョ: "ヨ", ヮ: "ワ",
+  ヵ: "カ", ヶ: "ケ",
+};
+
+/** 検索照合用の正規化。小文字化・空白（全角含む）除去・長音「ー」除去・小書き文字の大書き化。
+ * クエリと索引（haystack）の両方に同じ正規化を通すことで、表記ゆれを部分一致で吸収する。 */
+export function normalizeSearchText(s: string): string {
+  return String(s ?? "")
+    .toLowerCase()
+    .replace(/[\s　]+/g, "")
+    .replace(/ー/g, "")
+    .replace(/[ぁぃぅぇぉっゃゅょゎァィゥェォッャュョヮヵヶ]/g, (c) => SMALL_KANA[c] ?? c);
+}
+
+/** 検索用の前計算索引（haystack）。全フィールドを正規化して空白区切りで1本にまとめる。
+ * 正規化後のクエリには空白が残らないため、フィールドをまたいだ偶然の一致は起きない。
+ * 商品一覧は「1キーストロークごとに全商品を正規化し直す」と固まる（260812/260901 実測）ため、
+ * 商品配列が変わったときだけこれを作り直し、打鍵時は matchesSearchHaystack だけを回す。 */
+export function buildSearchHaystack(p: ProductSearchFields): string {
+  return [p.ne_code, p.product_name, p.display_name ?? "", p.jan_code ?? "", ...(p.sub_codes ?? [])]
+    .map((v) => normalizeSearchText(String(v ?? "")))
+    .filter(Boolean)
+    .join(" ");
+}
+
+/** 前計算済み haystack との照合。normalizedQuery は normalizeSearchText 済みを渡す（呼び出し側の責務）。
+ * 空クエリは常に true（絞り込みなし）。 */
+export function matchesSearchHaystack(haystack: string, normalizedQuery: string): boolean {
+  if (!normalizedQuery) return true;
+  return haystack.includes(normalizedQuery);
+}
+
+/** NEコード・商品名・掲載商品名・JANコード・sub_codes の部分一致（正規化＝大文字小文字・空白・
+ * 長音・小書き文字の表記ゆれを無視）。query 空（空白のみ含む）は常に true。
+ * 実装は索引経由（buildSearchHaystack + matchesSearchHaystack）と同一関数を使い、
+ * 一覧（索引経由）と CSV 画面（この関数）で絞り込み結果が食い違わないようにする。 */
 export function matchesProductQuery(p: ProductSearchFields, query: string): boolean {
-  const q = query.trim().toLowerCase();
-  if (!q) return true;
-  return [p.ne_code, p.product_name, p.jan_code ?? "", ...(p.sub_codes ?? [])].some((v) =>
-    String(v).toLowerCase().includes(q),
-  );
+  return matchesSearchHaystack(buildSearchHaystack(p), normalizeSearchText(query));
 }
 
 /** products.extra から検索用の sub_codes（SKU の ne_code / SKU管理番号 / 楽天管理番号）を集める。

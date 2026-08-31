@@ -1,12 +1,19 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import { deleteProduct } from "@/lib/product/repository";
 import type { ProductRow } from "@/lib/product/repository";
 import { mallPresence } from "@/lib/product/schema";
-import { matchesProductQuery, matchesListedFilter, productSubCodes, type ListedFilter } from "@/lib/product/search";
+import {
+  buildSearchHaystack,
+  matchesSearchHaystack,
+  normalizeSearchText,
+  matchesListedFilter,
+  productSubCodes,
+  type ListedFilter,
+} from "@/lib/product/search";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { HelpLink } from "@/components/help/HelpLink";
@@ -14,6 +21,10 @@ import { BulkRegisterPanel } from "./BulkRegisterPanel";
 
 type Mall = "rakuten" | "yahoo";
 const MALL_LABEL: Record<Mall, string> = { rakuten: "楽天", yahoo: "Yahoo" };
+
+/** 一度に描画する行数の上限（260812/260901 検索が固まる問題の対策）。
+ * 絞り込み・検索はこれまでどおり全件を対象にし、描画だけを段階化する。 */
+export const LIST_PAGE_SIZE = 100;
 
 type StoredVariant = { sku_manage_number?: string; ne_code?: string; variation_value?: string; selling_price?: number; display_price?: number };
 type PriceRow = { key: string; variantIndex: number | null; label: string; selling: number; display: number };
@@ -52,22 +63,48 @@ export function ProductList({ initial }: { initial: ProductRow[] }) {
   const timers = useRef<Record<string, ReturnType<typeof setTimeout>>>({});
 
   const makers = useMemo(() => Array.from(new Set(products.map((p) => String(p.maker_code)))).sort(), [products]);
+
+  // 検索索引の前計算（260901 追加依頼: 検索中にマウスが固まる対策）。
+  // 1キーストロークごとに全商品の正規化・presence 判定をやり直さず、商品配列が変わったときだけ作り直す。
+  const indexed = useMemo(
+    () =>
+      products.map((p) => ({
+        p,
+        haystack: buildSearchHaystack({
+          ne_code: String(p.ne_code ?? ""),
+          product_name: String(p.product_name ?? ""),
+          // 掲載商品名（モール表示名）でも検索できるようにする
+          display_name: String((p as { display_name?: unknown }).display_name ?? ""),
+          jan_code: String(p.jan_code ?? ""),
+          // 多SKU統合商品を SKU の ne_code / SKU管理番号 / 楽天管理番号でも見つけられるようにする
+          sub_codes: productSubCodes(p.extra),
+        }),
+        // 掲載状況の絞り込みは反映ボタンの活性化と同じ情報源（mallPresence）で判定する
+        presence: presenceOf(p),
+      })),
+    [products],
+  );
+  const normalizedQuery = useMemo(() => normalizeSearchText(query), [query]);
   const filtered = useMemo(() => {
-    return products.filter((p) => {
-      if (makerFilter && p.maker_code !== makerFilter) return false;
-      const fields = {
-        ne_code: String(p.ne_code ?? ""),
-        product_name: String(p.product_name ?? ""),
-        jan_code: String(p.jan_code ?? ""),
-        // 多SKU統合商品を SKU の ne_code / SKU管理番号 / 楽天管理番号でも見つけられるようにする
-        sub_codes: productSubCodes(p.extra),
-      };
-      if (!matchesProductQuery(fields, query)) return false;
-      // 掲載状況の絞り込みは反映ボタンの活性化と同じ情報源（mallPresence）で判定する
-      if (!matchesListedFilter(presenceOf(p), listedFilter)) return false;
-      return true;
-    });
-  }, [products, query, makerFilter, listedFilter]);
+    return indexed
+      .filter(({ p, haystack, presence }) => {
+        if (makerFilter && p.maker_code !== makerFilter) return false;
+        if (!matchesSearchHaystack(haystack, normalizedQuery)) return false;
+        if (!matchesListedFilter(presence, listedFilter)) return false;
+        return true;
+      })
+      .map(({ p }) => p);
+  }, [indexed, normalizedQuery, makerFilter, listedFilter]);
+
+  // 段階表示: 一度に描画する行数を上限までに抑える（検索・絞り込みの対象は全件のまま）。
+  // 条件変更（検索語・絞り込み）と該当件数の変化（削除等）で上限に戻す。
+  // 行内の価格編集は products が変わるが該当件数は変わらないため畳まれない。
+  const [visibleCount, setVisibleCount] = useState(LIST_PAGE_SIZE);
+  useEffect(() => {
+    setVisibleCount(LIST_PAGE_SIZE);
+  }, [normalizedQuery, makerFilter, listedFilter, filtered.length]);
+  const visible = filtered.slice(0, visibleCount);
+  const hiddenCount = Math.max(0, filtered.length - visible.length);
 
   const toggleAll = (e: React.ChangeEvent<HTMLInputElement>) => setSelected(e.target.checked ? new Set(filtered.map((p) => p.id)) : new Set());
   const toggleOne = (id: string) =>
@@ -216,6 +253,12 @@ export function ProductList({ initial }: { initial: ProductRow[] }) {
             <option value="unlisted">{MALL_LABEL[m]}: 未掲載</option>
           </select>
         ))}
+        <span className="self-center text-xs text-slate-500">{filtered.length} 件が該当</span>
+        {hiddenCount > 0 && (
+          <span className="self-center text-xs text-amber-600">
+            {filtered.length} 件中 {visible.length} 件を表示中（残り {hiddenCount} 件）
+          </span>
+        )}
       </div>
 
       <div className="bg-white rounded border border-slate-200 overflow-x-auto">
@@ -234,7 +277,7 @@ export function ProductList({ initial }: { initial: ProductRow[] }) {
             {filtered.length === 0 && (
               <tr><td colSpan={6} className="px-3 py-8 text-center text-slate-500">商品がありません。「+ 新規商品」から登録してください。</td></tr>
             )}
-            {filtered.map((p) => {
+            {visible.map((p) => {
               const rows = priceRows(p);
               const multi = variantsOf(p).length > 1;
               return (
@@ -299,6 +342,27 @@ export function ProductList({ initial }: { initial: ProductRow[] }) {
                 </tr>
               );
             })}
+            {hiddenCount > 0 && (
+              <tr className="border-t border-slate-100">
+                {/* 段階表示の操作行（データ行と区別するため td は1つ） */}
+                <td colSpan={6} className="px-3 py-3 text-center">
+                  <div className="flex items-center justify-center gap-3 text-sm">
+                    <button
+                      onClick={() => setVisibleCount((n) => n + Math.min(hiddenCount, LIST_PAGE_SIZE))}
+                      className="rounded border border-blue-300 px-3 py-1.5 text-blue-700 hover:bg-blue-50"
+                    >
+                      さらに {Math.min(hiddenCount, LIST_PAGE_SIZE)} 件表示
+                    </button>
+                    <button
+                      onClick={() => setVisibleCount(filtered.length)}
+                      className="rounded border border-slate-300 px-3 py-1.5 text-slate-600 hover:bg-slate-50"
+                    >
+                      すべて表示（{filtered.length} 件）
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
